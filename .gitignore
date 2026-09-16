@@ -12,4 +12,4 @@ node_modules/
 # The statistics file that the usage examples in the README write to the
 # repository root. Anchored to the root on purpose: frontend/public/stats.json
 # is the fixture the dashboard reads and is meant to be committed.
-/stats.json
+/stats.jsonstats.json
