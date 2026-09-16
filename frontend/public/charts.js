@@ -91,11 +91,19 @@
   }
 
   function barOption(stats) {
-    var keys = stats.key_counts || [];
+    // A field that holds no nested keys can only ever draw a zero-height bar,
+    // so it is left out: the chart answers "which fields carry structure", and
+    // a row of empty bars answers it worse than no bars at all.
+    var keys = (stats.key_counts || []).filter(function (entry) {
+      return entry.count > 0;
+    });
     return {
       title: {
         text: "Key counts",
-        subtext: "keys in each top-level field",
+        subtext:
+          keys.length === 0
+            ? "no field holds nested keys"
+            : "keys in each top-level field",
         left: "center",
       },
       tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },

@@ -9,7 +9,11 @@ target
 frontend/dist/
 node_modules/
 
-# The statistics file that the usage examples in the README write to the
-# repository root. Anchored to the root on purpose: frontend/public/stats.json
-# is the fixture the dashboard reads and is meant to be committed.
-/stats.jsonstats.json
+# Statistics files written by `--json-out`. Both are generated from test.json
+# rather than edited by hand, so neither belongs in the repository:
+#   - the usage examples in the README write one to the repository root
+#   - the dashboard reads the one under frontend/public
+# Regenerate the dashboard's copy with the command in the README's dashboard
+# section before opening the page.
+/stats.json
+frontend/public/stats.json
