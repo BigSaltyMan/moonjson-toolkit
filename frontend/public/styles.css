@@ -1,0 +1,223 @@
+:root {
+  --ink: #14161f;
+  --muted: #6b7280;
+  --line: #e3e7f0;
+  --surface: #ffffff;
+  --accent: #4f7cff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  background:
+    radial-gradient(980px 460px at 8% -10%, rgba(79, 124, 255, 0.16), transparent 72%),
+    radial-gradient(1060px 560px at 100% -14%, rgba(140, 92, 255, 0.13), transparent 70%),
+    #f7f9ff;
+}
+
+#app {
+  padding: 64px 20px 56px;
+}
+
+.page {
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+/* Masthead ------------------------------------------------------------- */
+
+.masthead {
+  margin-bottom: 32px;
+}
+
+.masthead-title {
+  margin: 0;
+  font-size: clamp(1.9rem, 4vw, 2.6rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.masthead-lead {
+  margin: 10px 0 0;
+  max-width: 62ch;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+code {
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.8);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.86em;
+}
+
+/* Headline numbers ----------------------------------------------------- */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(20, 22, 31, 0.04);
+}
+
+.card-value {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.card-label {
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Charts --------------------------------------------------------------- */
+
+.charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.chart {
+  min-width: 0;
+  height: 380px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(20, 22, 31, 0.04);
+}
+
+/* Panels --------------------------------------------------------------- */
+
+.panel {
+  padding: 20px 22px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(20, 22, 31, 0.04);
+}
+
+.panel-title {
+  margin: 0 0 14px;
+  font-size: 1.05rem;
+}
+
+.type-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.type-table th,
+.type-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-size: 0.92rem;
+}
+
+.type-table th {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.type-table tr:last-child td {
+  border-bottom: none;
+}
+
+.type-table .numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Status and error states ---------------------------------------------- */
+
+.status {
+  margin: 16px 0 0;
+  min-height: 1.2em;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.panel-error {
+  border-color: #f2c4c4;
+  background: #fff8f8;
+}
+
+.error-detail {
+  margin: 0 0 10px;
+  color: #a4262c;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.88rem;
+}
+
+.error-hint {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
+.retry {
+  padding: 9px 18px;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  color: #fff;
+  background: #14161f;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.retry:hover {
+  opacity: 0.9;
+}
+
+/* Footer --------------------------------------------------------------- */
+
+.footer {
+  margin-top: 32px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+@media (max-width: 860px) {
+  #app {
+    padding-top: 32px;
+  }
+
+  .cards,
+  .charts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .chart {
+    height: 320px;
+  }
+}

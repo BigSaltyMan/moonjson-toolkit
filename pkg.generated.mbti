@@ -1,0 +1,112 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "BigSaltyMan/moonjson-toolkit"
+
+import {
+  "Nanaloveyuki/parsec",
+  "Nanaloveyuki/parsec/json",
+}
+
+// Values
+pub async fn analyze(String) -> Result[String, String]
+
+pub let api_key_variable : String
+
+pub fn clamp_indent(Int) -> Int
+
+pub let deepseek_endpoint : String
+
+pub let deepseek_model : String
+
+pub let default_indent : Int
+
+pub fn describe_json_error(@json.JsonError) -> String
+
+pub fn describe_limit_kind(@json.JsonLimitKind) -> String
+
+pub fn describe_syntax_error(@parsec.ParseError) -> String
+
+pub fn escape_json_string(String) -> String
+
+pub fn format(@json.Json, Int) -> String
+
+pub fn line_text(String, Int) -> String
+
+pub let max_indent : Int
+
+pub let max_prompt_chars : Int
+
+pub fn offset_to_line_col(String, Int) -> (Int, Int)
+
+pub fn parse(String) -> Result[@json.Json, @json.JsonError]
+
+pub fn parse_with_diagnostic(String) -> Result[@json.Json, JsonDiagnostic]
+
+pub async fn read_file(String) -> Result[String, String]
+
+pub async fn read_stdin() -> Result[String, String]
+
+pub let request_timeout_ms : Int
+
+pub fn usage() -> String
+
+pub async fn write_stats_file(String, @json.Json) -> Result[Unit, String]
+
+// Errors
+
+// Types and methods
+type ChatMessage derive(ToJson)
+
+type ChatRequest derive(ToJson)
+
+pub(all) struct CliOptions {
+  mut file : String?
+  mut indent : Int
+  mut validate : Bool
+  mut help : Bool
+  mut ai : Bool
+  mut json_out : String?
+}
+pub fn CliOptions::default() -> Self
+pub fn CliOptions::parse(Array[String]) -> Result[Self, String]
+
+pub(all) struct DepthCount {
+  depth : Int
+  count : Int
+} derive(ToJson)
+
+pub struct JsonDiagnostic {
+  offset : Int
+  line : Int
+  column : Int
+  message : String
+  snippet : String
+}
+pub fn JsonDiagnostic::at(String, Int, String) -> Self
+pub fn JsonDiagnostic::from_error(String, @json.JsonError) -> Self
+pub fn JsonDiagnostic::render(Self) -> String
+pub fn JsonDiagnostic::summary(Self) -> String
+
+pub(all) struct JsonStats {
+  total_keys : Int
+  total_nodes : Int
+  max_depth : Int
+  type_counts : Array[TypeCount]
+  key_counts : Array[KeyCount]
+  depth_counts : Array[DepthCount]
+} derive(ToJson)
+pub fn JsonStats::of(@json.Json) -> Self
+pub fn JsonStats::to_json_text(Self) -> String
+
+pub(all) struct KeyCount {
+  name : String
+  count : Int
+} derive(ToJson)
+
+pub(all) struct TypeCount {
+  kind : String
+  count : Int
+} derive(ToJson)
+
+// Type aliases
+
+// Traits

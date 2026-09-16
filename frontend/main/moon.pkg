@@ -1,0 +1,12 @@
+import {
+  "moonbit-community/rabbita",
+  "moonbit-community/rabbita/cmd",
+  "moonbit-community/rabbita/html",
+  "moonbit-community/rabbita/http",
+  "moonbitlang/core/debug",
+  "moonbitlang/core/json",
+}
+
+supported_targets = "js"
+
+pkgtype(kind: "executable")

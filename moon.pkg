@@ -1,0 +1,14 @@
+import {
+  "Nanaloveyuki/parsec",
+  "Nanaloveyuki/parsec/json" @pjson,
+  "moonbitlang/core/debug",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/os_error",
+  "moonbitlang/async/stdio",
+  "oboard/mio",
+}
+
+supported_targets = "+native"
