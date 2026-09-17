@@ -69,8 +69,14 @@ pub async fn run(
         exit_usage_error,
       )
   }
+  // `--help` and `--version` both answer without reading any input. When both
+  // are asked for, the usage text wins: it is the longer answer and the one
+  // that tells you the other flag exists.
   if options.help {
     return { out: usage() + "\n", err: "", code: exit_success, }
+  }
+  if options.version {
+    return { out: version_line() + "\n", err: "", code: exit_success, }
   }
   let (text, source) = match read_input(options.file) {
     Ok(input) => input

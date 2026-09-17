@@ -66,6 +66,7 @@ Options:
   -i, --indent <n>       Spaces per nesting level, 0 to 16 (default: 2)
   -v, --validate         Only check the input and report the first error
   -h, --help             Show this message and exit
+  -V, --version          Show the version and exit
       --ai               Ask DeepSeek for a quality report and suggestions
       --json-out <path>  Write a statistics report as JSON to <path>
 ```
@@ -73,8 +74,12 @@ Options:
 Short options may be combined, so `-vh` means `-v -h`. The value of `--indent`
 may be attached, as in `-i4`, `-i=4`, `--indent=4` or `--indent 4`.
 
+Note that `-v` and `-V` are different flags: the lower case one validates, the
+upper case one prints the version.
+
 `-v` replaces the formatted document with a one-line verdict. It is the only
-thing it changes: `--json-out` and `--ai` still run.
+thing it changes: `--json-out` and `--ai` still run. `--help` and `--version`
+both answer without reading any input at all.
 
 ### Exit codes
 
@@ -284,7 +289,7 @@ command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 80 tests
+moon test  --target native   # 87 tests
 moon fmt                     # format
 
 cd frontend

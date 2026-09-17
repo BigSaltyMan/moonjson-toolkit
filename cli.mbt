@@ -1,10 +1,32 @@
 ///|
+/// The name the tool answers to in its usage text and its version line.
+pub let program_name : String = "moonjson-toolkit"
+
+///|
+/// The version reported by `-V` / `--version`.
+///
+/// MoonBit cannot read `moon.mod` while building — `moon.mod` is strictly
+/// parsed, has no build hooks, and the language has no way to include a file at
+/// compile time — so the number has to exist here as well as there. What keeps
+/// the two from drifting is `cli_wbtest.mbt`, which reads `moon.mod` on every
+/// test run and fails when this constant disagrees with it. Bump `moon.mod` and
+/// the suite will tell you to bump this too.
+pub let version : String = "0.1.0"
+
+///|
+/// The line printed by `-V` / `--version`.
+pub fn version_line() -> String {
+  program_name + " " + version
+}
+
+///|
 /// Options accepted by the command-line interface.
 pub(all) struct CliOptions {
   mut file : String?
   mut indent : Int
   mut validate : Bool
   mut help : Bool
+  mut version : Bool
   mut ai : Bool
   mut json_out : String?
 }
@@ -17,6 +39,7 @@ pub fn CliOptions::default() -> CliOptions {
     indent: default_indent,
     validate: false,
     help: false,
+    version: false,
     ai: false,
     json_out: None,
   }
@@ -26,14 +49,29 @@ pub fn CliOptions::default() -> CliOptions {
 /// The text shown for `-h` / `--help`.
 pub fn usage() -> String {
   [
-    "moonjson-toolkit - format, validate and analyse JSON documents", "", "Usage:",
-    "  moonjson-toolkit [options]", "", "Input is read from standard input unless --file is given.",
-    "", "Options:", "  -f, --file <path>      Read JSON from <path> instead of standard input",
-    "  -i, --indent <n>       Spaces per nesting level, 0 to 16 (default: 2)", "  -v, --validate         Only check the input and report the first error",
-    "  -h, --help             Show this message and exit", "      --ai               Ask DeepSeek for a quality report and suggestions",
-    "      --json-out <path>  Write a statistics report as JSON to <path>", "", "Short options may be combined, so -vh means -v -h. The value of --indent",
-    "may be attached, as in -i4, -i=4, --indent=4 or --indent 4.", "", "Exit codes:",
-    "  0  success", "  1  the input could not be read, or is not valid JSON", "  2  the command line was invalid",
+    program_name + " - format, validate and analyse JSON documents",
+    "",
+    "Usage:",
+    "  moonjson-toolkit [options]",
+    "",
+    "Input is read from standard input unless --file is given.",
+    "",
+    "Options:",
+    "  -f, --file <path>      Read JSON from <path> instead of standard input",
+    "  -i, --indent <n>       Spaces per nesting level, 0 to 16 (default: 2)",
+    "  -v, --validate         Only check the input and report the first error",
+    "  -h, --help             Show this message and exit",
+    "  -V, --version          Show the version and exit",
+    "      --ai               Ask DeepSeek for a quality report and suggestions",
+    "      --json-out <path>  Write a statistics report as JSON to <path>",
+    "",
+    "Short options may be combined, so -vh means -v -h. The value of --indent",
+    "may be attached, as in -i4, -i=4, --indent=4 or --indent 4.",
+    "",
+    "Exit codes:",
+    "  0  success",
+    "  1  the input could not be read, or is not valid JSON",
+    "  2  the command line was invalid",
     "  3  the input was valid but the AI review failed",
   ].join("\n")
 }
@@ -185,6 +223,7 @@ pub fn CliOptions::parse(args : Array[String]) -> Result[CliOptions, String] {
       let (name, inline) = split_long_option(arg.exact_view(start=2).to_owned())
       match name {
         "help" => options.help = true
+        "version" => options.version = true
         "validate" => options.validate = true
         "ai" => options.ai = true
         "file" | "json-out" | "indent" =>
@@ -207,6 +246,10 @@ pub fn CliOptions::parse(args : Array[String]) -> Result[CliOptions, String] {
         position = position + 1
         match flag {
           'h' => options.help = true
+          // Lower case is `--validate`, upper case is `--version`; they are
+          // one keystroke apart and mean quite different things, so both
+          // spellings are worth having a test for.
+          'V' => options.version = true
           'v' => options.validate = true
           'f' | 'i' => {
             let option = if flag == 'f' { "-f" } else { "-i" }

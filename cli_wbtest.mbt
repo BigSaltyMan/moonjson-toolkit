@@ -23,8 +23,89 @@ test "no arguments yields the documented defaults" {
   assert_eq(options.indent, 2)
   assert_eq(options.validate, false)
   assert_eq(options.help, false)
+  assert_eq(options.version, false)
   assert_eq(options.ai, false)
   assert_eq(options.json_out, None)
+}
+
+///|
+test "--version asks for the version" {
+  assert_eq(cli_ok(["--version"]).version, true)
+}
+
+///|
+test "-V asks for the version" {
+  assert_eq(cli_ok(["-V"]).version, true)
+}
+
+///|
+test "-v is still validate and -V is still version" {
+  // The two are one shifted key apart and mean unrelated things, so the parser
+  // must not treat them as the same flag.
+  let lower = cli_ok(["-v"])
+  assert_eq(lower.validate, true)
+  assert_eq(lower.version, false)
+  let upper = cli_ok(["-V"])
+  assert_eq(upper.version, true)
+  assert_eq(upper.validate, false)
+}
+
+///|
+test "-V combines with other short flags" {
+  let options = cli_ok(["-Vv"])
+  assert_eq(options.version, true)
+  assert_eq(options.validate, true)
+}
+
+///|
+/// Pull the value out of the `version = "..."` line of a `moon.mod` file.
+///
+/// Written to fail loudly rather than quietly: a `moon.mod` this cannot read is
+/// a broken test, not a passing one, so every unexpected shape aborts.
+fn moon_mod_version(text : String) -> String {
+  for line in text.split("\n") {
+    if line.trim().has_prefix("version") {
+      match line.split_once("\"") {
+        Some((_, rest)) =>
+          match rest.split_once("\"") {
+            Some((value, _)) => return value.to_owned()
+            None =>
+              abort("the version line has no closing quote: " + line.to_owned())
+          }
+        None =>
+          abort("the version line has no quoted value: " + line.to_owned())
+      }
+    }
+  }
+  abort("moon.mod has no version line")
+}
+
+///|
+test "the version line reads as documented" {
+  assert_eq(version_line(), "moonjson-toolkit 0.1.0")
+}
+
+///|
+test "the version parser reads a moon.mod" {
+  let sample = "# a comment\n\nname = \"someone/pkg\"\n\nversion = \"9.8.7\"\n"
+  assert_eq(moon_mod_version(sample), "9.8.7")
+}
+
+///|
+/// The point of this test: `moon.mod` is the one place the version is meant to
+/// be edited, and the constant in `cli.mbt` is a second copy that MoonBit has
+/// no way to derive from it. This fails the moment the two disagree, so the
+/// copy cannot go stale without the suite saying so.
+async test "the version constant matches moon.mod" {
+  let text = try @fs.read_file("moon.mod").text() catch {
+    error =>
+      abort(
+        "cannot read moon.mod from the test directory: " + error.to_string(),
+      )
+  } noraise {
+    text => text
+  }
+  assert_eq(version, moon_mod_version(text))
 }
 
 ///|
@@ -161,8 +242,8 @@ test "the usage text documents every option" {
   let text = usage()
   for
     option in [
-      "-f", "--file", "-i", "--indent", "-v", "--validate", "-h", "--help", "--ai",
-      "--json-out",
+      "-f", "--file", "-i", "--indent", "-v", "--validate", "-h", "--help", "-V",
+      "--version", "--ai", "--json-out",
     ] {
     assert_true(text.contains(option))
   }
