@@ -99,16 +99,38 @@ moon run cmd/main -- -f test.json
 
 ```json
 {
-  "name": "moon",
-  "version": 1,
+  "name": "moonjson-toolkit",
+  "version": 2,
+  "stable": true,
   "tags": [
     "json",
-    "cli"
+    "cli",
+    "formatter"
   ],
-  "nested": {
-    "a": {
-      "b": 2
+  "owner": {
+    "name": "MoonBit",
+    "contact": {
+      "email": "dev@moonbitlang.com",
+      "active": true
     }
+  },
+  "dependencies": [
+    {
+      "name": "parsec",
+      "version": "0.1.3"
+    },
+    {
+      "name": "async",
+      "version": "0.22.1"
+    },
+    {
+      "name": "x",
+      "version": "0.5.5"
+    }
+  ],
+  "settings": {
+    "indent": 2,
+    "theme": null
   }
 }
 ```
@@ -155,36 +177,40 @@ moon run cmd/main -- -f test.json --json-out stats.json
 
 ```json
 {
-  "total_keys": 6,
-  "total_nodes": 9,
+  "total_keys": 19,
+  "total_nodes": 26,
   "max_depth": 4,
   "type_counts": [
-    { "kind": "null", "count": 0 },
-    { "kind": "boolean", "count": 0 },
+    { "kind": "null", "count": 1 },
+    { "kind": "boolean", "count": 2 },
     { "kind": "number", "count": 2 },
-    { "kind": "string", "count": 3 },
-    { "kind": "array", "count": 1 },
-    { "kind": "object", "count": 3 }
+    { "kind": "string", "count": 12 },
+    { "kind": "array", "count": 2 },
+    { "kind": "object", "count": 7 }
   ],
   "key_counts": [
     { "name": "name", "count": 0 },
     { "name": "version", "count": 0 },
+    { "name": "stable", "count": 0 },
     { "name": "tags", "count": 0 },
-    { "name": "nested", "count": 2 }
+    { "name": "owner", "count": 4 },
+    { "name": "dependencies", "count": 6 },
+    { "name": "settings", "count": 2 }
   ],
   "depth_counts": [
     { "depth": 1, "count": 1 },
-    { "depth": 2, "count": 4 },
-    { "depth": 3, "count": 3 },
-    { "depth": 4, "count": 1 }
+    { "depth": 2, "count": 7 },
+    { "depth": 3, "count": 10 },
+    { "depth": 4, "count": 8 }
   ]
 }
 ```
 
 `key_counts` counts the keys nested inside each top-level field, so a field
-holding a scalar or an array of scalars reports `0` while `nested` reports the
-two keys it contains. `depth_counts` is 1-based and covers every level up to
-`max_depth`.
+holding a scalar or an array of scalars reports `0` — `name`, `version`,
+`stable` and `tags` all do — while `owner` reports the four keys it holds
+across its two levels, and `dependencies` reports six across its three entries.
+`depth_counts` is 1-based and covers every level up to `max_depth`.
 
 ## The statistics dashboard
 
@@ -276,6 +302,14 @@ moon test --target js        # 4 tests
 | [`moonbitlang/x`](https://mooncakes.io/docs/moonbitlang/x) | system helpers |
 | [Rabbita](https://github.com/moonbit-community/rabbita) | the web dashboard, compiled to JavaScript |
 | [Apache ECharts](https://echarts.apache.org/) | the bar and pie charts |
+
+## Known limitations
+
+- **`--ai` ignores proxy settings.** The request is written with a direct socket
+  through `mio`, which does not read `http_proxy` or `https_proxy`. On a network
+  that reaches the internet only through a proxy, `--ai` will fail to connect;
+  run it somewhere the API is directly reachable, or route the traffic yourself.
+  Everything else in the tool works offline.
 
 ## License
 
