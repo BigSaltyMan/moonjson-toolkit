@@ -24,6 +24,7 @@ pub fn version_line() -> String {
 pub(all) struct CliOptions {
   mut file : String?
   mut indent : Int
+  mut max_depth : Int?
   mut compact : Bool
   mut sort_keys : Bool
   mut validate : Bool
@@ -39,6 +40,7 @@ pub fn CliOptions::default() -> CliOptions {
   {
     file: None,
     indent: default_indent,
+    max_depth: None,
     compact: false,
     sort_keys: false,
     validate: false,
@@ -65,6 +67,7 @@ pub fn usage() -> String {
     "  -i, --indent <n>       Spaces per nesting level, 0 to 16 (default: 2)",
     "  -c, --compact          Print the document on one line, ignoring --indent",
     "  -S, --sort-keys        Order the keys of every object before printing",
+    "      --max-depth <n>    Refuse documents nested deeper than <n> (default: 128)",
     "  -v, --validate         Only check the input and report the first error",
     "  -h, --help             Show this message and exit",
     "  -V, --version          Show the version and exit",
@@ -134,6 +137,23 @@ fn parse_indent(value : String) -> Result[Int, String] {
 }
 
 ///|
+/// Interpret the text given to `--max-depth` as a nesting limit.
+///
+/// Zero is allowed and means nothing may nest at all, which is what the parser
+/// does with it: a document of bare scalars still parses.
+fn parse_max_depth(value : String) -> Result[Int, String] {
+  match parse_decimal(value) {
+    None => Err("invalid max-depth value: " + value + " (expected an integer)")
+    Some(limit) =>
+      if limit < 0 {
+        Err("max-depth out of range: " + value + " (expected 0 or more)")
+      } else {
+        Ok(limit)
+      }
+  }
+}
+
+///|
 /// Resolve the value of an option, taking it from `inline` (the text after
 /// `=`) or, failing that, from the next argument.
 ///
@@ -195,7 +215,15 @@ fn apply_value_option(
       options.json_out = Some(value)
       Ok(())
     }
-    _ =>
+    "max-depth" =>
+      match parse_max_depth(value) {
+        Ok(limit) => {
+          options.max_depth = Some(limit)
+          Ok(())
+        }
+        Err(message) => Err(message)
+      }
+    "indent" =>
       match parse_indent(value) {
         Ok(width) => {
           options.indent = width
@@ -203,6 +231,10 @@ fn apply_value_option(
         }
         Err(message) => Err(message)
       }
+    // Unreachable: `CliOptions::parse` routes only the four names above here.
+    // An error rather than a silent `Ok` so that adding a fifth value-taking
+    // option and forgetting this match is caught rather than ignored.
+    _ => Err("unknown option: --" + name)
   }
 }
 
@@ -234,7 +266,7 @@ pub fn CliOptions::parse(args : Array[String]) -> Result[CliOptions, String] {
         "compact" => options.compact = true
         "sort-keys" => options.sort_keys = true
         "ai" => options.ai = true
-        "file" | "json-out" | "indent" =>
+        "file" | "json-out" | "indent" | "max-depth" =>
           match option_value("--" + name, inline, args, index) {
             Err(message) => return Err(message)
             Ok((value, next)) =>

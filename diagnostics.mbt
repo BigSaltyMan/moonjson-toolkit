@@ -86,6 +86,10 @@ pub fn describe_json_error(error : @pjson.JsonError) -> String {
   match error {
     Syntax(error~) => describe_syntax_error(error)
     DuplicateKey(key~, ..) => "duplicate object key " + quote_for_message(key)
+    // Depth reads better the other way round: the document is what exceeded the
+    // limit, so it is the subject of the sentence rather than the limit.
+    Limit(kind=NestingDepth, limit~, ..) =>
+      "nesting depth exceeds limit " + limit.to_string()
     Limit(kind~, limit~, ..) =>
       "input exceeds the " +
       describe_limit_kind(kind) +

@@ -21,6 +21,7 @@ test "no arguments yields the documented defaults" {
   let options = cli_ok([])
   assert_eq(options.file, None)
   assert_eq(options.indent, 2)
+  assert_eq(options.max_depth, None)
   assert_eq(options.compact, false)
   assert_eq(options.sort_keys, false)
   assert_eq(options.validate, false)
@@ -172,6 +173,26 @@ test "--sort-keys asks for ordered keys" {
 }
 
 ///|
+test "--max-depth takes a nesting limit" {
+  assert_eq(cli_ok(["--max-depth", "3"]).max_depth, Some(3))
+  assert_eq(cli_ok(["--max-depth=3"]).max_depth, Some(3))
+  // Zero is a limit like any other: nothing may nest.
+  assert_eq(cli_ok(["--max-depth", "0"]).max_depth, Some(0))
+}
+
+///|
+test "a max-depth that is not a natural number is rejected" {
+  assert_eq(
+    cli_err(["--max-depth", "abc"]),
+    "invalid max-depth value: abc (expected an integer)",
+  )
+  assert_eq(
+    cli_err(["--max-depth", "-1"]),
+    "max-depth out of range: -1 (expected 0 or more)",
+  )
+}
+
+///|
 test "--json-out takes a path" {
   assert_eq(cli_ok(["--json-out", "s.json"]).json_out, Some("s.json"))
   assert_eq(cli_ok(["--json-out=s.json"]).json_out, Some("s.json"))
@@ -261,8 +282,8 @@ test "the usage text documents every option" {
   let text = usage()
   for
     option in [
-      "-f", "--file", "-i", "--indent", "-c", "--compact", "-S", "--sort-keys", "-v",
-      "--validate", "-h", "--help", "-V", "--version", "--ai", "--json-out",
+      "-f", "--file", "-i", "--indent", "-c", "--compact", "-S", "--sort-keys", "--max-depth",
+      "-v", "--validate", "-h", "--help", "-V", "--version", "--ai", "--json-out",
     ] {
     assert_true(text.contains(option))
   }

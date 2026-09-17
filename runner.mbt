@@ -82,7 +82,7 @@ pub async fn run(
     Ok(input) => input
     Err(message) => return failure("error: " + message, exit_input_error)
   }
-  let json = match parse_with_diagnostic(text) {
+  let json = match parse_with_diagnostic(text, options.max_depth) {
     Ok(json) => json
     Err(diagnostic) =>
       return failure(

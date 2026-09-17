@@ -23,6 +23,12 @@ charts the statistics the tool writes.
            ^
   ```
 
+  A repeated key inside one object is an error for the same reason, reported at
+  the second spelling of the key rather than the first — silently keeping one of
+  the two would mean the value you get back depends on the parser rather than on
+  the document. `--max-depth <n>` puts the same kind of bound on nesting: any
+  document deeper than `n` is refused, with the position where it went too far.
+
 - **Statistics** — key counts, node counts, maximum nesting depth, the
   distribution of JSON types and a per-depth breakdown, written as JSON.
 - **Charts** — a [Rabbita](https://github.com/moonbit-community/rabbita) web app
@@ -68,6 +74,7 @@ Options:
   -i, --indent <n>       Spaces per nesting level, 0 to 16 (default: 2)
   -c, --compact          Print the document on one line, ignoring --indent
   -S, --sort-keys        Order the keys of every object before printing
+      --max-depth <n>    Refuse documents nested deeper than <n> (default: 128)
   -v, --validate         Only check the input and report the first error
   -h, --help             Show this message and exit
   -V, --version          Show the version and exit
@@ -191,6 +198,17 @@ printf '{"a":1,}' | moon run cmd/main --
 #          ^
 ```
 
+Refuse a document that nests too deeply. The default limit is 128 levels; lower
+it when the documents you expect are shallow and anything deeper is a mistake:
+
+```sh
+printf '[[[[]]]]' | moon run cmd/main -- --max-depth 3
+# error: <stdin> is not valid JSON
+# line 1, column 4: nesting depth exceeds limit 3
+#   [[[[]]]]
+#      ^
+```
+
 Write a statistics report while formatting:
 
 ```sh
@@ -306,7 +324,7 @@ command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 95 tests
+moon test  --target native   # 104 tests
 moon fmt                     # format
 
 cd frontend
