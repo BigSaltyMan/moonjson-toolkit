@@ -47,7 +47,10 @@ test "a repeated object key is reported with its position" {
   // The first `"a"` is fine, so it is the second one that the diagnostic has to
   // point at: line 2, and the quote that opens it.
   let diagnostic = reject("{\"a\":1,\n \"a\":2}", None)
-  assert_eq(diagnostic.message, "duplicate object key \"a\"")
+  assert_eq(
+    diagnostic.message,
+    "duplicate object key \"a\" (first defined at line 1, column 2)",
+  )
   assert_eq(diagnostic.line, 2)
   assert_eq(diagnostic.column, 2)
   assert_eq(diagnostic.snippet, " \"a\":2}")

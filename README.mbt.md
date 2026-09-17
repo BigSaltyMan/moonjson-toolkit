@@ -24,10 +24,14 @@ charts the statistics the tool writes.
   ```
 
   A repeated key inside one object is an error for the same reason, reported at
-  the second spelling of the key rather than the first — silently keeping one of
-  the two would mean the value you get back depends on the parser rather than on
-  the document. `--max-depth <n>` puts the same kind of bound on nesting: any
-  document deeper than `n` is refused, with the position where it went too far.
+  the second spelling of the key and naming the line and column of the first —
+  silently keeping one of the two would mean the value you get back depends on
+  the parser rather than on the document. `--max-depth <n>` puts the same kind of
+  bound on nesting: any document deeper than `n` is refused, with the position
+  where it went too far.
+- **Paths and keys** — `--paths` lists the route to every value in the document,
+  one per line, and `--keys-only` lists just the object members. Between them
+  they answer "what is in here" without printing the document.
 
 - **Statistics** — key counts, node counts, maximum nesting depth, the
   distribution of JSON types and a per-depth breakdown, written as JSON.
@@ -75,6 +79,8 @@ Options:
   -c, --compact          Print the document on one line, ignoring --indent
   -S, --sort-keys        Order the keys of every object before printing
       --max-depth <n>    Refuse documents nested deeper than <n> (default: 128)
+      --paths            Print the path of every value instead of the document
+      --keys-only        Print only the paths that name an object member
   -v, --validate         Only check the input and report the first error
   -h, --help             Show this message and exit
   -V, --version          Show the version and exit
@@ -91,6 +97,11 @@ upper case one prints the version.
 `-v` replaces the formatted document with a one-line verdict. It is the only
 thing it changes: `--json-out` and `--ai` still run. `--help` and `--version`
 both answer without reading any input at all.
+
+`--paths` and `--keys-only` also replace the document, with a list of names
+rather than a verdict. Asking for both prints the longer list, and `-v` wins
+over either of them, since it asks for no document output at all. Like `-v`,
+neither of them stops the rest of the work: `--json-out` and `--ai` still run.
 
 ### Exit codes
 
@@ -209,6 +220,39 @@ printf '[[[[]]]]' | moon run cmd/main -- --max-depth 3
 #      ^
 ```
 
+List what is in a document instead of printing it:
+
+```sh
+echo '{"name":"x","tags":["a","b"],"owner":{"email":"e"}}' | moon run cmd/main -- --paths
+# name
+# tags
+# tags[0]
+# tags[1]
+# owner
+# owner.email
+```
+
+`--keys-only` on the same input drops the array indices and stops at `tags`,
+because a value inside an array is not reached:
+
+```sh
+echo '{"name":"x","tags":["a","b"],"owner":{"email":"e"}}' | moon run cmd/main -- --keys-only
+# name
+# tags
+# owner
+# owner.email
+```
+
+A repeated key is reported at the second spelling and names the first:
+
+```sh
+printf '{"a":1,"a":2}' | moon run cmd/main --
+# error: <stdin> is not valid JSON
+# line 1, column 8: duplicate object key "a" (first defined at line 1, column 2)
+#   {"a":1,"a":2}
+#          ^
+```
+
 Write a statistics report while formatting:
 
 ```sh
@@ -306,6 +350,7 @@ moonjson-toolkit/
 ├── diagnostics.mbt       offsets to line/column, rendered error snippets
 ├── cli.mbt               argument parsing and usage text
 ├── parser.mbt            parsing and file/standard-input reading
+├── paths.mbt             the path of every value, and of every object member
 ├── ai.mbt                the DeepSeek request and response handling
 ├── stats.mbt             the statistics model and its JSON form
 ├── runner.mbt            one run of the tool, and the exit codes
@@ -324,7 +369,7 @@ command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 104 tests
+moon test  --target native   # 114 tests
 moon fmt                     # format
 
 cd frontend
@@ -350,6 +395,13 @@ moon test --target js        # 4 tests
   that reaches the internet only through a proxy, `--ai` will fail to connect;
   run it somewhere the API is directly reachable, or route the traffic yourself.
   Everything else in the tool works offline.
+
+- **A path is ambiguous when a key contains `.`, `[` or `]`.** Paths are written
+  the way they are read rather than escaped, so `{"a.b": 1}` and
+  `{"a": {"b": 1}}` both produce `a.b`, and `{"a[0]": 1}` is indistinguishable
+  from the first element of an array named `a`. Keys that use those characters
+  are rare enough to be worth the readable form; quote them, or read the path
+  list alongside the document, when they turn up.
 
 ## License
 

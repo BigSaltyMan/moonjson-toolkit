@@ -82,6 +82,10 @@ pub fn describe_syntax_error(error : @parsec.ParseError) -> String {
 
 ///|
 /// Turn a JSON error into a human-readable reason.
+///
+/// A duplicate key is described without saying where the first one was, because
+/// that position needs the input text to work out; `JsonDiagnostic::from_error`
+/// appends it. The wording of the reason itself lives here and only here.
 pub fn describe_json_error(error : @pjson.JsonError) -> String {
   match error {
     Syntax(error~) => describe_syntax_error(error)
@@ -96,6 +100,21 @@ pub fn describe_json_error(error : @pjson.JsonError) -> String {
       " limit of " +
       limit.to_string()
   }
+}
+
+///|
+/// Where a key was first written, as a trailing parenthetical.
+///
+/// Knowing only the second spelling of a repeated key tells you where the
+/// document went wrong but not what it collided with, which is the part that
+/// takes the searching.
+fn first_defined_at(input : String, offset : Int) -> String {
+  let (line, column) = offset_to_line_col(input, offset)
+  " (first defined at line " +
+  line.to_string() +
+  ", column " +
+  column.to_string() +
+  ")"
 }
 
 ///|
@@ -124,7 +143,13 @@ pub fn JsonDiagnostic::from_error(
 ) -> JsonDiagnostic {
   let offset = error.offset()
   let (line, column) = offset_to_line_col(input, offset)
-  let message = describe_json_error(error)
+  let message = match error {
+    // The parser remembers where the key was first defined, so the report can
+    // name it. The caret still marks the repeated one.
+    DuplicateKey(first_offset~, ..) =>
+      describe_json_error(error) + first_defined_at(input, first_offset)
+    _ => describe_json_error(error)
+  }
   JsonDiagnostic::{
     offset,
     line,

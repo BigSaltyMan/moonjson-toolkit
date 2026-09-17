@@ -67,8 +67,24 @@ test "an unterminated array reports a missing bracket" {
 ///|
 test "a duplicate key is reported with its line and column" {
   let diagnostic = diagnostic_for("{\"a\":1,\"a\":2}")
-  assert_eq(diagnostic.message, "duplicate object key \"a\"")
+  // The caret belongs on the repeat, and the message also names the original so
+  // that the two spellings can be told apart without hunting for them.
+  assert_eq(
+    diagnostic.message,
+    "duplicate object key \"a\" (first defined at line 1, column 2)",
+  )
   assert_eq(diagnostic.column, 8)
+}
+
+///|
+test "the first definition of a repeated key is located on its own line" {
+  let diagnostic = diagnostic_for("{\n  \"a\": 1,\n  \"b\": 2,\n  \"a\": 3\n}")
+  assert_eq(diagnostic.line, 4)
+  assert_eq(diagnostic.column, 3)
+  assert_eq(
+    diagnostic.message,
+    "duplicate object key \"a\" (first defined at line 2, column 3)",
+  )
 }
 
 ///|

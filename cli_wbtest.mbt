@@ -24,6 +24,8 @@ test "no arguments yields the documented defaults" {
   assert_eq(options.max_depth, None)
   assert_eq(options.compact, false)
   assert_eq(options.sort_keys, false)
+  assert_eq(options.paths, false)
+  assert_eq(options.keys_only, false)
   assert_eq(options.validate, false)
   assert_eq(options.help, false)
   assert_eq(options.version, false)
@@ -173,6 +175,22 @@ test "--sort-keys asks for ordered keys" {
 }
 
 ///|
+test "--paths asks for the path list" {
+  assert_true(cli_ok(["--paths"]).paths)
+  // It stands on its own: nothing else is turned on with it.
+  assert_false(cli_ok(["--paths"]).keys_only)
+}
+
+///|
+test "--keys-only asks for the member list" {
+  assert_true(cli_ok(["--keys-only"]).keys_only)
+  assert_false(cli_ok(["--keys-only"]).paths)
+  // `--keys` and `-k` are not abbreviations of it.
+  assert_eq(cli_err(["--keys"]), "unknown option: --keys")
+  assert_eq(cli_err(["-k"]), "unknown option: -k")
+}
+
+///|
 test "--max-depth takes a nesting limit" {
   assert_eq(cli_ok(["--max-depth", "3"]).max_depth, Some(3))
   assert_eq(cli_ok(["--max-depth=3"]).max_depth, Some(3))
@@ -283,7 +301,8 @@ test "the usage text documents every option" {
   for
     option in [
       "-f", "--file", "-i", "--indent", "-c", "--compact", "-S", "--sort-keys", "--max-depth",
-      "-v", "--validate", "-h", "--help", "-V", "--version", "--ai", "--json-out",
+      "--paths", "--keys-only", "-v", "--validate", "-h", "--help", "-V", "--version",
+      "--ai", "--json-out",
     ] {
     assert_true(text.contains(option))
   }

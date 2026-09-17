@@ -27,6 +27,8 @@ pub(all) struct CliOptions {
   mut max_depth : Int?
   mut compact : Bool
   mut sort_keys : Bool
+  mut paths : Bool
+  mut keys_only : Bool
   mut validate : Bool
   mut help : Bool
   mut version : Bool
@@ -43,6 +45,8 @@ pub fn CliOptions::default() -> CliOptions {
     max_depth: None,
     compact: false,
     sort_keys: false,
+    paths: false,
+    keys_only: false,
     validate: false,
     help: false,
     version: false,
@@ -68,6 +72,8 @@ pub fn usage() -> String {
     "  -c, --compact          Print the document on one line, ignoring --indent",
     "  -S, --sort-keys        Order the keys of every object before printing",
     "      --max-depth <n>    Refuse documents nested deeper than <n> (default: 128)",
+    "      --paths            Print the path of every value instead of the document",
+    "      --keys-only        Print only the paths that name an object member",
     "  -v, --validate         Only check the input and report the first error",
     "  -h, --help             Show this message and exit",
     "  -V, --version          Show the version and exit",
@@ -76,6 +82,10 @@ pub fn usage() -> String {
     "",
     "Short options may be combined, so -vh means -v -h. The value of --indent",
     "may be attached, as in -i4, -i=4, --indent=4 or --indent 4.",
+    "",
+    "--paths and --keys-only each replace the printed document with a list of",
+    "names, one per line. Asking for both prints the longer list, and -v wins",
+    "over either of them, since it asks for no document output at all.",
     "",
     "Exit codes:",
     "  0  success",
@@ -265,6 +275,8 @@ pub fn CliOptions::parse(args : Array[String]) -> Result[CliOptions, String] {
         "validate" => options.validate = true
         "compact" => options.compact = true
         "sort-keys" => options.sort_keys = true
+        "paths" => options.paths = true
+        "keys-only" => options.keys_only = true
         "ai" => options.ai = true
         "file" | "json-out" | "indent" | "max-depth" =>
           match option_value("--" + name, inline, args, index) {

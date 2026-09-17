@@ -129,6 +129,19 @@ pub async fn run(
   if options.validate {
     // `-v` replaces the document with a one-line verdict, nothing else.
     out.write_string(source + ": valid JSON\n")
+  } else if options.paths || options.keys_only {
+    // The two name lists are alternatives to the document rather than additions
+    // to it, and `--paths` is the longer of the pair, so it is the one that
+    // answers when both are asked for.
+    let names = if options.paths {
+      collect_paths(ordered)
+    } else {
+      collect_key_paths(ordered)
+    }
+    for name in names {
+      out.write_string(name)
+      out.write_string("\n")
+    }
   } else {
     out.write_string(formatted)
     out.write_string("\n")
