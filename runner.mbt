@@ -90,7 +90,16 @@ pub async fn run(
         exit_input_error,
       )
   }
-  let formatted = format(json, options.indent)
+  // Sorting is a change to the document, not to its layout, so it happens
+  // first and both the review and the printed output see the same order.
+  let ordered = if options.sort_keys { sort_keys(json) } else { json }
+  // `--compact` asks for a document with no line breaks in it at all, which is
+  // what `--indent` exists to place, so the width is simply not consulted.
+  let formatted = if options.compact {
+    format_compact(ordered)
+  } else {
+    format(ordered, options.indent)
+  }
   // The review is asked for before anything is printed, so that a failure here
   // leaves standard output empty rather than trailing a document that the
   // caller may be piping somewhere.

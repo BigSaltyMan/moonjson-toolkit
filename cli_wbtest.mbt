@@ -21,6 +21,8 @@ test "no arguments yields the documented defaults" {
   let options = cli_ok([])
   assert_eq(options.file, None)
   assert_eq(options.indent, 2)
+  assert_eq(options.compact, false)
+  assert_eq(options.sort_keys, false)
   assert_eq(options.validate, false)
   assert_eq(options.help, false)
   assert_eq(options.version, false)
@@ -153,6 +155,23 @@ test "boolean flags are recognised in both spellings" {
 }
 
 ///|
+test "--compact asks for a single line" {
+  assert_true(cli_ok(["-c"]).compact)
+  assert_true(cli_ok(["--compact"]).compact)
+  // It changes the layout only, so the indent keeps its default rather than
+  // being zeroed here.
+  assert_eq(cli_ok(["-c"]).indent, default_indent)
+}
+
+///|
+test "--sort-keys asks for ordered keys" {
+  assert_true(cli_ok(["-S"]).sort_keys)
+  assert_true(cli_ok(["--sort-keys"]).sort_keys)
+  // `-s` is not the same flag, and neither is it an alias for anything.
+  assert_eq(cli_err(["-s"]), "unknown option: -s")
+}
+
+///|
 test "--json-out takes a path" {
   assert_eq(cli_ok(["--json-out", "s.json"]).json_out, Some("s.json"))
   assert_eq(cli_ok(["--json-out=s.json"]).json_out, Some("s.json"))
@@ -242,8 +261,8 @@ test "the usage text documents every option" {
   let text = usage()
   for
     option in [
-      "-f", "--file", "-i", "--indent", "-v", "--validate", "-h", "--help", "-V",
-      "--version", "--ai", "--json-out",
+      "-f", "--file", "-i", "--indent", "-c", "--compact", "-S", "--sort-keys", "-v",
+      "--validate", "-h", "--help", "-V", "--version", "--ai", "--json-out",
     ] {
     assert_true(text.contains(option))
   }

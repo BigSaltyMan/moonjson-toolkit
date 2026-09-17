@@ -140,3 +140,96 @@ pub fn format(json : @pjson.Json, indent : Int) -> String {
   write_json(buf, json, 0, width)
   buf.to_string()
 }
+
+///|
+/// Write `json` to `buf` as one unbroken line.
+///
+/// No line break and no padding space is emitted anywhere, including after the
+/// colon that separates an object key from its value. The only spaces that
+/// survive are the ones inside string contents, which are data and are escaped
+/// exactly as the indented form escapes them.
+fn write_compact(buf : StringBuilder, json : @pjson.Json) -> Unit {
+  match json {
+    Null => buf.write_string("null")
+    Bool(value~) => buf.write_string(if value { "true" } else { "false" })
+    Number(raw~) => buf.write_string(raw)
+    Text(value~) => {
+      buf.write_char('"')
+      buf.write_string(escape_json_string(value))
+      buf.write_char('"')
+    }
+    // An empty array or object writes its two brackets and nothing between
+    // them, so `[]` and `{}` need no special case here.
+    Array(items~) => {
+      buf.write_char('[')
+      let mut first = true
+      for item in items {
+        if !first {
+          buf.write_char(',')
+        }
+        first = false
+        write_compact(buf, item)
+      }
+      buf.write_char(']')
+    }
+    Object(members~) => {
+      buf.write_char('{')
+      let mut first = true
+      for entry in members {
+        let (key, value) = entry
+        if !first {
+          buf.write_char(',')
+        }
+        first = false
+        buf.write_char('"')
+        buf.write_string(escape_json_string(key))
+        buf.write_string("\":")
+        write_compact(buf, value)
+      }
+      buf.write_char('}')
+    }
+  }
+}
+
+///|
+/// Render `json` on a single line, with no padding spaces.
+///
+/// The result parses back to the same document as `format(json, indent)`; only
+/// the layout differs. Callers that ask for this are usually piping the output
+/// somewhere a line break would be noise, so the indent width has no effect.
+pub fn format_compact(json : @pjson.Json) -> String {
+  let buf = StringBuilder()
+  write_compact(buf, json)
+  buf.to_string()
+}
+
+///|
+/// Return `json` with the members of every object ordered by key.
+///
+/// Keys are compared with `String::compare`, so the order is code point by code
+/// point: ASCII keys come out the way a dictionary would list them, and upper
+/// case sorts before lower case. The ordering reaches every object in the
+/// document, including the ones nested inside arrays.
+///
+/// The argument is not modified. Each object is rebuilt around a fresh array
+/// rather than sorted in place, so a caller that still holds the original tree
+/// keeps seeing the document in the order it was written.
+pub fn sort_keys(json : @pjson.Json) -> @pjson.Json {
+  match json {
+    Object(members~) => {
+      let rebuilt = members.map(fn(entry) {
+        let (key, value) = entry
+        (key, sort_keys(value))
+      })
+      rebuilt.sort_by(fn(left, right) {
+        let (left_key, _) = left
+        let (right_key, _) = right
+        left_key.compare(right_key)
+      })
+      Object(members=rebuilt)
+    }
+    Array(items~) => Array(items=items.map(fn(item) { sort_keys(item) }))
+    // Everything else is a leaf: a scalar holds no keys to order.
+    leaf => leaf
+  }
+}

@@ -10,7 +10,9 @@ charts the statistics the tool writes.
 
 - **Formatting** — pretty-prints any JSON document with 0 to 16 spaces per
   nesting level. Empty containers stay inline, strings are escaped correctly,
-  and numbers keep the exact literal they had in the input.
+  and numbers keep the exact literal they had in the input. `--compact` puts
+  the whole document on one line instead, and `--sort-keys` orders the keys of
+  every object before printing.
 - **Validation with diagnostics** — a malformed document reports the line, the
   column and the reason, and points at the offending character:
 
@@ -64,6 +66,8 @@ Input is read from standard input unless --file is given.
 Options:
   -f, --file <path>      Read JSON from <path> instead of standard input
   -i, --indent <n>       Spaces per nesting level, 0 to 16 (default: 2)
+  -c, --compact          Print the document on one line, ignoring --indent
+  -S, --sort-keys        Order the keys of every object before printing
   -v, --validate         Only check the input and report the first error
   -h, --help             Show this message and exit
   -V, --version          Show the version and exit
@@ -145,6 +149,19 @@ Read from a pipe and indent with four spaces:
 ```sh
 echo '{"a":[1,2]}' | moon run cmd/main -- -i4
 ```
+
+Collapse a document onto one line and order its keys, which is the pair to
+reach for when the output is going to be compared or diffed rather than read:
+
+```sh
+echo '{"b":{"z":1,"a":2},"a":[{"y":3,"x":4}]}' | moon run cmd/main -- -cS
+# {"a":[{"x":4,"y":3}],"b":{"a":2,"z":1}}
+```
+
+`--sort-keys` reaches every object in the document, including the ones nested
+inside arrays, and compares keys by code point, so an upper case letter sorts
+before a lower case one. It changes what is printed, not what `--json-out`
+records: the statistics file keeps the order the document was written in.
 
 Check a document without printing it:
 
@@ -289,7 +306,7 @@ command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 87 tests
+moon test  --target native   # 95 tests
 moon fmt                     # format
 
 cd frontend

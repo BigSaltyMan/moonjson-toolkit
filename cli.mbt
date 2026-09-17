@@ -24,6 +24,8 @@ pub fn version_line() -> String {
 pub(all) struct CliOptions {
   mut file : String?
   mut indent : Int
+  mut compact : Bool
+  mut sort_keys : Bool
   mut validate : Bool
   mut help : Bool
   mut version : Bool
@@ -37,6 +39,8 @@ pub fn CliOptions::default() -> CliOptions {
   {
     file: None,
     indent: default_indent,
+    compact: false,
+    sort_keys: false,
     validate: false,
     help: false,
     version: false,
@@ -59,6 +63,8 @@ pub fn usage() -> String {
     "Options:",
     "  -f, --file <path>      Read JSON from <path> instead of standard input",
     "  -i, --indent <n>       Spaces per nesting level, 0 to 16 (default: 2)",
+    "  -c, --compact          Print the document on one line, ignoring --indent",
+    "  -S, --sort-keys        Order the keys of every object before printing",
     "  -v, --validate         Only check the input and report the first error",
     "  -h, --help             Show this message and exit",
     "  -V, --version          Show the version and exit",
@@ -225,6 +231,8 @@ pub fn CliOptions::parse(args : Array[String]) -> Result[CliOptions, String] {
         "help" => options.help = true
         "version" => options.version = true
         "validate" => options.validate = true
+        "compact" => options.compact = true
+        "sort-keys" => options.sort_keys = true
         "ai" => options.ai = true
         "file" | "json-out" | "indent" =>
           match option_value("--" + name, inline, args, index) {
@@ -251,6 +259,11 @@ pub fn CliOptions::parse(args : Array[String]) -> Result[CliOptions, String] {
           // spellings are worth having a test for.
           'V' => options.version = true
           'v' => options.validate = true
+          'c' => options.compact = true
+          // Capitalised on purpose: `jq` gives `-S` to its own `--sort-keys`,
+          // so the letter a reader is likely to reach for is already the one
+          // that does this.
+          'S' => options.sort_keys = true
           'f' | 'i' => {
             let option = if flag == 'f' { "-f" } else { "-i" }
             let rest = String::from_array(flags[position:])
