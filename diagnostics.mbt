@@ -178,11 +178,16 @@ pub fn JsonDiagnostic::at(
 
 ///|
 /// A one-line summary: `line 3, column 5: expected value`.
+///
+/// The position is coloured and the reason is not, which is the only division
+/// the message offers: the position is where to look and the reason is what to
+/// do about it. `yellow` returns its argument unchanged unless colour is on, so
+/// this is the same string it has always been when the output is not a
+/// terminal — which is what every test compares against.
 pub fn JsonDiagnostic::summary(self : JsonDiagnostic) -> String {
-  "line " +
-  self.line.to_string() +
-  ", column " +
-  self.column.to_string() +
+  yellow(
+    "line " + self.line.to_string() + ", column " + self.column.to_string(),
+  ) +
   ": " +
   self.message
 }

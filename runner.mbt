@@ -31,6 +31,17 @@ fn failure(message : String, code : Int) -> RunResult {
 }
 
 ///|
+/// The `error:` marker every failure message opens with, in red when colour is
+/// on and plain when it is not.
+///
+/// The argument error is the one message that does not use this: it is built
+/// from an argument list that did not parse, so whether `--no-color` was among
+/// those arguments is unknown, and the safe answer for an unknown is no colour.
+fn error_prefix() -> String {
+  red("error:") + " "
+}
+
+///|
 /// Read the JSON text, from `--file` when given and from standard input
 /// otherwise. Returns the text together with a label naming its source.
 async fn read_input(file : String?) -> Result[(String, String), String] {
@@ -69,6 +80,12 @@ pub async fn run(
         exit_usage_error,
       )
   }
+  // Colour is settled here, once everything that decides it is known: it takes
+  // a terminal and an absence of `--no-color`. The argument error above is
+  // deliberately left out of it — an argument list that failed to parse is
+  // exactly the one whose `--no-color` cannot be read, so the only safe answer
+  // is no colour, which is what the default already is.
+  set_color_enabled(!options.no_color && is_tty())
   // `--help` and `--version` both answer without reading any input. When both
   // are asked for, the usage text wins: it is the longer answer and the one
   // that tells you the other flag exists.
@@ -80,13 +97,13 @@ pub async fn run(
   }
   let (text, source) = match read_input(options.file) {
     Ok(input) => input
-    Err(message) => return failure("error: " + message, exit_input_error)
+    Err(message) => return failure(error_prefix() + message, exit_input_error)
   }
   let json = match parse_with_diagnostic(text, options.max_depth) {
     Ok(json) => json
     Err(diagnostic) =>
       return failure(
-        "error: " + source + " is not valid JSON\n" + diagnostic.render(),
+        error_prefix() + source + " is not valid JSON\n" + diagnostic.render(),
         exit_input_error,
       )
   }
@@ -118,12 +135,17 @@ pub async fn run(
         Ok(_) => err = "statistics written to " + path + "\n"
         Err(message) =>
           return failure(
-            "error: cannot write " + path + ": " + message,
+            error_prefix() + "cannot write " + path + ": " + message,
             exit_input_error,
           )
       }
     None => ()
   }
+  // `--stats` and `--json-out` are two answers to the same question, so asking
+  // for both is not an error but a tie, and the file is the more useful of the
+  // two: it is the one that can be kept, charted and compared. The summary on
+  // standard output is what is given up.
+  let show_stats = options.stats && options.json_out == None
   // Nothing below can fail, so this is where standard output starts.
   let out = StringBuilder()
   if options.validate {
@@ -142,6 +164,13 @@ pub async fn run(
       out.write_string(name)
       out.write_string("\n")
     }
+  } else if show_stats {
+    // Computed from `json` rather than from `ordered`: sorting changes the
+    // order the document is printed in and none of these counts, and taking
+    // them from the same value `--json-out` is given keeps the two reports
+    // saying the same thing when both are asked for.
+    out.write_string(JsonStats::of(json).to_text())
+    out.write_string("\n")
   } else {
     out.write_string(formatted)
     out.write_string("\n")

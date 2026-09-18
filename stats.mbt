@@ -186,6 +186,38 @@ pub fn JsonStats::to_json_text(self : JsonStats) -> String {
 }
 
 ///|
+/// Render the statistics as the two lines `--stats` prints:
+///
+/// ```
+/// keys: 6  nodes: 9  depth: 4
+/// type counts: object=3 array=1 string=3 number=2
+/// ```
+///
+/// A type that does not occur is left out rather than printed as `kind=0`. The
+/// line is a summary of what the document holds, and the absence of a type says
+/// that in less room than a row of zeroes would.
+///
+/// The counts that remain keep the canonical order of `type_counts` — the order
+/// `to_json_text` writes and the dashboard charts — rather than being sorted by
+/// size, so a reader comparing two documents can follow one type with their eye
+/// down both lines. It also means the two lines agree with the statistics file
+/// entry for entry: `--stats` is the same numbers in less space.
+pub fn JsonStats::to_text(self : JsonStats) -> String {
+  let buf = StringBuilder()
+  buf.write_string("keys: " + self.total_keys.to_string())
+  buf.write_string("  nodes: " + self.total_nodes.to_string())
+  buf.write_string("  depth: " + self.max_depth.to_string())
+  buf.write_char('\n')
+  buf.write_string("type counts:")
+  for entry in self.type_counts {
+    if entry.count > 0 {
+      buf.write_string(" " + entry.kind + "=" + entry.count.to_string())
+    }
+  }
+  buf.to_string()
+}
+
+///|
 /// Write the statistics of `json` to `path`.
 pub async fn write_stats_file(
   path : String,

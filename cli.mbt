@@ -29,11 +29,13 @@ pub(all) struct CliOptions {
   mut sort_keys : Bool
   mut paths : Bool
   mut keys_only : Bool
+  mut stats : Bool
   mut validate : Bool
   mut help : Bool
   mut version : Bool
   mut ai : Bool
   mut json_out : String?
+  mut no_color : Bool
 }
 
 ///|
@@ -47,11 +49,13 @@ pub fn CliOptions::default() -> CliOptions {
     sort_keys: false,
     paths: false,
     keys_only: false,
+    stats: false,
     validate: false,
     help: false,
     version: false,
     ai: false,
     json_out: None,
+    no_color: false,
   }
 }
 
@@ -79,6 +83,8 @@ pub fn usage() -> String {
     "  -V, --version          Show the version and exit",
     "      --ai               Ask DeepSeek for a quality report and suggestions",
     "      --json-out <path>  Write a statistics report as JSON to <path>",
+    "      --stats            Print a statistics summary instead of the document",
+    "      --no-color         Never colour the output, even on a terminal",
     "",
     "Short options may be combined, so -vh means -v -h. The value of --indent",
     "may be attached, as in -i4, -i=4, --indent=4 or --indent 4.",
@@ -86,6 +92,11 @@ pub fn usage() -> String {
     "--paths and --keys-only each replace the printed document with a list of",
     "names, one per line. Asking for both prints the longer list, and -v wins",
     "over either of them, since it asks for no document output at all.",
+    "",
+    "--stats replaces the document with a two-line summary of it. It joins the",
+    "same family: -v wins over it as it wins over the name lists, and --json-out",
+    "takes precedence over it, so asking for both writes the file and prints the",
+    "document as usual.",
     "",
     "Exit codes:",
     "  0  success",
@@ -277,6 +288,8 @@ pub fn CliOptions::parse(args : Array[String]) -> Result[CliOptions, String] {
         "sort-keys" => options.sort_keys = true
         "paths" => options.paths = true
         "keys-only" => options.keys_only = true
+        "stats" => options.stats = true
+        "no-color" => options.no_color = true
         "ai" => options.ai = true
         "file" | "json-out" | "indent" | "max-depth" =>
           match option_value("--" + name, inline, args, index) {

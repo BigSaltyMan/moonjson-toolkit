@@ -118,3 +118,27 @@ test "no JSON type is missing from the report" {
   let stats = JsonStats::of(parse_ok("1"))
   assert_eq(stats.type_counts.length(), 6)
 }
+
+///|
+test "the text summary is two lines, one per kind of number" {
+  let text = JsonStats::of(parse_ok("{\"a\":[1,2],\"b\":{\"c\":null}}")).to_text()
+  // Three keys, six nodes, three levels. The types keep the order the report
+  // and the dashboard use rather than being sorted by size, so `null=1` comes
+  // first and `object=2`, the largest, comes last.
+  assert_eq(
+    text,
+    "keys: 3  nodes: 6  depth: 3\n" +
+    "type counts: null=1 number=2 array=1 object=2",
+  )
+}
+
+///|
+test "a type the document does not contain is left out of the summary" {
+  // The model keeps all six counts whatever the document, so this is the
+  // renderer's doing: an empty object has no boolean in it, and a row of
+  // zeroes would say that in more room than the silence does.
+  assert_eq(
+    JsonStats::of(parse_ok("{}")).to_text(),
+    "keys: 0  nodes: 1  depth: 1\ntype counts: object=1",
+  )
+}

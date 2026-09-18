@@ -26,11 +26,13 @@ test "no arguments yields the documented defaults" {
   assert_eq(options.sort_keys, false)
   assert_eq(options.paths, false)
   assert_eq(options.keys_only, false)
+  assert_eq(options.stats, false)
   assert_eq(options.validate, false)
   assert_eq(options.help, false)
   assert_eq(options.version, false)
   assert_eq(options.ai, false)
   assert_eq(options.json_out, None)
+  assert_eq(options.no_color, false)
 }
 
 ///|
@@ -211,6 +213,22 @@ test "a max-depth that is not a natural number is rejected" {
 }
 
 ///|
+test "--stats asks for the summary" {
+  assert_true(cli_ok(["--stats"]).stats)
+  // It is not the same request as `--json-out`: one prints, the other writes.
+  assert_eq(cli_ok(["--stats"]).json_out, None)
+  assert_eq(cli_err(["--stat"]), "unknown option: --stat")
+}
+
+///|
+test "--no-color switches colour off" {
+  assert_true(cli_ok(["--no-color"]).no_color)
+  // The default is the only other state there is: the terminal decides.
+  assert_false(cli_ok([]).no_color)
+  assert_eq(cli_err(["--no-colour"]), "unknown option: --no-colour")
+}
+
+///|
 test "--json-out takes a path" {
   assert_eq(cli_ok(["--json-out", "s.json"]).json_out, Some("s.json"))
   assert_eq(cli_ok(["--json-out=s.json"]).json_out, Some("s.json"))
@@ -302,7 +320,7 @@ test "the usage text documents every option" {
     option in [
       "-f", "--file", "-i", "--indent", "-c", "--compact", "-S", "--sort-keys", "--max-depth",
       "--paths", "--keys-only", "-v", "--validate", "-h", "--help", "-V", "--version",
-      "--ai", "--json-out",
+      "--ai", "--json-out", "--stats", "--no-color",
     ] {
     assert_true(text.contains(option))
   }

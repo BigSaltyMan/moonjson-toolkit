@@ -34,7 +34,11 @@ charts the statistics the tool writes.
   they answer "what is in here" without printing the document.
 
 - **Statistics** — key counts, node counts, maximum nesting depth, the
-  distribution of JSON types and a per-depth breakdown, written as JSON.
+  distribution of JSON types and a per-depth breakdown, written as JSON by
+  `--json-out` or printed as a two-line summary by `--stats`.
+- **Colour** — errors are coloured on a terminal and plain everywhere else, so
+  a redirected run never has escape sequences in it. `--no-color` turns them
+  off, as does the `NO_COLOR` and `TERM=dumb` conventions.
 - **Charts** — a [Rabbita](https://github.com/moonbit-community/rabbita) web app
   renders the statistics file as a key-count bar chart, a nesting-depth pie
   chart and a type table.
@@ -86,6 +90,8 @@ Options:
   -V, --version          Show the version and exit
       --ai               Ask DeepSeek for a quality report and suggestions
       --json-out <path>  Write a statistics report as JSON to <path>
+      --stats            Print a statistics summary instead of the document
+      --no-color         Never colour the output, even on a terminal
 ```
 
 Short options may be combined, so `-vh` means `-v -h`. The value of `--indent`
@@ -102,6 +108,11 @@ both answer without reading any input at all.
 rather than a verdict. Asking for both prints the longer list, and `-v` wins
 over either of them, since it asks for no document output at all. Like `-v`,
 neither of them stops the rest of the work: `--json-out` and `--ai` still run.
+
+`--stats` replaces the document with a two-line summary of it. It joins the same
+family: `-v` wins over it as it wins over the name lists, and `--json-out` takes
+precedence over it, so asking for both writes the file and prints the document
+as usual.
 
 ### Exit codes
 
@@ -296,6 +307,17 @@ holding a scalar or an array of scalars reports `0` — `name`, `version`,
 across its two levels, and `dependencies` reports six across its three entries.
 `depth_counts` is 1-based and covers every level up to `max_depth`.
 
+Ask for the same numbers on standard output instead of in a file:
+
+```sh
+moon run cmd/main -- --stats -f test.json
+# keys: 19  nodes: 26  depth: 4
+# type counts: null=1 boolean=2 number=2 string=12 array=2 object=7
+```
+
+The two lines say what the report above says, in the order it says it, with the
+types the document does not contain left out rather than shown as `=0`.
+
 ## The statistics dashboard
 
 The dashboard reads the file written by `--json-out`. It is a separate MoonBit
@@ -348,6 +370,7 @@ moonjson-toolkit/
 ├── moon.pkg              the library package and its imports
 ├── formatter.mbt         pretty-printing
 ├── diagnostics.mbt       offsets to line/column, rendered error snippets
+├── color.mbt             the colour decision and the escape wrapping
 ├── cli.mbt               argument parsing and usage text
 ├── parser.mbt            parsing and file/standard-input reading
 ├── paths.mbt             the path of every value, and of every object member
@@ -369,7 +392,7 @@ command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 114 tests
+moon test  --target native   # 123 tests
 moon fmt                     # format
 
 cd frontend
@@ -395,6 +418,14 @@ moon test --target js        # 4 tests
   that reaches the internet only through a proxy, `--ai` will fail to connect;
   run it somewhere the API is directly reachable, or route the traffic yourself.
   Everything else in the tool works offline.
+
+- **Colour detection outside Linux falls back to the environment.** On Linux the
+  tool asks the kernel whether standard output is a terminal, so a document
+  redirected to a file is never coloured. Platforms without `/proc` have no such
+  answer to hand without platform-specific calls this project does not make, so
+  `TERM` is taken as the answer there instead. `TERM` stays set when output is
+  redirected, so a redirected run on those platforms may be coloured after all;
+  `--no-color` or `NO_COLOR=1` is the answer there, and both work everywhere.
 
 - **A path is ambiguous when a key contains `.`, `[` or `]`.** Paths are written
   the way they are read rather than escaped, so `{"a.b": 1}` and
