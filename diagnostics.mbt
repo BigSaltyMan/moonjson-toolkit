@@ -131,7 +131,11 @@ pub fn describe_limit_kind(kind : @pjson.JsonLimitKind) -> String {
 
 ///|
 /// Render `value` as a quoted, escaped literal for use in a message.
-fn quote_for_message(value : String) -> String {
+///
+/// Public because the messages that name keys are not all written here:
+/// `flatten.mbt` names the two keys of a conflict, and a key is escaped the
+/// same way wherever it is quoted.
+pub fn quote_for_message(value : String) -> String {
   "\"" + escape_json_string(value) + "\""
 }
 

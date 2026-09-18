@@ -20,6 +20,10 @@ charts the statistics the tool writes.
 - **JSON Lines** — `--jsonl` reads an input whose lines are documents, one per
   line, and formats each of them onto a line of its own. A line that is not
   valid JSON is reported by its line number while the others are still printed.
+- **Reshaping** — `--flatten` collapses every nested object into dotted keys,
+  turning `{"a":{"b":1}}` into `{"a.b":1}`, and `--unflatten` expands them
+  again. Both reach objects inside arrays, and both refuse a document that
+  names one path two ways, naming the two keys that disagree.
 - **Validation with diagnostics** — a malformed document reports the line, the
   column and the reason, and points at the offending character:
 
@@ -90,6 +94,8 @@ Options:
   -c, --compact          Print the document on one line, ignoring --indent
   -S, --sort-keys        Order the keys of every object before printing
       --trim-strings     Trim the whitespace around every string in the document
+      --flatten          Collapse every nested object into dotted keys
+      --unflatten        Expand every dotted key back into nested objects
       --jsonl            Read the input as JSON Lines, one document per line
       --max-depth <n>    Refuse documents nested deeper than <n> (default: 128)
       --paths            Print the path of every value instead of the document
@@ -118,6 +124,12 @@ same family: -v wins over it as it wins over the name lists, and --json-out
 takes precedence over it, so asking for both writes the file and prints the
 document as usual. --json-out describes one document, so it is refused when
 several files are named.
+
+--flatten collapses every nested object into dotted keys, and --unflatten
+expands them again. The two are inverses of each other, so only one of them
+may be given. A document that names one path two ways, with a key "a.b"
+beside a key "a", has no flattened or unflattened form and is refused with
+both keys named.
 
 --jsonl reads the input as JSON Lines: one document per line, with blank
 lines skipped. Each record is handled on its own, so the other options apply
@@ -167,10 +179,36 @@ repeated once per record with nothing to say which record an answer belongs to.
 `-v` is not among them: it asks whether the input is valid, which is as good a
 question about a file of many documents as about a file of one.
 
-`--sort-keys` and `--trim-strings` change the document rather than its layout, so
-the printed document, the paths and the AI review all see the result, while
-`--json-out` keeps recording the document as it was written — none of the counts
-it reports can tell the difference.
+`--flatten` and `--unflatten` are inverses of each other, so asking for both is
+not a pair of changes but a question about which one was meant, and the command
+line is refused. A document that can be read either way is answered either way:
+`{"a":{"b":1}}` and `{"a.b":1}` are the same document written two ways, and each
+flag rewrites one into the other. Neither of them invents or drops anything —
+flattening joins keys that were already written and unflattening splits them at
+their dots — so the values, their order and even the empty containers survive
+the trip.
+
+A document that spells one path two ways has no flattened form to be had. If a
+member is named `a.b` while a sibling named `a` holds an object, lifting `a`
+produces a second `a.b`, and one of the two would have to be dropped; the run
+exits `1` rather than settling it by a rule about which of them matters less.
+Both keys are named, so the message says which pair to reconcile:
+
+```
+error: <stdin> cannot be flattened
+conflicting keys: "a" and "a.b"
+```
+
+`--unflatten` refuses those shapes too, and is stricter: it decides by the keys
+alone, so a key that is the dotted start of another key means one place is named
+twice, whatever the value at the shorter key holds. A literal dotted key beside a
+key holding anything but an object is no trouble at all, since nothing is lifted
+and nothing collides: `{"a.b":1,"a":2}` flattens to itself.
+
+`--flatten`, `--unflatten`, `--sort-keys` and `--trim-strings` change the
+document rather than its layout, so the printed document, the paths and the AI
+review all see the result, while `--json-out` keeps recording the document as it
+was written — none of the counts it reports can tell the difference.
 
 ### Exit codes
 
@@ -315,6 +353,34 @@ Keys are names rather than values and are left exactly as they were written.
 Trimming them would rename them, and two keys differing only in their surrounding
 spaces would collapse into the repeated key the parser refuses — a document that
 parsed would become one that would not.
+
+Collapse the nesting of a document into dotted keys, which is the shape to hand
+to anything that reads a flat table of names:
+
+```sh
+printf '{"a":{"b":{"c":1}},"d":[{"e":{"f":2}}]}' | moon run cmd/main -- --flatten -c
+# {"a.b.c":1,"d":[{"e.f":2}]}
+```
+
+Expand them again, merging the keys that share a prefix as it goes:
+
+```sh
+printf '{"a.b":1,"a.c":{"d":2}}' | moon run cmd/main -- --unflatten -c
+# {"a":{"b":1,"c":{"d":2}}}
+```
+
+A document that names one path two ways has no form to be had in either
+direction, and is refused with both keys named:
+
+```sh
+printf '{"a":{"b":1},"a.b":2}' | moon run cmd/main -- --flatten -c
+# error: <stdin> cannot be flattened
+# conflicting keys: "a" and "a.b"
+```
+
+A literal dotted key beside a key holding something else is not that case:
+nothing is lifted out of `a`, so nothing collides, and the document is already
+flat.
 
 Read from a pipe and indent with four spaces:
 
@@ -512,6 +578,7 @@ moonjson-toolkit/
 ├── moon.mod              module metadata and dependencies
 ├── moon.pkg              the library package and its imports
 ├── formatter.mbt         pretty-printing
+├── flatten.mbt           dotted keys out of nesting, and back again
 ├── jsonl.mbt             splitting a JSON Lines input into records
 ├── diagnostics.mbt       offsets to line/column, rendered error snippets
 ├── color.mbt             the colour decision and the escape wrapping
@@ -536,7 +603,7 @@ command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 141 tests
+moon test  --target native   # 153 tests
 moon fmt                     # format
 
 cd frontend

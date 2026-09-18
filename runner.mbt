@@ -67,6 +67,13 @@ async fn read_input(file : String?) -> Result[(String, String), String] {
 /// command line that names more than one, and the answer is to refuse rather
 /// than to answer for the first of them and quietly drop the rest.
 fn validate_options(options : CliOptions) -> Result[Unit, String] {
+  // Each undoes the other, so asking for both is not a pair of changes but a
+  // question about which one was meant.
+  if options.flatten && options.unflatten {
+    return Err(
+      "--flatten and --unflatten are inverses, so only one of them can be given",
+    )
+  }
   if options.files.length() > 1 && options.json_out != None {
     return Err(
       "--json-out describes a single document, but " +
@@ -108,17 +115,71 @@ fn validate_options(options : CliOptions) -> Result[Unit, String] {
 ///|
 /// Apply the changes that alter the document rather than its layout.
 ///
-/// Trimming rewrites the strings and sorting rebuilds the objects, so both
-/// happen before anything is printed and the review sees them too. The order
-/// between the two does not matter: neither looks at what the other changes,
-/// one moving keys and the other rewriting values.
-fn prepare_document(options : CliOptions, json : @pjson.Json) -> @pjson.Json {
-  let trimmed = if options.trim_strings { trim_strings(json) } else { json }
-  if options.sort_keys {
-    sort_keys(trimmed)
+/// These happen before anything is printed, so the review, the statistics file
+/// and the path list all see the result. The order is: reshape the keys first,
+/// then tidy the values and the order they are printed in.
+///
+/// Every one of them rebuilds the containers rather than editing them, so the
+/// tree handed in is left as it was found. The order of the last two does not
+/// matter: neither looks at what the other changes, one moving keys and the
+/// other rewriting values.
+///
+/// The reshaping is the one step that can fail, and only for a document that
+/// has no flattened or unflattened form to be had.
+fn prepare_document(
+  options : CliOptions,
+  json : @pjson.Json,
+) -> Result[@pjson.Json, String] {
+  let shaped = if options.flatten {
+    flatten(json)
+  } else if options.unflatten {
+    unflatten(json)
   } else {
-    trimmed
+    Ok(json)
   }
+  match shaped {
+    Err(message) => Err(message)
+    Ok(shaped) => {
+      let trimmed = if options.trim_strings {
+        trim_strings(shaped)
+      } else {
+        shaped
+      }
+      Ok(if options.sort_keys { sort_keys(trimmed) } else { trimmed })
+    }
+  }
+}
+
+///|
+/// The word for the reshaping a command line asked of the document.
+///
+/// Only read when that reshaping failed, and then only for the sentence that
+/// says so: `cannot be flattened` names what was refused, where `conflicting
+/// keys` on its own would leave the reader guessing what it was about to do.
+fn shape_verb(options : CliOptions) -> String {
+  if options.flatten {
+    "flattened"
+  } else {
+    "unflattened"
+  }
+}
+
+///|
+/// The report for a document the requested reshaping cannot be done to.
+fn shape_failure(
+  options : CliOptions,
+  source : String,
+  message : String,
+) -> RunResult {
+  failure(
+    error_prefix() +
+    source +
+    " cannot be " +
+    shape_verb(options) +
+    "\n" +
+    message,
+    exit_input_error,
+  )
 }
 
 ///|
@@ -261,7 +322,10 @@ async fn render_document(
   json : @pjson.Json,
   analyze : async (String) -> Result[String, String],
 ) -> RunResult {
-  let prepared = prepare_document(options, json)
+  let prepared = match prepare_document(options, json) {
+    Ok(prepared) => prepared
+    Err(message) => return shape_failure(options, source, message)
+  }
   let formatted = format_document(options, prepared)
   // The review is asked for before anything is printed, so that a failure here
   // leaves standard output empty rather than trailing a document that the
@@ -354,11 +418,21 @@ fn run_jsonl(options : CliOptions, source : String, text : String) -> RunResult 
   for record in parse_jsonl_with_depth(text, options.max_depth) {
     match record {
       Ok(json) =>
-        if !options.validate {
-          out.write_string(
-            format_document(options, prepare_document(options, json)),
-          )
-          out.write_string("\n")
+        match prepare_document(options, json) {
+          Ok(prepared) =>
+            if !options.validate {
+              out.write_string(format_document(options, prepared))
+              out.write_string("\n")
+            }
+          Err(message) => {
+            // As with a record that does not parse, one that cannot be reshaped
+            // is reported and the rest are still printed, and the run ends 1.
+            let report = shape_failure(options, source, message)
+            err.write_string(report.err)
+            if code == exit_success {
+              code = report.code
+            }
+          }
         }
       Err(diagnostic) => {
         err.write_string(

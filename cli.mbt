@@ -29,6 +29,8 @@ pub(all) struct CliOptions {
   mut sort_keys : Bool
   mut trim_strings : Bool
   mut jsonl : Bool
+  mut flatten : Bool
+  mut unflatten : Bool
   mut paths : Bool
   mut keys_only : Bool
   mut stats : Bool
@@ -51,6 +53,8 @@ pub fn CliOptions::default() -> CliOptions {
     sort_keys: false,
     trim_strings: false,
     jsonl: false,
+    flatten: false,
+    unflatten: false,
     paths: false,
     keys_only: false,
     stats: false,
@@ -80,6 +84,8 @@ pub fn usage() -> String {
     "  -c, --compact          Print the document on one line, ignoring --indent",
     "  -S, --sort-keys        Order the keys of every object before printing",
     "      --trim-strings     Trim the whitespace around every string in the document",
+    "      --flatten          Collapse every nested object into dotted keys",
+    "      --unflatten        Expand every dotted key back into nested objects",
     "      --jsonl            Read the input as JSON Lines, one document per line",
     "      --max-depth <n>    Refuse documents nested deeper than <n> (default: 128)",
     "      --paths            Print the path of every value instead of the document",
@@ -108,6 +114,12 @@ pub fn usage() -> String {
     "takes precedence over it, so asking for both writes the file and prints the",
     "document as usual. --json-out describes one document, so it is refused when",
     "several files are named.",
+    "",
+    "--flatten collapses every nested object into dotted keys, and --unflatten",
+    "expands them again. The two are inverses of each other, so only one of them",
+    "may be given. A document that names one path two ways, with a key \"a.b\"",
+    "beside a key \"a\", has no flattened or unflattened form and is refused with",
+    "both keys named.",
     "",
     "--jsonl reads the input as JSON Lines: one document per line, with blank",
     "lines skipped. Each record is handled on its own, so the other options apply",
@@ -308,6 +320,8 @@ pub fn CliOptions::parse(args : Array[String]) -> Result[CliOptions, String] {
         "sort-keys" => options.sort_keys = true
         "trim-strings" => options.trim_strings = true
         "jsonl" => options.jsonl = true
+        "flatten" => options.flatten = true
+        "unflatten" => options.unflatten = true
         "paths" => options.paths = true
         "keys-only" => options.keys_only = true
         "stats" => options.stats = true

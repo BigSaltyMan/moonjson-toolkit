@@ -207,6 +207,59 @@ async test "--trim-strings reaches the printed document" {
 }
 
 ///|
+async test "--flatten and --unflatten reach the printed document" {
+  let scratch = Scratch::named("flatten")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let flattened = run_on(
+    scratch,
+    "{\"a\":{\"b\":1},\"c\":2}",
+    ["--flatten", "--compact"],
+    analyzer,
+  )
+  inspect(flattened.code, content="0")
+  inspect(flattened.out, content="{\"a.b\":1,\"c\":2}\n")
+  inspect(flattened.err, content="")
+  // The same text read the other way, and printed as the nesting it describes:
+  // the reshaping happens before the layout, so the two agree on what the
+  // document is.
+  let unflattened = run_on(
+    scratch,
+    "{\"a.b\":1,\"c\":2}",
+    ["--unflatten"],
+    analyzer,
+  )
+  inspect(unflattened.code, content="0")
+  inspect(
+    unflattened.out,
+    content="{\n  \"a\": {\n    \"b\": 1\n  },\n  \"c\": 2\n}\n",
+  )
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "a document that cannot be reshaped exits 1 and prints nothing" {
+  let scratch = Scratch::named("flatten_conflict")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_on(
+    scratch,
+    "{\"a\":{\"b\":1},\"a.b\":2}",
+    ["--flatten"],
+    analyzer,
+  )
+  inspect(result.code, content="1")
+  // Nothing reaches standard output, as with a document that does not parse:
+  // there is no flattened form of this one to print.
+  inspect(result.out, content="")
+  inspect(
+    result.err,
+    content="error: " +
+      scratch.input +
+      " cannot be flattened\nconflicting keys: \"a\" and \"a.b\"\n",
+  )
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
 async test "several files are handled in turn, each under its own heading" {
   let first = Scratch::named("multi_first")
   let second = Scratch::named("multi_second")
@@ -271,6 +324,22 @@ async test "--json-out is refused when several files are named" {
 }
 
 ///|
+async test "--flatten and --unflatten together are refused" {
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  // Neither name exists, which is the point: the command line is refused
+  // before anything is opened.
+  let result = run(
+    ["-f", "no_such.json", "--flatten", "--unflatten"],
+    analyze=analyzer.analyzer(),
+  )
+  inspect(result.code, content="2")
+  inspect(result.out, content="")
+  assert_true(result.err.contains("--flatten and --unflatten are inverses"))
+  assert_false(result.err.contains("no such file"))
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
 async test "--jsonl prints one record per line" {
   let scratch = Scratch::named("jsonl")
   let analyzer = StubAnalyzer::new(Ok("unused"))
@@ -308,6 +377,25 @@ async test "--jsonl keeps going past a bad record and exits 1" {
   assert_true(result.err.contains(scratch.input + " is not valid JSON"))
   assert_true(result.err.contains("line 2"))
   assert_true(result.err.contains("{\"b\":}"))
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "--jsonl reshapes every record on its own" {
+  let scratch = Scratch::named("jsonl_flatten")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_on(
+    scratch,
+    "{\"a\":{\"b\":1}}\n{\"c\":{\"d\":2},\"c.d\":3}\n{\"e\":{\"f\":4}}\n",
+    ["--jsonl", "--flatten", "--compact"],
+    analyzer,
+  )
+  inspect(result.code, content="1")
+  // A record that cannot be reshaped is reported and the records around it are
+  // still printed, exactly as for one that does not parse.
+  inspect(result.out, content="{\"a.b\":1}\n{\"e.f\":4}\n")
+  assert_true(result.err.contains(scratch.input + " cannot be flattened"))
+  assert_true(result.err.contains("conflicting keys: \"c\" and \"c.d\""))
   assert_eq(analyzer.calls, 0)
 }
 

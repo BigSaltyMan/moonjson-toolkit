@@ -25,6 +25,8 @@ test "no arguments yields the documented defaults" {
   assert_eq(options.compact, false)
   assert_eq(options.sort_keys, false)
   assert_eq(options.trim_strings, false)
+  assert_eq(options.flatten, false)
+  assert_eq(options.unflatten, false)
   assert_eq(options.jsonl, false)
   assert_eq(options.paths, false)
   assert_eq(options.keys_only, false)
@@ -200,6 +202,19 @@ test "--trim-strings asks for the strings to be trimmed" {
 }
 
 ///|
+test "--flatten and --unflatten are read, each on its own" {
+  assert_true(cli_ok(["--flatten"]).flatten)
+  assert_true(cli_ok(["--unflatten"]).unflatten)
+  // Parsing does not decide anything about the pair: the two are read as the
+  // flags they are, and whether the pair makes a run is settled later, where
+  // every other question about the command line as a whole is settled.
+  assert_false(cli_ok(["--flatten"]).unflatten)
+  assert_false(cli_ok(["--unflatten"]).flatten)
+  assert_eq(cli_err(["--flat"]), "unknown option: --flat")
+  assert_eq(cli_err(["--flatten-keys"]), "unknown option: --flatten-keys")
+}
+
+///|
 test "--jsonl asks for the input to be read as JSON Lines" {
   assert_true(cli_ok(["--jsonl"]).jsonl)
   // It says how the input is written, not what to do with the document, so it
@@ -351,8 +366,9 @@ test "the usage text documents every option" {
   for
     option in [
       "-f", "--file", "-i", "--indent", "-c", "--compact", "-S", "--sort-keys", "--trim-strings",
-      "--jsonl", "--max-depth", "--paths", "--keys-only", "-v", "--validate", "-h",
-      "--help", "-V", "--version", "--ai", "--json-out", "--stats", "--no-color",
+      "--flatten", "--unflatten", "--jsonl", "--max-depth", "--paths", "--keys-only",
+      "-v", "--validate", "-h", "--help", "-V", "--version", "--ai", "--json-out",
+      "--stats", "--no-color",
     ] {
     assert_true(text.contains(option))
   }
