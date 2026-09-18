@@ -62,10 +62,12 @@ async fn read_input(file : String?) -> Result[(String, String), String] {
 ///|
 /// Run the tool over `args` and collect everything it produced.
 ///
-/// Every step that can fail — reading, parsing, the AI review, writing the
-/// statistics file — runs before a single byte reaches `out`, so a failure
-/// never leaves a half-written document on standard output. `-v` suppresses
-/// only the formatted document itself; `--json-out` and `--ai` still run.
+/// Several `--file` arguments mean several documents, and each is handled in
+/// turn by `run_document`: a file that fails is reported on standard error and
+/// the ones after it are still processed, so one bad input does not hide the
+/// state of the rest. The run ends with the first non-zero code any of them
+/// produced — the earliest failure is the one worth naming, and the other
+/// failures are already on standard error beside it.
 pub async fn run(
   args : Array[String],
   analyze~ : async (String) -> Result[String, String],
@@ -95,10 +97,68 @@ pub async fn run(
   if options.version {
     return { out: version_line() + "\n", err: "", code: exit_success, }
   }
-  let (text, source) = match read_input(options.file) {
-    Ok(input) => input
-    Err(message) => return failure(error_prefix() + message, exit_input_error)
+  // A statistics file describes one document, and this command line names more
+  // than one. Refused rather than written for the first of them, which would
+  // quietly drop the rest.
+  if options.files.length() > 1 && options.json_out != None {
+    return failure(
+      error_prefix() +
+      "--json-out describes a single document, but " +
+      options.files.length().to_string() +
+      " files were given\nrun 'moonjson-toolkit --help' to see the available options",
+      exit_usage_error,
+    )
   }
+  let inputs : Array[String?] = if options.files.length() == 0 {
+    // No file named is not no input: standard input is the document.
+    [None]
+  } else {
+    options.files.map(fn(path) { Some(path) })
+  }
+  // A heading is only worth printing when there is more than one document to
+  // tell apart, which is why a single file reads exactly as it always has.
+  let many = inputs.length() > 1
+  let out = StringBuilder()
+  let err = StringBuilder()
+  let mut code = exit_success
+  for input in inputs {
+    let (text, source) = match read_input(input) {
+      Ok(read) => read
+      Err(message) => {
+        err.write_string(error_prefix() + message + "\n")
+        if code == exit_success {
+          code = exit_input_error
+        }
+        continue
+      }
+    }
+    let result = run_document(options, source, text, analyze)
+    if many && result.out != "" {
+      out.write_string("==> " + source + " <==\n")
+    }
+    out.write_string(result.out)
+    err.write_string(result.err)
+    if code == exit_success {
+      code = result.code
+    }
+  }
+  { out: out.to_string(), err: err.to_string(), code, }
+}
+
+///|
+/// Handle one document, from its text to everything the run prints for it.
+///
+/// Every step that can fail — parsing, the AI review, writing the statistics
+/// file — runs before a single byte for this document reaches `out`, so a
+/// failure never leaves a half-written document on standard output. `-v`
+/// suppresses only the formatted document itself; `--json-out` and `--ai` still
+/// run.
+async fn run_document(
+  options : CliOptions,
+  source : String,
+  text : String,
+  analyze : async (String) -> Result[String, String],
+) -> RunResult {
   let json = match parse_with_diagnostic(text, options.max_depth) {
     Ok(json) => json
     Err(diagnostic) =>
@@ -107,15 +167,18 @@ pub async fn run(
         exit_input_error,
       )
   }
-  // Sorting is a change to the document, not to its layout, so it happens
-  // first and both the review and the printed output see the same order.
-  let ordered = if options.sort_keys { sort_keys(json) } else { json }
+  // Trimming and sorting are both changes to the document rather than to its
+  // layout, so they happen before printing and the review sees them too. The
+  // order between the two does not matter: neither looks at what the other
+  // changes, one moving keys and the other rewriting values.
+  let trimmed = if options.trim_strings { trim_strings(json) } else { json }
+  let prepared = if options.sort_keys { sort_keys(trimmed) } else { trimmed }
   // `--compact` asks for a document with no line breaks in it at all, which is
   // what `--indent` exists to place, so the width is simply not consulted.
   let formatted = if options.compact {
-    format_compact(ordered)
+    format_compact(prepared)
   } else {
-    format(ordered, options.indent)
+    format(prepared, options.indent)
   }
   // The review is asked for before anything is printed, so that a failure here
   // leaves standard output empty rather than trailing a document that the
@@ -156,17 +219,17 @@ pub async fn run(
     // to it, and `--paths` is the longer of the pair, so it is the one that
     // answers when both are asked for.
     let names = if options.paths {
-      collect_paths(ordered)
+      collect_paths(prepared)
     } else {
-      collect_key_paths(ordered)
+      collect_key_paths(prepared)
     }
     for name in names {
       out.write_string(name)
       out.write_string("\n")
     }
   } else if show_stats {
-    // Computed from `json` rather than from `ordered`: sorting changes the
-    // order the document is printed in and none of these counts, and taking
+    // Computed from `json` rather than from `prepared`: sorting and trimming
+    // change how the document is printed and none of these counts, and taking
     // them from the same value `--json-out` is given keeps the two reports
     // saying the same thing when both are asked for.
     out.write_string(JsonStats::of(json).to_text())

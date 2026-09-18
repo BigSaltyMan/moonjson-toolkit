@@ -11,8 +11,12 @@ charts the statistics the tool writes.
 - **Formatting** — pretty-prints any JSON document with 0 to 16 spaces per
   nesting level. Empty containers stay inline, strings are escaped correctly,
   and numbers keep the exact literal they had in the input. `--compact` puts
-  the whole document on one line instead, and `--sort-keys` orders the keys of
-  every object before printing.
+  the whole document on one line instead, `--sort-keys` orders the keys of
+  every object before printing, and `--trim-strings` removes the whitespace
+  around every string value while leaving the spaces inside one alone.
+- **Several documents at once** — `--file` may be repeated. Each file is
+  handled in turn, under a `==> path <==` heading once there is more than one
+  of them, and a file that fails does not stop the ones after it.
 - **Validation with diagnostics** — a malformed document reports the line, the
   column and the reason, and points at the offending character:
 
@@ -78,10 +82,11 @@ Usage:
 Input is read from standard input unless --file is given.
 
 Options:
-  -f, --file <path>      Read JSON from <path> instead of standard input
+  -f, --file <path>      Read one or more input files instead of standard input
   -i, --indent <n>       Spaces per nesting level, 0 to 16 (default: 2)
   -c, --compact          Print the document on one line, ignoring --indent
   -S, --sort-keys        Order the keys of every object before printing
+      --trim-strings     Trim the whitespace around every string in the document
       --max-depth <n>    Refuse documents nested deeper than <n> (default: 128)
       --paths            Print the path of every value instead of the document
       --keys-only        Print only the paths that name an object member
@@ -92,6 +97,29 @@ Options:
       --json-out <path>  Write a statistics report as JSON to <path>
       --stats            Print a statistics summary instead of the document
       --no-color         Never colour the output, even on a terminal
+
+Short options may be combined, so -vh means -v -h. The value of --indent
+may be attached, as in -i4, -i=4, --indent=4 or --indent 4.
+
+--file may be repeated. Each file is handled in turn, each under a
+'==> path <==' heading once more than one is given, and the run exits with
+the first non-zero code among them.
+
+--paths and --keys-only each replace the printed document with a list of
+names, one per line. Asking for both prints the longer list, and -v wins
+over either of them, since it asks for no document output at all.
+
+--stats replaces the document with a two-line summary of it. It joins the
+same family: -v wins over it as it wins over the name lists, and --json-out
+takes precedence over it, so asking for both writes the file and prints the
+document as usual. --json-out describes one document, so it is refused when
+several files are named.
+
+Exit codes:
+  0  success
+  1  the input could not be read, or is not valid JSON
+  2  the command line was invalid
+  3  the input was valid but the AI review failed
 ```
 
 Short options may be combined, so `-vh` means `-v -h`. The value of `--indent`
@@ -114,6 +142,15 @@ family: `-v` wins over it as it wins over the name lists, and `--json-out` takes
 precedence over it, so asking for both writes the file and prints the document
 as usual.
 
+`--file` may be repeated, and each document is handled on its own. `--json-out`
+describes a single document, so it is refused when several files are named
+rather than written for whichever one came first.
+
+`--sort-keys` and `--trim-strings` change the document rather than its layout, so
+the printed document, the paths and the AI review all see the result, while
+`--json-out` keeps recording the document as it was written — none of the counts
+it reports can tell the difference.
+
 ### Exit codes
 
 | Code | Meaning |
@@ -123,9 +160,12 @@ as usual.
 | `2`  | the command line itself was invalid |
 | `3`  | the input was valid, but the AI review could not be produced |
 
-A run that fails writes nothing to standard output. All the work that can fail
-happens before the first byte is printed, so a failure never leaves a partly
-written document for whatever is reading the output.
+A run that fails writes nothing to standard output for the document that failed.
+All the work that can fail for one document happens before the first byte of it
+is printed, so a failure never leaves a partly written document for whatever is
+reading the output. With several files this holds per file: the ones that worked
+are printed, the ones that did not are on standard error, and the exit code is
+the first one that was not `0`.
 
 ### Examples
 
@@ -172,6 +212,56 @@ moon run cmd/main -- -f test.json
   }
 }
 ```
+
+Handle several documents in one run. Each is formatted on its own, under a
+heading that names the file it came from, and the headings appear only when
+there is more than one document to tell apart:
+
+```sh
+moon run cmd/main -- -f a.json -f b.json
+# ==> a.json <==
+# {
+#   "a": 1
+# }
+# ==> b.json <==
+# {
+#   "b": 2
+# }
+```
+
+A file that cannot be read or parsed does not end the run. Its error goes to
+standard error and the next file is still processed, so one bad input does not
+hide the state of the rest; the run then exits with the first code that was not
+`0`, which is `1` here:
+
+```sh
+moon run cmd/main -- -f a.json -f c.json -f b.json
+# ==> a.json <==
+# {
+#   "a": 1
+# }
+# ==> b.json <==
+# {
+#   "b": 2
+# }
+# error: c.json is not valid JSON
+# line 1, column 8: expected opening quote
+#   {"c":3,}
+#          ^
+```
+
+Trim the whitespace that crept into a document's strings. Only the ends of a
+string are touched, so the spaces inside one are part of it and stay:
+
+```sh
+printf '{"name":"  moon  ","note":"  a  b  "}' | moon run cmd/main -- --trim-strings -c
+# {"name":"moon","note":"a  b"}
+```
+
+Keys are names rather than values and are left exactly as they were written.
+Trimming them would rename them, and two keys differing only in their surrounding
+spaces would collapse into the repeated key the parser refuses — a document that
+parsed would become one that would not.
 
 Read from a pipe and indent with four spaces:
 
@@ -392,7 +482,7 @@ command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 123 tests
+moon test  --target native   # 131 tests
 moon fmt                     # format
 
 cd frontend

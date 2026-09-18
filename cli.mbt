@@ -22,11 +22,12 @@ pub fn version_line() -> String {
 ///|
 /// Options accepted by the command-line interface.
 pub(all) struct CliOptions {
-  mut file : String?
+  mut files : Array[String]
   mut indent : Int
   mut max_depth : Int?
   mut compact : Bool
   mut sort_keys : Bool
+  mut trim_strings : Bool
   mut paths : Bool
   mut keys_only : Bool
   mut stats : Bool
@@ -42,11 +43,12 @@ pub(all) struct CliOptions {
 /// The options used when no argument changes them.
 pub fn CliOptions::default() -> CliOptions {
   {
-    file: None,
+    files: [],
     indent: default_indent,
     max_depth: None,
     compact: false,
     sort_keys: false,
+    trim_strings: false,
     paths: false,
     keys_only: false,
     stats: false,
@@ -71,10 +73,11 @@ pub fn usage() -> String {
     "Input is read from standard input unless --file is given.",
     "",
     "Options:",
-    "  -f, --file <path>      Read JSON from <path> instead of standard input",
+    "  -f, --file <path>      Read one or more input files instead of standard input",
     "  -i, --indent <n>       Spaces per nesting level, 0 to 16 (default: 2)",
     "  -c, --compact          Print the document on one line, ignoring --indent",
     "  -S, --sort-keys        Order the keys of every object before printing",
+    "      --trim-strings     Trim the whitespace around every string in the document",
     "      --max-depth <n>    Refuse documents nested deeper than <n> (default: 128)",
     "      --paths            Print the path of every value instead of the document",
     "      --keys-only        Print only the paths that name an object member",
@@ -89,6 +92,10 @@ pub fn usage() -> String {
     "Short options may be combined, so -vh means -v -h. The value of --indent",
     "may be attached, as in -i4, -i=4, --indent=4 or --indent 4.",
     "",
+    "--file may be repeated. Each file is handled in turn, each under a",
+    "'==> path <==' heading once more than one is given, and the run exits with",
+    "the first non-zero code among them.",
+    "",
     "--paths and --keys-only each replace the printed document with a list of",
     "names, one per line. Asking for both prints the longer list, and -v wins",
     "over either of them, since it asks for no document output at all.",
@@ -96,7 +103,8 @@ pub fn usage() -> String {
     "--stats replaces the document with a two-line summary of it. It joins the",
     "same family: -v wins over it as it wins over the name lists, and --json-out",
     "takes precedence over it, so asking for both writes the file and prints the",
-    "document as usual.",
+    "document as usual. --json-out describes one document, so it is refused when",
+    "several files are named.",
     "",
     "Exit codes:",
     "  0  success",
@@ -228,8 +236,10 @@ fn apply_value_option(
   value : String,
 ) -> Result[Unit, String] {
   match name {
+    // The one value option that accumulates rather than replaces: naming a
+    // second file adds a second input rather than discarding the first.
     "file" => {
-      options.file = Some(value)
+      options.files.push(value)
       Ok(())
     }
     "json-out" => {
@@ -286,6 +296,7 @@ pub fn CliOptions::parse(args : Array[String]) -> Result[CliOptions, String] {
         "validate" => options.validate = true
         "compact" => options.compact = true
         "sort-keys" => options.sort_keys = true
+        "trim-strings" => options.trim_strings = true
         "paths" => options.paths = true
         "keys-only" => options.keys_only = true
         "stats" => options.stats = true

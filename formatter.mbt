@@ -233,3 +233,37 @@ pub fn sort_keys(json : @pjson.Json) -> @pjson.Json {
     leaf => leaf
   }
 }
+
+///|
+/// Return `json` with the leading and trailing whitespace removed from every
+/// string in it.
+///
+/// The whitespace removed is the set `String::trim` defines — space, tab,
+/// newline and carriage return — which is exactly the set JSON itself treats as
+/// whitespace between tokens. Only the ends of a string are touched, so spaces
+/// inside a value are part of it and stay: `"  a  b  "` becomes `"a  b"`.
+///
+/// Keys are left alone. A key is a name rather than a value, and trimming one
+/// would rename it: two keys differing only in the spaces around them would
+/// collapse into the repeated key the parser refuses, turning a document that
+/// parsed into one that would not.
+///
+/// The argument is not modified, for the same reason `sort_keys` is not: the
+/// containers are rebuilt, so a caller still holding the original tree keeps
+/// seeing the document as it was written.
+pub fn trim_strings(json : @pjson.Json) -> @pjson.Json {
+  match json {
+    Text(value~) => Text(value=value.trim().to_owned())
+    Object(members~) => {
+      let rebuilt = members.map(fn(entry) {
+        let (key, value) = entry
+        (key, trim_strings(value))
+      })
+      Object(members=rebuilt)
+    }
+    Array(items~) => Array(items=items.map(fn(item) { trim_strings(item) }))
+    // Everything else is a leaf: a number keeps the literal it was written
+    // with, and there is nothing in a null or a boolean to trim.
+    leaf => leaf
+  }
+}

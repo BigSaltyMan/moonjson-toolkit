@@ -19,11 +19,12 @@ fn cli_err(args : Array[String]) -> String {
 ///|
 test "no arguments yields the documented defaults" {
   let options = cli_ok([])
-  assert_eq(options.file, None)
+  assert_eq(options.files, [])
   assert_eq(options.indent, 2)
   assert_eq(options.max_depth, None)
   assert_eq(options.compact, false)
   assert_eq(options.sort_keys, false)
+  assert_eq(options.trim_strings, false)
   assert_eq(options.paths, false)
   assert_eq(options.keys_only, false)
   assert_eq(options.stats, false)
@@ -117,22 +118,35 @@ async test "the version constant matches moon.mod" {
 
 ///|
 test "--file takes a separate argument" {
-  assert_eq(cli_ok(["--file", "a.json"]).file, Some("a.json"))
+  assert_eq(cli_ok(["--file", "a.json"]).files, ["a.json"])
 }
 
 ///|
 test "-f takes a separate argument" {
-  assert_eq(cli_ok(["-f", "a.json"]).file, Some("a.json"))
+  assert_eq(cli_ok(["-f", "a.json"]).files, ["a.json"])
 }
 
 ///|
 test "a long option may carry its value after an equals sign" {
-  assert_eq(cli_ok(["--file=a.json"]).file, Some("a.json"))
+  assert_eq(cli_ok(["--file=a.json"]).files, ["a.json"])
 }
 
 ///|
 test "a short option may carry its value with no separator" {
-  assert_eq(cli_ok(["-fa.json"]).file, Some("a.json"))
+  assert_eq(cli_ok(["-fa.json"]).files, ["a.json"])
+}
+
+///|
+test "-f may be repeated to name several files" {
+  // The one value option that accumulates: a second `-f` adds an input rather
+  // than replacing the first, and the order given is the order kept.
+  assert_eq(cli_ok(["-f", "a.json", "-f", "b.json"]).files, ["a.json", "b.json"])
+  // Every spelling adds to the same list, mixed freely.
+  assert_eq(cli_ok(["--file=a.json", "-fb.json", "--file", "c.json"]).files, [
+    "a.json", "b.json", "c.json",
+  ])
+  // The same file twice is two documents, not one: the list is not a set.
+  assert_eq(cli_ok(["-f", "a.json", "-f", "a.json"]).files, ["a.json", "a.json"])
 }
 
 ///|
@@ -174,6 +188,14 @@ test "--sort-keys asks for ordered keys" {
   assert_true(cli_ok(["--sort-keys"]).sort_keys)
   // `-s` is not the same flag, and neither is it an alias for anything.
   assert_eq(cli_err(["-s"]), "unknown option: -s")
+}
+
+///|
+test "--trim-strings asks for the strings to be trimmed" {
+  assert_true(cli_ok(["--trim-strings"]).trim_strings)
+  // It stands on its own: trimming is not something another flag implies.
+  assert_false(cli_ok(["--trim-strings"]).sort_keys)
+  assert_eq(cli_err(["--trim"]), "unknown option: --trim")
 }
 
 ///|
@@ -252,7 +274,7 @@ test "a value-taking flag may end a combined group" {
 test "options may appear in any order" {
   let options = cli_ok(["-i", "4", "-f", "a.json", "--ai"])
   assert_eq(options.indent, 4)
-  assert_eq(options.file, Some("a.json"))
+  assert_eq(options.files, ["a.json"])
   assert_true(options.ai)
 }
 
@@ -318,9 +340,9 @@ test "the usage text documents every option" {
   let text = usage()
   for
     option in [
-      "-f", "--file", "-i", "--indent", "-c", "--compact", "-S", "--sort-keys", "--max-depth",
-      "--paths", "--keys-only", "-v", "--validate", "-h", "--help", "-V", "--version",
-      "--ai", "--json-out", "--stats", "--no-color",
+      "-f", "--file", "-i", "--indent", "-c", "--compact", "-S", "--sort-keys", "--trim-strings",
+      "--max-depth", "--paths", "--keys-only", "-v", "--validate", "-h", "--help",
+      "-V", "--version", "--ai", "--json-out", "--stats", "--no-color",
     ] {
     assert_true(text.contains(option))
   }

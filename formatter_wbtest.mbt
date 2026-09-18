@@ -132,3 +132,38 @@ test "sorting leaves the document it was given alone" {
     "{\n  \"a\": [\n    {\n      \"x\": 4,\n      \"y\": 3\n    }\n  ],\n  \"b\": {\n    \"a\": 2,\n    \"z\": 1\n  }\n}",
   )
 }
+
+///|
+test "trimming removes the whitespace around top-level strings" {
+  let json = parse_ok("{\"a\":\"  x  \",\"b\":\"   \",\"c\":1}")
+  // An all-whitespace string becomes empty rather than disappearing: it is
+  // still a member, and still one of the document's strings.
+  assert_eq(
+    format(trim_strings(json), 2),
+    "{\n  \"a\": \"x\",\n  \"b\": \"\",\n  \"c\": 1\n}",
+  )
+  // A bare string is a document too, and gets the same treatment.
+  assert_eq(format(trim_strings(parse_ok("\"  y \"")), 2), "\"y\"")
+  // Newlines and tabs count as whitespace, not just spaces, so a string can be
+  // joined across the lines it was written on.
+  assert_eq(format(trim_strings(parse_ok("\"\\n\\ta\\t\\n\"")), 2), "\"a\"")
+}
+
+///|
+test "trimming reaches strings nested in objects and arrays" {
+  let json = parse_ok(
+    "{\"a\":[\" p \",{\"b\":\"\\tq\\n\"}],\"c\":{\"d\":\" r \"}}",
+  )
+  let expected = "{\n  \"a\": [\n    \"p\",\n    {\n      \"b\": \"q\"\n    }\n  ],\n  \"c\": {\n    \"d\": \"r\"\n  }\n}"
+  assert_eq(format(trim_strings(json), 2), expected)
+  // Keys are names, not values, and are left exactly as they were written.
+  assert_eq(
+    format(trim_strings(parse_ok("{\"  k  \":\"  v  \"}")), 2),
+    "{\n  \"  k  \": \"v\"\n}",
+  )
+  // The document handed in is untouched, as with sorting.
+  assert_eq(
+    format(json, 2),
+    "{\n  \"a\": [\n    \" p \",\n    {\n      \"b\": \"\\tq\\n\"\n    }\n  ],\n  \"c\": {\n    \"d\": \" r \"\n  }\n}",
+  )
+}

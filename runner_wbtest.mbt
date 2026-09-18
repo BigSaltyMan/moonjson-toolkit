@@ -192,6 +192,85 @@ async test "an unwritable statistics path exits 1 and prints no document" {
 }
 
 ///|
+async test "--trim-strings reaches the printed document" {
+  let scratch = Scratch::named("trim")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_on(
+    scratch,
+    "{\"a\":\"  x  \"}",
+    ["--trim-strings"],
+    analyzer,
+  )
+  inspect(result.code, content="0")
+  inspect(result.out, content="{\n  \"a\": \"x\"\n}\n")
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "several files are handled in turn, each under its own heading" {
+  let first = Scratch::named("multi_first")
+  let second = Scratch::named("multi_second")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  @fs.write_file(first.input, "{\"a\":1}")
+  @fs.write_file(second.input, "{\"b\":2}")
+  let result = run(
+    ["-f", first.input, "-f", second.input],
+    analyze=analyzer.analyzer(),
+  )
+  discard(first.input)
+  discard(second.input)
+  inspect(result.code, content="0")
+  inspect(
+    result.out,
+    content="==> " +
+      first.input +
+      " <==\n{\n  \"a\": 1\n}\n==> " +
+      second.input +
+      " <==\n{\n  \"b\": 2\n}\n",
+  )
+  inspect(result.err, content="")
+}
+
+///|
+async test "a file that fails does not stop the ones after it" {
+  let good = Scratch::named("multi_good")
+  let bad = Scratch::named("multi_bad")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  @fs.write_file(good.input, "{\"a\":1}")
+  @fs.write_file(bad.input, "{\"a\":1,}")
+  // The bad file is named first, so the good one is only reached at all if a
+  // failure leaves the run going.
+  let result = run(
+    ["-f", bad.input, "-f", good.input],
+    analyze=analyzer.analyzer(),
+  )
+  discard(good.input)
+  discard(bad.input)
+  inspect(result.code, content="1")
+  assert_true(result.out.contains("==> " + good.input + " <=="))
+  // The failure is reported, and reports nothing on standard output: no heading
+  // for a document that was never produced.
+  assert_true(result.err.contains(bad.input + " is not valid JSON"))
+  assert_false(result.out.contains(bad.input + " <=="))
+}
+
+///|
+async test "--json-out is refused when several files are named" {
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  // Neither name exists, which is the point: the command line is refused
+  // before anything is opened.
+  let result = run(
+    ["-f", "no_such_a.json", "-f", "no_such_b.json", "--json-out", "s.json"],
+    analyze=analyzer.analyzer(),
+  )
+  inspect(result.code, content="2")
+  inspect(result.out, content="")
+  assert_true(result.err.contains("--json-out describes a single document"))
+  assert_false(result.err.contains("no such file"))
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
 async test "--help prints the usage and exits 0 without reading anything" {
   let analyzer = StubAnalyzer::new(Ok("unused"))
   let result = run(["--help"], analyze=analyzer.analyzer())
