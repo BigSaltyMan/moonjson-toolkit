@@ -60,6 +60,81 @@ async fn read_input(file : String?) -> Result[(String, String), String] {
 }
 
 ///|
+/// Reject the command lines that do not describe a run, before any input is
+/// read.
+///
+/// Each of them pairs a request that only makes sense for one document with a
+/// command line that names more than one, and the answer is to refuse rather
+/// than to answer for the first of them and quietly drop the rest.
+fn validate_options(options : CliOptions) -> Result[Unit, String] {
+  if options.files.length() > 1 && options.json_out != None {
+    return Err(
+      "--json-out describes a single document, but " +
+      options.files.length().to_string() +
+      " files were given",
+    )
+  }
+  if options.jsonl {
+    // Each of these asks about a document as a whole: a statistics file to
+    // write, a review to ask for, or a summary of the structure to print. A
+    // JSON Lines input is many documents, and none of those answers survives
+    // being repeated once per record with nothing to say which record it
+    // belongs to.
+    let refused = if options.json_out != None {
+      Some("--json-out")
+    } else if options.ai {
+      Some("--ai")
+    } else if options.stats {
+      Some("--stats")
+    } else if options.paths {
+      Some("--paths")
+    } else if options.keys_only {
+      Some("--keys-only")
+    } else {
+      None
+    }
+    match refused {
+      Some(option) =>
+        return Err(
+          option +
+          " describes a single document, and --jsonl reads many: the two cannot be combined",
+        )
+      None => ()
+    }
+  }
+  Ok(())
+}
+
+///|
+/// Apply the changes that alter the document rather than its layout.
+///
+/// Trimming rewrites the strings and sorting rebuilds the objects, so both
+/// happen before anything is printed and the review sees them too. The order
+/// between the two does not matter: neither looks at what the other changes,
+/// one moving keys and the other rewriting values.
+fn prepare_document(options : CliOptions, json : @pjson.Json) -> @pjson.Json {
+  let trimmed = if options.trim_strings { trim_strings(json) } else { json }
+  if options.sort_keys {
+    sort_keys(trimmed)
+  } else {
+    trimmed
+  }
+}
+
+///|
+/// Render a document in the layout the options ask for.
+///
+/// `--compact` wants a document with no line breaks in it at all, which is what
+/// `--indent` exists to place, so the width is simply not consulted.
+fn format_document(options : CliOptions, json : @pjson.Json) -> String {
+  if options.compact {
+    format_compact(json)
+  } else {
+    format(json, options.indent)
+  }
+}
+
+///|
 /// Run the tool over `args` and collect everything it produced.
 ///
 /// Several `--file` arguments mean several documents, and each is handled in
@@ -97,17 +172,18 @@ pub async fn run(
   if options.version {
     return { out: version_line() + "\n", err: "", code: exit_success, }
   }
-  // A statistics file describes one document, and this command line names more
-  // than one. Refused rather than written for the first of them, which would
-  // quietly drop the rest.
-  if options.files.length() > 1 && options.json_out != None {
-    return failure(
-      error_prefix() +
-      "--json-out describes a single document, but " +
-      options.files.length().to_string() +
-      " files were given\nrun 'moonjson-toolkit --help' to see the available options",
-      exit_usage_error,
-    )
+  // Checked before any input is read, so a command line that names several
+  // documents and then asks a question about one of them costs nothing to
+  // answer.
+  match validate_options(options) {
+    Ok(_) => ()
+    Err(message) =>
+      return failure(
+        error_prefix() +
+        message +
+        "\nrun 'moonjson-toolkit --help' to see the available options",
+        exit_usage_error,
+      )
   }
   let inputs : Array[String?] = if options.files.length() == 0 {
     // No file named is not no input: standard input is the document.
@@ -132,7 +208,11 @@ pub async fn run(
         continue
       }
     }
-    let result = run_document(options, source, text, analyze)
+    let result = if options.jsonl {
+      run_jsonl(options, source, text)
+    } else {
+      run_document(options, source, text, analyze)
+    }
     if many && result.out != "" {
       out.write_string("==> " + source + " <==\n")
     }
@@ -167,19 +247,22 @@ async fn run_document(
         exit_input_error,
       )
   }
-  // Trimming and sorting are both changes to the document rather than to its
-  // layout, so they happen before printing and the review sees them too. The
-  // order between the two does not matter: neither looks at what the other
-  // changes, one moving keys and the other rewriting values.
-  let trimmed = if options.trim_strings { trim_strings(json) } else { json }
-  let prepared = if options.sort_keys { sort_keys(trimmed) } else { trimmed }
-  // `--compact` asks for a document with no line breaks in it at all, which is
-  // what `--indent` exists to place, so the width is simply not consulted.
-  let formatted = if options.compact {
-    format_compact(prepared)
-  } else {
-    format(prepared, options.indent)
-  }
+  render_document(options, source, json, analyze)
+}
+
+///|
+/// Everything one parsed document produces, from the options to the text.
+///
+/// Split from `run_document` so that a parse failure is the only thing that has
+/// to happen before this point: from here on the document is known to be good.
+async fn render_document(
+  options : CliOptions,
+  source : String,
+  json : @pjson.Json,
+  analyze : async (String) -> Result[String, String],
+) -> RunResult {
+  let prepared = prepare_document(options, json)
+  let formatted = format_document(options, prepared)
   // The review is asked for before anything is printed, so that a failure here
   // leaves standard output empty rather than trailing a document that the
   // caller may be piping somewhere.
@@ -249,4 +332,50 @@ async fn run_document(
     None => ()
   }
   { out: out.to_string(), err, code: exit_success, }
+}
+
+///|
+/// Handle one JSON Lines input: every record is rendered onto a line of its
+/// own, and every record that is not valid JSON is reported on standard error.
+///
+/// A bad record does not stop the run. Each line of the input stands alone by
+/// definition, so the ones that can be read are printed whether or not the
+/// others could be, and a mistake on the fourth line does not cost the reader
+/// the fifth. The code is the first non-zero one any record produced, so a run
+/// with a single bad record ends 1 however many good ones followed it.
+///
+/// `-v` asks for no document output at all, so a run where every record parsed
+/// is answered with the one verdict line it prints for a single document, and a
+/// run where one did not is answered by that record's report alone.
+fn run_jsonl(options : CliOptions, source : String, text : String) -> RunResult {
+  let out = StringBuilder()
+  let err = StringBuilder()
+  let mut code = exit_success
+  for record in parse_jsonl_with_depth(text, options.max_depth) {
+    match record {
+      Ok(json) =>
+        if !options.validate {
+          out.write_string(
+            format_document(options, prepare_document(options, json)),
+          )
+          out.write_string("\n")
+        }
+      Err(diagnostic) => {
+        err.write_string(
+          error_prefix() +
+          source +
+          " is not valid JSON\n" +
+          diagnostic.render() +
+          "\n",
+        )
+        if code == exit_success {
+          code = exit_input_error
+        }
+      }
+    }
+  }
+  if options.validate && code == exit_success {
+    out.write_string(source + ": valid JSON\n")
+  }
+  { out: out.to_string(), err: err.to_string(), code, }
 }

@@ -17,6 +17,9 @@ charts the statistics the tool writes.
 - **Several documents at once** — `--file` may be repeated. Each file is
   handled in turn, under a `==> path <==` heading once there is more than one
   of them, and a file that fails does not stop the ones after it.
+- **JSON Lines** — `--jsonl` reads an input whose lines are documents, one per
+  line, and formats each of them onto a line of its own. A line that is not
+  valid JSON is reported by its line number while the others are still printed.
 - **Validation with diagnostics** — a malformed document reports the line, the
   column and the reason, and points at the offending character:
 
@@ -87,6 +90,7 @@ Options:
   -c, --compact          Print the document on one line, ignoring --indent
   -S, --sort-keys        Order the keys of every object before printing
       --trim-strings     Trim the whitespace around every string in the document
+      --jsonl            Read the input as JSON Lines, one document per line
       --max-depth <n>    Refuse documents nested deeper than <n> (default: 128)
       --paths            Print the path of every value instead of the document
       --keys-only        Print only the paths that name an object member
@@ -114,6 +118,13 @@ same family: -v wins over it as it wins over the name lists, and --json-out
 takes precedence over it, so asking for both writes the file and prints the
 document as usual. --json-out describes one document, so it is refused when
 several files are named.
+
+--jsonl reads the input as JSON Lines: one document per line, with blank
+lines skipped. Each record is handled on its own, so the other options apply
+to every one of them in turn. A record that is not valid JSON is reported
+with its line in the file and the rest are still printed; the run exits 1 if
+any record failed. It describes many documents at once, so it is refused
+with --json-out and with --ai.
 
 Exit codes:
   0  success
@@ -146,6 +157,16 @@ as usual.
 describes a single document, so it is refused when several files are named
 rather than written for whichever one came first.
 
+`--jsonl` declares what the input is, not what to do with it: each line is read
+as a document of its own and the other options apply to every one of them in
+turn, so `--compact`, `--sort-keys` or `--trim-strings` reach every record the
+same way they reach a single document. Blank lines are skipped. `--json-out`,
+`--ai`, `--stats`, `--paths` and `--keys-only` each answer a question about one
+document, and a JSON Lines input is many, so they are refused rather than
+repeated once per record with nothing to say which record an answer belongs to.
+`-v` is not among them: it asks whether the input is valid, which is as good a
+question about a file of many documents as about a file of one.
+
 `--sort-keys` and `--trim-strings` change the document rather than its layout, so
 the printed document, the paths and the AI review all see the result, while
 `--json-out` keeps recording the document as it was written — none of the counts
@@ -165,7 +186,9 @@ All the work that can fail for one document happens before the first byte of it
 is printed, so a failure never leaves a partly written document for whatever is
 reading the output. With several files this holds per file: the ones that worked
 are printed, the ones that did not are on standard error, and the exit code is
-the first one that was not `0`.
+the first one that was not `0`. Under `--jsonl` it holds per record, since a
+record is the unit that either parses or does not; a run that had any bad record
+at all exits `1`, however many good ones followed it.
 
 ### Examples
 
@@ -247,6 +270,36 @@ moon run cmd/main -- -f a.json -f c.json -f b.json
 # error: c.json is not valid JSON
 # line 1, column 8: expected opening quote
 #   {"c":3,}
+#          ^
+```
+
+Format a file whose lines are documents, which is the shape a log or an export
+usually arrives in. Each record is printed on a line of its own, and the blank
+line is not a record:
+
+```sh
+printf '{"a":1}\n\n{"b":[2]}\n' | moon run cmd/main -- --jsonl
+# {
+#   "a": 1
+# }
+# {
+#   "b": [
+#     2
+#   ]
+# }
+```
+
+One bad line does not cost the reader the others. It is reported on standard
+error, with its line number in the file, while every record that could be read
+is still printed; the run then exits `1`:
+
+```sh
+printf '{"a":1}\n{"b":1,}\n{"c":3}\n' | moon run cmd/main -- --jsonl -c
+# {"a":1}
+# {"c":3}
+# error: <stdin> is not valid JSON
+# line 2, column 8: expected opening quote
+#   {"b":1,}
 #          ^
 ```
 
@@ -459,6 +512,7 @@ moonjson-toolkit/
 ├── moon.mod              module metadata and dependencies
 ├── moon.pkg              the library package and its imports
 ├── formatter.mbt         pretty-printing
+├── jsonl.mbt             splitting a JSON Lines input into records
 ├── diagnostics.mbt       offsets to line/column, rendered error snippets
 ├── color.mbt             the colour decision and the escape wrapping
 ├── cli.mbt               argument parsing and usage text
@@ -482,7 +536,7 @@ command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 131 tests
+moon test  --target native   # 141 tests
 moon fmt                     # format
 
 cd frontend

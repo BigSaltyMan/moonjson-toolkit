@@ -271,6 +271,79 @@ async test "--json-out is refused when several files are named" {
 }
 
 ///|
+async test "--jsonl prints one record per line" {
+  let scratch = Scratch::named("jsonl")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_on(
+    scratch,
+    "{\"a\":1}\n\n{\"b\":[2]}\n",
+    ["--jsonl"],
+    analyzer,
+  )
+  inspect(result.code, content="0")
+  // Each record is formatted on its own, and the blank line between them is not
+  // a record: it prints nothing.
+  inspect(
+    result.out,
+    content="{\n  \"a\": 1\n}\n{\n  \"b\": [\n    2\n  ]\n}\n",
+  )
+  inspect(result.err, content="")
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "--jsonl keeps going past a bad record and exits 1" {
+  let scratch = Scratch::named("jsonl_bad")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_on(
+    scratch,
+    "{\"a\":1}\n{\"b\":}\n{\"c\":3}\n",
+    ["--jsonl", "--compact"],
+    analyzer,
+  )
+  inspect(result.code, content="1")
+  // The records on either side are printed: one line of the file going wrong
+  // does not cost the reader the others.
+  inspect(result.out, content="{\"a\":1}\n{\"c\":3}\n")
+  assert_true(result.err.contains(scratch.input + " is not valid JSON"))
+  assert_true(result.err.contains("line 2"))
+  assert_true(result.err.contains("{\"b\":}"))
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "--jsonl is refused with the options that describe one document" {
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  // The file does not exist, which is the point: the command line is refused
+  // before anything is opened.
+  let result = run(
+    ["-f", "no_such.jsonl", "--jsonl", "--ai"],
+    analyze=analyzer.analyzer(),
+  )
+  inspect(result.code, content="2")
+  inspect(result.out, content="")
+  assert_true(result.err.contains("--ai describes a single document"))
+  assert_true(result.err.contains("--jsonl reads many"))
+  assert_false(result.err.contains("no such file"))
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "--jsonl -v answers with the verdict instead of the records" {
+  let scratch = Scratch::named("jsonl_validate")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_on(
+    scratch,
+    "{\"a\":1}\n{\"b\":2}\n",
+    ["--jsonl", "-v"],
+    analyzer,
+  )
+  inspect(result.code, content="0")
+  inspect(result.out, content=scratch.input + ": valid JSON\n")
+  inspect(result.err, content="")
+}
+
+///|
 async test "--help prints the usage and exits 0 without reading anything" {
   let analyzer = StubAnalyzer::new(Ok("unused"))
   let result = run(["--help"], analyze=analyzer.analyzer())

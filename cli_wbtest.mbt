@@ -25,6 +25,7 @@ test "no arguments yields the documented defaults" {
   assert_eq(options.compact, false)
   assert_eq(options.sort_keys, false)
   assert_eq(options.trim_strings, false)
+  assert_eq(options.jsonl, false)
   assert_eq(options.paths, false)
   assert_eq(options.keys_only, false)
   assert_eq(options.stats, false)
@@ -199,6 +200,15 @@ test "--trim-strings asks for the strings to be trimmed" {
 }
 
 ///|
+test "--jsonl asks for the input to be read as JSON Lines" {
+  assert_true(cli_ok(["--jsonl"]).jsonl)
+  // It says how the input is written, not what to do with the document, so it
+  // turns nothing else on with it.
+  assert_false(cli_ok(["--jsonl"]).compact)
+  assert_eq(cli_err(["--json-lines"]), "unknown option: --json-lines")
+}
+
+///|
 test "--paths asks for the path list" {
   assert_true(cli_ok(["--paths"]).paths)
   // It stands on its own: nothing else is turned on with it.
@@ -341,8 +351,8 @@ test "the usage text documents every option" {
   for
     option in [
       "-f", "--file", "-i", "--indent", "-c", "--compact", "-S", "--sort-keys", "--trim-strings",
-      "--max-depth", "--paths", "--keys-only", "-v", "--validate", "-h", "--help",
-      "-V", "--version", "--ai", "--json-out", "--stats", "--no-color",
+      "--jsonl", "--max-depth", "--paths", "--keys-only", "-v", "--validate", "-h",
+      "--help", "-V", "--version", "--ai", "--json-out", "--stats", "--no-color",
     ] {
     assert_true(text.contains(option))
   }

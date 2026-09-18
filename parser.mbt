@@ -27,13 +27,24 @@ pub fn parse_with_diagnostic(
   text : String,
   max_depth : Int?,
 ) -> Result[@pjson.Json, JsonDiagnostic] {
-  let parsed = match max_depth {
-    None => @pjson.parse(text)
-    Some(limit) => @pjson.parse_with_limits(text, depth_limits(limit))
-  }
-  match parsed {
+  match parse_raw(text, max_depth) {
     Ok(json) => Ok(json)
     Err(error) => Err(JsonDiagnostic::from_error(text, error))
+  }
+}
+
+///|
+/// The parser call itself, with no diagnostic built around it.
+///
+/// Split out because JSON Lines parses a record at a time and needs the raw
+/// error to place it in the file as a whole rather than in the record.
+fn parse_raw(
+  text : String,
+  max_depth : Int?,
+) -> Result[@pjson.Json, @pjson.JsonError] {
+  match max_depth {
+    None => @pjson.parse(text)
+    Some(limit) => @pjson.parse_with_limits(text, depth_limits(limit))
   }
 }
 

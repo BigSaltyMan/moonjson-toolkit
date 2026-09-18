@@ -141,13 +141,30 @@ pub fn JsonDiagnostic::from_error(
   input : String,
   error : @pjson.JsonError,
 ) -> JsonDiagnostic {
-  let offset = error.offset()
-  let (line, column) = offset_to_line_col(input, offset)
+  JsonDiagnostic::for_record(input, 0, error)
+}
+
+///|
+/// Build a diagnostic for an error in the record of `whole` that starts `base`
+/// characters in.
+///
+/// The error's offsets are relative to the record rather than to `whole`; both
+/// the position and the snippet are reported against `whole`, so a bad record
+/// three lines down a JSON Lines file is reported at its real line and quotes
+/// its own line of the file. `from_error` is this with nothing before the
+/// record, which is the ordinary single-document case.
+pub fn JsonDiagnostic::for_record(
+  whole : String,
+  base : Int,
+  error : @pjson.JsonError,
+) -> JsonDiagnostic {
+  let offset = base + error.offset()
+  let (line, column) = offset_to_line_col(whole, offset)
   let message = match error {
     // The parser remembers where the key was first defined, so the report can
     // name it. The caret still marks the repeated one.
     DuplicateKey(first_offset~, ..) =>
-      describe_json_error(error) + first_defined_at(input, first_offset)
+      describe_json_error(error) + first_defined_at(whole, base + first_offset)
     _ => describe_json_error(error)
   }
   JsonDiagnostic::{
@@ -155,7 +172,7 @@ pub fn JsonDiagnostic::from_error(
     line,
     column,
     message,
-    snippet: line_text(input, line),
+    snippet: line_text(whole, line),
   }
 }
 

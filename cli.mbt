@@ -28,6 +28,7 @@ pub(all) struct CliOptions {
   mut compact : Bool
   mut sort_keys : Bool
   mut trim_strings : Bool
+  mut jsonl : Bool
   mut paths : Bool
   mut keys_only : Bool
   mut stats : Bool
@@ -49,6 +50,7 @@ pub fn CliOptions::default() -> CliOptions {
     compact: false,
     sort_keys: false,
     trim_strings: false,
+    jsonl: false,
     paths: false,
     keys_only: false,
     stats: false,
@@ -78,6 +80,7 @@ pub fn usage() -> String {
     "  -c, --compact          Print the document on one line, ignoring --indent",
     "  -S, --sort-keys        Order the keys of every object before printing",
     "      --trim-strings     Trim the whitespace around every string in the document",
+    "      --jsonl            Read the input as JSON Lines, one document per line",
     "      --max-depth <n>    Refuse documents nested deeper than <n> (default: 128)",
     "      --paths            Print the path of every value instead of the document",
     "      --keys-only        Print only the paths that name an object member",
@@ -105,6 +108,13 @@ pub fn usage() -> String {
     "takes precedence over it, so asking for both writes the file and prints the",
     "document as usual. --json-out describes one document, so it is refused when",
     "several files are named.",
+    "",
+    "--jsonl reads the input as JSON Lines: one document per line, with blank",
+    "lines skipped. Each record is handled on its own, so the other options apply",
+    "to every one of them in turn. A record that is not valid JSON is reported",
+    "with its line in the file and the rest are still printed; the run exits 1 if",
+    "any record failed. It describes many documents at once, so it is refused",
+    "with --json-out and with --ai.",
     "",
     "Exit codes:",
     "  0  success",
@@ -297,6 +307,7 @@ pub fn CliOptions::parse(args : Array[String]) -> Result[CliOptions, String] {
         "compact" => options.compact = true
         "sort-keys" => options.sort_keys = true
         "trim-strings" => options.trim_strings = true
+        "jsonl" => options.jsonl = true
         "paths" => options.paths = true
         "keys-only" => options.keys_only = true
         "stats" => options.stats = true
