@@ -116,13 +116,21 @@ fn validate_options(options : CliOptions) -> Result[Unit, String] {
 /// Apply the changes that alter the document rather than its layout.
 ///
 /// These happen before anything is printed, so the review, the statistics file
-/// and the path list all see the result. The order is: reshape the keys first,
-/// then tidy the values and the order they are printed in.
+/// and the path list all see the result. The order is: drop what is not wanted,
+/// reshape the keys, then tidy the values and the order they are printed in.
 ///
 /// Every one of them rebuilds the containers rather than editing them, so the
 /// tree handed in is left as it was found. The order of the last two does not
 /// matter: neither looks at what the other changes, one moving keys and the
 /// other rewriting values.
+///
+/// Removing comes first because what is gone cannot then be in the way: a
+/// document whose null member sits beside a dotted key it would collide with
+/// flattens once the member has been dropped, and one that is entirely empty
+/// has nothing left to reshape. The two removals are ordered between
+/// themselves for the same reason — `{"a":{"b":null}}` is `{}` once the null is
+/// gone and the member holding it is left empty, but `{"a":{}}` if the emptying
+/// is asked for first.
 ///
 /// The reshaping is the one step that can fail, and only for a document that
 /// has no flattened or unflattened form to be had.
@@ -130,6 +138,8 @@ fn prepare_document(
   options : CliOptions,
   json : @pjson.Json,
 ) -> Result[@pjson.Json, String] {
+  let pruned = if options.prune_null { prune_null(json) } else { json }
+  let json = if options.prune_empty { prune_empty(pruned) } else { pruned }
   let shaped = if options.flatten {
     flatten(json)
   } else if options.unflatten {
@@ -341,7 +351,7 @@ async fn render_document(
   let mut err = ""
   match options.json_out {
     Some(path) =>
-      match write_stats_file(path, json) {
+      match write_stats_file(path, prepared) {
         Ok(_) => err = "statistics written to " + path + "\n"
         Err(message) =>
           return failure(
@@ -375,11 +385,14 @@ async fn render_document(
       out.write_string("\n")
     }
   } else if show_stats {
-    // Computed from `json` rather than from `prepared`: sorting and trimming
-    // change how the document is printed and none of these counts, and taking
-    // them from the same value `--json-out` is given keeps the two reports
-    // saying the same thing when both are asked for.
-    out.write_string(JsonStats::of(json).to_text())
+    // Counted over the prepared document, which is the one the run has been
+    // asked to produce and the one the reader is looking at. Sorting and
+    // trimming cannot tell the difference — neither moves a value or changes
+    // its type — while pruning and flattening can, and a summary that kept
+    // counting members the document no longer has would be describing
+    // something the reader cannot see. It is also the value `--json-out` is
+    // given, so the two reports say the same thing when both are asked for.
+    out.write_string(JsonStats::of(prepared).to_text())
     out.write_string("\n")
   } else {
     out.write_string(formatted)

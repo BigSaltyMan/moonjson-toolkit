@@ -27,6 +27,8 @@ test "no arguments yields the documented defaults" {
   assert_eq(options.trim_strings, false)
   assert_eq(options.flatten, false)
   assert_eq(options.unflatten, false)
+  assert_eq(options.prune_null, false)
+  assert_eq(options.prune_empty, false)
   assert_eq(options.jsonl, false)
   assert_eq(options.paths, false)
   assert_eq(options.keys_only, false)
@@ -215,6 +217,20 @@ test "--flatten and --unflatten are read, each on its own" {
 }
 
 ///|
+test "--prune-null and --prune-empty are read, together or apart" {
+  assert_true(cli_ok(["--prune-null"]).prune_null)
+  assert_true(cli_ok(["--prune-empty"]).prune_empty)
+  // Unlike --flatten and --unflatten these do different things and compose, so
+  // there is nothing to refuse about asking for both.
+  let both = cli_ok(["--prune-null", "--prune-empty"])
+  assert_true(both.prune_null)
+  assert_true(both.prune_empty)
+  // Neither is a shortening of the other, and the prefix alone is not a flag.
+  assert_eq(cli_err(["--prune"]), "unknown option: --prune")
+  assert_eq(cli_err(["--prune-nulls"]), "unknown option: --prune-nulls")
+}
+
+///|
 test "--jsonl asks for the input to be read as JSON Lines" {
   assert_true(cli_ok(["--jsonl"]).jsonl)
   // It says how the input is written, not what to do with the document, so it
@@ -366,9 +382,9 @@ test "the usage text documents every option" {
   for
     option in [
       "-f", "--file", "-i", "--indent", "-c", "--compact", "-S", "--sort-keys", "--trim-strings",
-      "--flatten", "--unflatten", "--jsonl", "--max-depth", "--paths", "--keys-only",
-      "-v", "--validate", "-h", "--help", "-V", "--version", "--ai", "--json-out",
-      "--stats", "--no-color",
+      "--flatten", "--unflatten", "--prune-null", "--prune-empty", "--jsonl", "--max-depth",
+      "--paths", "--keys-only", "-v", "--validate", "-h", "--help", "-V", "--version",
+      "--ai", "--json-out", "--stats", "--no-color",
     ] {
     assert_true(text.contains(option))
   }

@@ -260,6 +260,64 @@ async test "a document that cannot be reshaped exits 1 and prints nothing" {
 }
 
 ///|
+async test "--prune-null and --prune-empty reach the printed document" {
+  let scratch = Scratch::named("prune")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  // The nulls go first, then the containers they left empty, so one pass of the
+  // pair clears a document down to what it actually says.
+  let result = run_on(
+    scratch,
+    "{\"a\":null,\"b\":{},\"c\":[1,null],\"d\":{\"e\":null}}",
+    ["--prune-null", "--prune-empty", "--compact"],
+    analyzer,
+  )
+  inspect(result.code, content="0")
+  inspect(result.out, content="{\"c\":[1,null]}\n")
+  inspect(result.err, content="")
+  // `--prune-null` on its own keeps every item of an array, null ones included.
+  let nulls_only = run_on(
+    scratch,
+    "{\"a\":null,\"b\":[1,null]}",
+    ["--prune-null", "--compact"],
+    analyzer,
+  )
+  inspect(nulls_only.out, content="{\"b\":[1,null]}\n")
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "--stats counts the document the run produced" {
+  let scratch = Scratch::named("prune_stats")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let text = "{\"a\":null,\"b\":{\"c\":null,\"d\":1}}"
+  let whole = run_on(scratch, text, ["--stats"], analyzer)
+  inspect(
+    whole.out,
+    content="keys: 4  nodes: 5  depth: 3\ntype counts: null=2 number=1 object=2\n",
+  )
+  // The members the pruning takes away are gone from the counts as well as from
+  // the document: the summary describes what the run produced, which is what
+  // the reader has in front of them.
+  let pruned = run_on(scratch, text, ["--prune-null", "--stats"], analyzer)
+  inspect(
+    pruned.out,
+    content="keys: 2  nodes: 3  depth: 3\ntype counts: number=1 object=2\n",
+  )
+  // The file `--json-out` writes reports the same numbers as the summary.
+  let reported = run_on(
+    scratch,
+    text,
+    ["--prune-null", "--json-out", scratch.stats],
+    analyzer,
+  )
+  inspect(reported.code, content="0")
+  let written = read_back(scratch.stats)
+  assert_true(written.contains("\"total_keys\": 2"))
+  assert_true(written.contains("\"total_nodes\": 3"))
+  discard(scratch.stats)
+}
+
+///|
 async test "several files are handled in turn, each under its own heading" {
   let first = Scratch::named("multi_first")
   let second = Scratch::named("multi_second")

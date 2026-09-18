@@ -31,6 +31,8 @@ pub(all) struct CliOptions {
   mut jsonl : Bool
   mut flatten : Bool
   mut unflatten : Bool
+  mut prune_null : Bool
+  mut prune_empty : Bool
   mut paths : Bool
   mut keys_only : Bool
   mut stats : Bool
@@ -55,6 +57,8 @@ pub fn CliOptions::default() -> CliOptions {
     jsonl: false,
     flatten: false,
     unflatten: false,
+    prune_null: false,
+    prune_empty: false,
     paths: false,
     keys_only: false,
     stats: false,
@@ -86,6 +90,8 @@ pub fn usage() -> String {
     "      --trim-strings     Trim the whitespace around every string in the document",
     "      --flatten          Collapse every nested object into dotted keys",
     "      --unflatten        Expand every dotted key back into nested objects",
+    "      --prune-null       Remove every object member whose value is null",
+    "      --prune-empty      Remove every empty object and every empty array",
     "      --jsonl            Read the input as JSON Lines, one document per line",
     "      --max-depth <n>    Refuse documents nested deeper than <n> (default: 128)",
     "      --paths            Print the path of every value instead of the document",
@@ -120,6 +126,14 @@ pub fn usage() -> String {
     "may be given. A document that names one path two ways, with a key \"a.b\"",
     "beside a key \"a\", has no flattened or unflattened form and is refused with",
     "both keys named.",
+    "",
+    "--prune-null drops every object member whose value is null, and --prune-empty",
+    "drops every empty object and every empty array, then the containers left empty",
+    "by that in turn. The two are independent and may be given together, in which",
+    "case the nulls go first, so a member left holding {} is dropped as well.",
+    "--prune-null keeps every item of an array: a null in an object is a member with",
+    "no value, while a null in an array is a value in a place, and dropping it would",
+    "renumber the items after it.",
     "",
     "--jsonl reads the input as JSON Lines: one document per line, with blank",
     "lines skipped. Each record is handled on its own, so the other options apply",
@@ -322,6 +336,8 @@ pub fn CliOptions::parse(args : Array[String]) -> Result[CliOptions, String] {
         "jsonl" => options.jsonl = true
         "flatten" => options.flatten = true
         "unflatten" => options.unflatten = true
+        "prune-null" => options.prune_null = true
+        "prune-empty" => options.prune_empty = true
         "paths" => options.paths = true
         "keys-only" => options.keys_only = true
         "stats" => options.stats = true

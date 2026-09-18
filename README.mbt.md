@@ -24,6 +24,10 @@ charts the statistics the tool writes.
   turning `{"a":{"b":1}}` into `{"a.b":1}`, and `--unflatten` expands them
   again. Both reach objects inside arrays, and both refuse a document that
   names one path two ways, naming the two keys that disagree.
+- **Pruning** — `--prune-null` removes every object member whose value is
+  `null`, and `--prune-empty` removes every empty object and every empty array,
+  then the containers left empty by that. The two may be given together, nulls
+  first, so `{"a":{"b":null}}` becomes `{}` in one pass.
 - **Validation with diagnostics** — a malformed document reports the line, the
   column and the reason, and points at the offending character:
 
@@ -96,6 +100,8 @@ Options:
       --trim-strings     Trim the whitespace around every string in the document
       --flatten          Collapse every nested object into dotted keys
       --unflatten        Expand every dotted key back into nested objects
+      --prune-null       Remove every object member whose value is null
+      --prune-empty      Remove every empty object and every empty array
       --jsonl            Read the input as JSON Lines, one document per line
       --max-depth <n>    Refuse documents nested deeper than <n> (default: 128)
       --paths            Print the path of every value instead of the document
@@ -130,6 +136,14 @@ expands them again. The two are inverses of each other, so only one of them
 may be given. A document that names one path two ways, with a key "a.b"
 beside a key "a", has no flattened or unflattened form and is refused with
 both keys named.
+
+--prune-null drops every object member whose value is null, and --prune-empty
+drops every empty object and every empty array, then the containers left empty
+by that in turn. The two are independent and may be given together, in which
+case the nulls go first, so a member left holding {} is dropped as well.
+--prune-null keeps every item of an array: a null in an object is a member with
+no value, while a null in an array is a value in a place, and dropping it would
+renumber the items after it.
 
 --jsonl reads the input as JSON Lines: one document per line, with blank
 lines skipped. Each record is handled on its own, so the other options apply
@@ -205,10 +219,31 @@ twice, whatever the value at the shorter key holds. A literal dotted key beside 
 key holding anything but an object is no trouble at all, since nothing is lifted
 and nothing collides: `{"a.b":1,"a":2}` flattens to itself.
 
-`--flatten`, `--unflatten`, `--sort-keys` and `--trim-strings` change the
-document rather than its layout, so the printed document, the paths and the AI
-review all see the result, while `--json-out` keeps recording the document as it
-was written — none of the counts it reports can tell the difference.
+`--prune-null` and `--prune-empty` remove what a document does not need, and are
+independent of each other and of everything else, so they may be given together
+or one at a time. The first drops every object member whose value is `null`: a
+member holding `null` says no more than the member being absent. The second drops
+every empty object and every empty array, and the containers that removal leaves
+empty go as well, however far up that reaches. The document itself is not a
+member of anything, so a run that prunes everything away still prints `{}` rather
+than nothing at all.
+
+`--prune-null` leaves arrays alone. An array is a sequence and its positions are
+part of what it says, so a `null` in the middle of one is a value in a place, and
+removing it would renumber the items after it — which is why `--prune-empty`,
+whose whole business is removing things, does reach into arrays to drop the
+empty containers in them. The two are applied nulls first when both are given:
+`{"a":{"b":null}}` is `{}` once the member holding the null is left empty and
+`--prune-empty` takes it, where the other order would stop at `{"a":{}}`.
+
+`--flatten`, `--unflatten`, `--prune-null`, `--prune-empty`, `--sort-keys` and
+`--trim-strings` change the document rather than its layout, so everything else
+in the run sees the result: the printed document, the path list, the AI review,
+and the counts behind `--stats` and `--json-out`, which describe what the run
+produced rather than what came in. Sorting and trimming cannot tell the
+difference — neither moves a value or changes its type — but pruning and
+reshaping can, and a summary still counting members the document no longer has
+would be describing something the reader cannot see.
 
 ### Exit codes
 
@@ -381,6 +416,19 @@ printf '{"a":{"b":1},"a.b":2}' | moon run cmd/main -- --flatten -c
 A literal dotted key beside a key holding something else is not that case:
 nothing is lifted out of `a`, so nothing collides, and the document is already
 flat.
+
+Drop what a document does not say: the members that hold `null`, and the
+containers that hold nothing. The two compose, and the nulls go first, so a
+member left empty by a removal goes too:
+
+```sh
+printf '{"a":null,"b":{},"c":[1,null],"d":{"e":null}}' | moon run cmd/main -- --prune-null --prune-empty -c
+# {"c":[1,null]}
+```
+
+The `null` inside the array is still there: an array is a sequence, and dropping
+an item out of the middle would renumber the ones after it. An empty container is
+a different matter, and `--prune-empty` does reach into arrays to remove one.
 
 Read from a pipe and indent with four spaces:
 
@@ -579,6 +627,7 @@ moonjson-toolkit/
 ├── moon.pkg              the library package and its imports
 ├── formatter.mbt         pretty-printing
 ├── flatten.mbt           dotted keys out of nesting, and back again
+├── prune.mbt             dropping null members and empty containers
 ├── jsonl.mbt             splitting a JSON Lines input into records
 ├── diagnostics.mbt       offsets to line/column, rendered error snippets
 ├── color.mbt             the colour decision and the escape wrapping
@@ -603,7 +652,7 @@ command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 153 tests
+moon test  --target native   # 162 tests
 moon fmt                     # format
 
 cd frontend
