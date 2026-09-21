@@ -13,6 +13,12 @@ pub let api_key_variable : String
 
 pub fn clamp_indent(Int) -> Int
 
+pub fn collect_key_paths(@json.Json) -> Array[String]
+
+pub fn collect_paths(@json.Json) -> Array[String]
+
+pub fn color_allowed(String?, String?, Bool?) -> Bool
+
 pub let deepseek_endpoint : String
 
 pub let deepseek_model : String
@@ -25,9 +31,25 @@ pub fn describe_limit_kind(@json.JsonLimitKind) -> String
 
 pub fn describe_syntax_error(@parsec.ParseError) -> String
 
+pub fn env_allows_color(String?, String?) -> Bool
+
 pub fn escape_json_string(String) -> String
 
+pub let exit_ai_error : Int
+
+pub let exit_input_error : Int
+
+pub let exit_success : Int
+
+pub let exit_usage_error : Int
+
+pub fn flatten(@json.Json) -> Result[@json.Json, String]
+
 pub fn format(@json.Json, Int) -> String
+
+pub fn format_compact(@json.Json) -> String
+
+pub async fn is_tty() -> Bool
 
 pub fn line_text(String, Int) -> String
 
@@ -39,32 +61,82 @@ pub fn offset_to_line_col(String, Int) -> (Int, Int)
 
 pub fn parse(String) -> Result[@json.Json, @json.JsonError]
 
-pub fn parse_with_diagnostic(String) -> Result[@json.Json, JsonDiagnostic]
+pub fn parse_jsonl(String) -> Array[Result[@json.Json, JsonDiagnostic]]
+
+pub fn parse_jsonl_with_depth(String, Int?) -> Array[Result[@json.Json, JsonDiagnostic]]
+
+pub fn parse_with_diagnostic(String, Int?) -> Result[@json.Json, JsonDiagnostic]
+
+pub let program_name : String
+
+pub fn prune_empty(@json.Json) -> @json.Json
+
+pub fn prune_null(@json.Json) -> @json.Json
+
+pub fn quote_for_message(String) -> String
 
 pub async fn read_file(String) -> Result[String, String]
 
 pub async fn read_stdin() -> Result[String, String]
 
+pub fn red(String) -> String
+
 pub let request_timeout_ms : Int
+
+pub async fn run(Array[String], analyze~ : async (String) -> Result[String, String]) -> RunResult
+
+pub fn set_color_enabled(Bool) -> Unit
+
+pub fn sort_keys(@json.Json) -> @json.Json
+
+pub let standard_max_depth : Int
+
+pub let standard_max_input_chars : Int
+
+pub fn trim_strings(@json.Json) -> @json.Json
+
+pub fn unflatten(@json.Json) -> Result[@json.Json, String]
 
 pub fn usage() -> String
 
+pub let version : String
+
+pub fn version_line() -> String
+
 pub async fn write_stats_file(String, @json.Json) -> Result[Unit, String]
+
+pub fn yellow(String) -> String
 
 // Errors
 
 // Types and methods
 type ChatMessage derive(ToJson)
+pub fn ChatMessage::to_json(Self) -> Json
 
 type ChatRequest derive(ToJson)
+pub fn ChatRequest::to_json(Self) -> Json
 
 pub(all) struct CliOptions {
-  mut file : String?
+  mut files : Array[String]
   mut indent : Int
+  mut max_depth : Int?
+  mut compact : Bool
+  mut sort_keys : Bool
+  mut trim_strings : Bool
+  mut jsonl : Bool
+  mut flatten : Bool
+  mut unflatten : Bool
+  mut prune_null : Bool
+  mut prune_empty : Bool
+  mut paths : Bool
+  mut keys_only : Bool
+  mut stats : Bool
   mut validate : Bool
   mut help : Bool
+  mut version : Bool
   mut ai : Bool
   mut json_out : String?
+  mut no_color : Bool
 }
 pub fn CliOptions::default() -> Self
 pub fn CliOptions::parse(Array[String]) -> Result[Self, String]
@@ -73,6 +145,7 @@ pub(all) struct DepthCount {
   depth : Int
   count : Int
 } derive(ToJson)
+pub fn DepthCount::to_json(Self) -> Json
 
 pub struct JsonDiagnostic {
   offset : Int
@@ -82,6 +155,7 @@ pub struct JsonDiagnostic {
   snippet : String
 }
 pub fn JsonDiagnostic::at(String, Int, String) -> Self
+pub fn JsonDiagnostic::for_record(String, Int, @json.JsonError) -> Self
 pub fn JsonDiagnostic::from_error(String, @json.JsonError) -> Self
 pub fn JsonDiagnostic::render(Self) -> String
 pub fn JsonDiagnostic::summary(Self) -> String
@@ -95,17 +169,27 @@ pub(all) struct JsonStats {
   depth_counts : Array[DepthCount]
 } derive(ToJson)
 pub fn JsonStats::of(@json.Json) -> Self
+pub fn JsonStats::to_json(Self) -> Json
 pub fn JsonStats::to_json_text(Self) -> String
+pub fn JsonStats::to_text(Self) -> String
 
 pub(all) struct KeyCount {
   name : String
   count : Int
 } derive(ToJson)
+pub fn KeyCount::to_json(Self) -> Json
+
+pub(all) struct RunResult {
+  out : String
+  err : String
+  code : Int
+}
 
 pub(all) struct TypeCount {
   kind : String
   count : Int
 } derive(ToJson)
+pub fn TypeCount::to_json(Self) -> Json
 
 // Type aliases
 
