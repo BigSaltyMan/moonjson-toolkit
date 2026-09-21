@@ -654,7 +654,7 @@ command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 166 tests
+moon test  --target native   # 172 tests
 moon fmt                     # format
 
 cd frontend
@@ -667,7 +667,7 @@ moon test --target js        # 4 tests
 module the suite reaches:
 
 ```sh
-moon coverage analyze
+moon coverage analyze -- -f summary
 ```
 
 ```
@@ -677,33 +677,36 @@ cmd/main/main.mbt: 0/14
 color.mbt: 30/33
 diagnostics.mbt: 64/79
 flatten.mbt: 100/102
-formatter.mbt: 144/152
-parser.mbt: 30/36
+formatter.mbt: 151/152
+parser.mbt: 261/276
 runner.mbt: 150/174
-Total: 855/941
+Total: 1093/1181
 ```
 
-That is 855 of the 941 lines the instrumentation watches, or 90.9%. A module is
-listed only when something in it went unexecuted, so the four this block leaves
-out — `jsonl.mbt`, `paths.mbt`, `prune.mbt` and `stats.mbt` — are covered end to
-end. The same numbers, ordered by how much of each module is reached:
+That is 1093 of the 1181 points the instrumentation watches, or 92.5%. The count
+is of positions in the source rather than lines — a line carrying two expressions
+is two points, and one of them can go unexecuted while the line itself is read as
+covered — so a module is listed whenever any of its points went unexecuted, and
+the four this block leaves out, `jsonl.mbt`, `paths.mbt`, `prune.mbt` and
+`stats.mbt`, are covered point for point. The same numbers, ordered by how much
+of each module is reached:
 
 | Module | Coverage |
 | ------ | -------- |
 | `jsonl.mbt`, `paths.mbt`, `prune.mbt`, `stats.mbt` | 100% |
+| `formatter.mbt` | 99.3% |
 | `flatten.mbt` | 98.0% |
 | `cli.mbt` | 97.2% |
-| `formatter.mbt` | 94.7% |
+| `parser.mbt` | 94.6% |
 | `color.mbt` | 90.9% |
 | `runner.mbt` | 86.2% |
 | `ai.mbt` | 85.3% |
-| `parser.mbt` | 83.3% |
 | `diagnostics.mbt` | 81.0% |
 | `cmd/main/main.mbt` | 0% |
 
 `cmd/main/main.mbt` is the one deliberate zero: it is the process entry point,
-and `moon test` never runs `main`. The eight lines there hand the real command
-line and the two real streams to `run`, which the suite covers directly instead.
+and `moon test` never runs `main`. What it does is hand the real command line and
+the two real streams to `run`, which the suite covers directly instead.
 
 The rest of what is missed is what needs something from outside the process.
 `analyze` in `ai.mbt` — the only function that talks to DeepSeek — is never
@@ -711,6 +714,58 @@ called, because no test may reach the real API. The standard-input paths in
 `parser.mbt` and `runner.mbt` stay untouched, because every test names a file.
 `diagnostics.mbt` keeps the parse-error variants and limit kinds no input in the
 suite manages to provoke.
+
+Most of what is left in `parser.mbt` is the fast path, and the points there that
+go unexecuted go unexecuted because reaching them would mean a bug: the two
+`abort` lines after loops that leave only by returning, and the guards against an
+escape cut short by the end of a string. The rest of them can only be
+reached by a document the suite does not carry — one over the 64 MiB input cap,
+which is the subject of the next section.
+
+## Performance
+
+`bench/run.sh` generates three documents and times the release build on each of
+them, formatting and then validating:
+
+```sh
+bench/run.sh
+```
+
+```
+moonjson-toolkit 0.1.0
+best of 3 runs, times in seconds
+
+file           size       format     validate
+small.json     982 B      0.002 s    0.002 s
+medium.json    1.1 MB     0.042 s    0.035 s
+large.json     9.6 MB     0.304 s    0.248 s
+```
+
+Those numbers are from a Ryzen 9 8940HX under WSL2, and move by about a tenth
+from run to run. `bench/generate.sh` writes the documents, and it is the only
+part of the benchmark in the repository: the documents are output rather than
+source, and are in `.gitignore`. The three are shaped differently on purpose —
+1 KB of nested objects, 1 MB of objects and arrays mixed, and 10 MB of a
+forty-deep chain beside a 60,000-item array, a 200×250 matrix and a
+250,000-character string.
+
+Ten megabytes is a size this tool could not read at all until recently. The
+library parser refuses any document over 1 MiB, a cap it keeps to itself and
+reports only when a document is already too long, so `parser.mbt` reads documents
+itself now, up to 64 MiB. Reading was also where the time went: `parsec/json`
+takes about a megabyte a second, which would have made ten megabytes ten seconds.
+`parser.mbt` follows the same grammar with a scanner over the document's own code
+units. On `medium.json` the library takes 1.21 s and the scanner takes 48 ms,
+measured in the same build, which is the ratio behind the third of a second in
+the large row.
+
+The scanner is not a second opinion on what is wrong with a document. Everything
+it will not accept is handed to the library parser, which is what names the
+problem and says where it is, so every diagnostic is exactly the one the tool
+gave before. What it does have to get right is which documents are good, and
+`parser_differential_wbtest.mbt` measures that: over a corpus of documents and of
+every single-character edit of them, the two readers accept the same documents
+and read the same values out of them.
 
 ## Tech stack
 

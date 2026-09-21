@@ -17,3 +17,8 @@ node_modules/
 # section before opening the page.
 /stats.json
 frontend/public/stats.json
+
+# The documents `bench/run.sh` measures. `bench/generate.sh` writes them and is
+# what the repository keeps: the documents are output rather than source, and
+# the largest of them is ten megabytes.
+bench/*.json

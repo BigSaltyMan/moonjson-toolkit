@@ -595,7 +595,7 @@ moonjson-toolkit/
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 166 tests
+moon test  --target native   # 172 tests
 moon fmt                     # format
 
 cd frontend
@@ -607,7 +607,7 @@ moon test --target js        # 4 tests
 `moon test` 可以开启插桩运行，报告测试套件覆盖了每个模块的多少代码：
 
 ```sh
-moon coverage analyze
+moon coverage analyze -- -f summary
 ```
 
 ```
@@ -617,30 +617,68 @@ cmd/main/main.mbt: 0/14
 color.mbt: 30/33
 diagnostics.mbt: 64/79
 flatten.mbt: 100/102
-formatter.mbt: 144/152
-parser.mbt: 30/36
+formatter.mbt: 151/152
+parser.mbt: 261/276
 runner.mbt: 150/174
-Total: 855/941
+Total: 1093/1181
 ```
 
-即插桩监视的 941 行中有 855 行被覆盖，占 90.9%。只有存在未执行代码的模块才会出现在上面这段输出里，所以它没有列出的四个模块——`jsonl.mbt`、`paths.mbt`、`prune.mbt` 和 `stats.mbt`——是完整覆盖的。同样的数字按覆盖率从高到低排列：
+即插桩监视的 1181 个点中有 1093 个被覆盖，占 92.5%。这里的计数单位是源码中的位置而不是行：一行里放下两个表达式就是两个点，其中一个没被执行时，这一行仍会算作已覆盖，所以只要模块里有任意一个点没被执行，它就会出现在上面这段输出里；反过来说，它没有列出的四个模块——`jsonl.mbt`、`paths.mbt`、`prune.mbt` 和 `stats.mbt`——是逐点完整覆盖的。同样的数字按覆盖率从高到低排列：
 
 | 模块 | 覆盖率 |
 | ---- | ------ |
 | `jsonl.mbt`、`paths.mbt`、`prune.mbt`、`stats.mbt` | 100% |
+| `formatter.mbt` | 99.3% |
 | `flatten.mbt` | 98.0% |
 | `cli.mbt` | 97.2% |
-| `formatter.mbt` | 94.7% |
+| `parser.mbt` | 94.6% |
 | `color.mbt` | 90.9% |
 | `runner.mbt` | 86.2% |
 | `ai.mbt` | 85.3% |
-| `parser.mbt` | 83.3% |
 | `diagnostics.mbt` | 81.0% |
 | `cmd/main/main.mbt` | 0% |
 
-`cmd/main/main.mbt` 是唯一一个有意为之的零：它是进程入口，而 `moon test` 从不运行 `main`。那八行只是把真实的命令行和两个真实的数据流交给 `run`，而 `run` 本身由测试直接覆盖。
+`cmd/main/main.mbt` 是唯一一个有意为之的零：它是进程入口，而 `moon test` 从不运行 `main`。它做的事只是把真实的命令行和两个真实的数据流交给 `run`，而 `run` 本身由测试直接覆盖。
 
 其余没覆盖到的，都是需要进程之外的东西才能触发的分支。`ai.mbt` 里的 `analyze`——唯一与 DeepSeek 通信的函数——从未被调用，因为任何测试都不允许访问真实 API；`parser.mbt` 和 `runner.mbt` 的标准输入路径没有被触及，因为每个测试都指定了文件；`diagnostics.mbt` 则留着测试套件无法构造出来的那些解析错误分支和限制类型。
+
+`parser.mbt` 剩下的那些点大多在快路径里，而它们之所以没被执行，是因为一旦被执行就说明有 bug：两个循环末尾的 `abort` 行（那两个循环只会通过返回离开），以及字符串末尾把转义序列截断时的兜底判断。剩下的点只有测试套件不携带的文档才够得着——一份超过 64 MiB 输入上限的文档，这正是下一节要说的。
+
+## 性能
+
+`bench/run.sh` 生成三份文档，并分别对发布版构建计时，先格式化再校验：
+
+```sh
+bench/run.sh
+```
+
+```
+moonjson-toolkit 0.1.0
+best of 3 runs, times in seconds
+
+file           size       format     validate
+small.json     982 B      0.002 s    0.002 s
+medium.json    1.1 MB     0.042 s    0.035 s
+large.json     9.6 MB     0.304 s    0.248 s
+```
+
+这些数字来自 WSL2 下的 Ryzen 9 8940HX，每次运行之间会有一成左右的浮动。文档由
+`bench/generate.sh` 生成，基准测试里进仓库的只有脚本：文档是产物而不是源码，已经写进
+`.gitignore`。三份文档刻意做成不同的形状——1 KB 的嵌套对象、1 MB 的对象与数组混合、
+以及 10 MB 的四十层深链，外加一个六万元素的数组、一个 200×250 的矩阵和一个 25 万字符
+的字符串。
+
+十兆字节是这个工具此前根本读不了的大小。库解析器拒绝任何超过 1 MiB 的文档，这个上限
+它自己握着，只在文档已经太长时才报告出来，所以现在由 `parser.mbt` 自己读文档，上限
+64 MiB。时间也主要花在读上：`parsec/json` 大约每秒读一兆字节，十兆字节就是十秒。
+`parser.mbt` 直接按同一套文法，在文档自身的码元上扫描。同一份 `medium.json`，库要
+1.21 s，扫描器只要 48 ms，且两者是在同一构建里量的——这就是大文件那一行的三分之一秒
+背后的倍数。
+
+扫描器不是对「文档哪里不对」的第二种说法。它不肯接受的一切都会交给库解析器，由后者指出
+问题是什么、出在哪里，所以每一条诊断都和从前一模一样。它必须做对的是「哪些文档是好的」，
+`parser_differential_wbtest.mbt` 量的正是这一点：在一组文档以及它们每一个单字符改动之上，
+两个读取器接受的文档相同，读出的值也相同。
 
 ## 技术栈
 
