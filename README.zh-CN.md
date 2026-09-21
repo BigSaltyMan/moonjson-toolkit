@@ -595,12 +595,52 @@ moonjson-toolkit/
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 162 tests
+moon test  --target native   # 166 tests
 moon fmt                     # format
 
 cd frontend
 moon test --target js        # 4 tests
 ```
+
+## 测试覆盖率
+
+`moon test` 可以开启插桩运行，报告测试套件覆盖了每个模块的多少代码：
+
+```sh
+moon coverage analyze
+```
+
+```
+ai.mbt: 58/68
+cli.mbt: 138/142
+cmd/main/main.mbt: 0/14
+color.mbt: 30/33
+diagnostics.mbt: 64/79
+flatten.mbt: 100/102
+formatter.mbt: 144/152
+parser.mbt: 30/36
+runner.mbt: 150/174
+Total: 855/941
+```
+
+即插桩监视的 941 行中有 855 行被覆盖，占 90.9%。只有存在未执行代码的模块才会出现在上面这段输出里，所以它没有列出的四个模块——`jsonl.mbt`、`paths.mbt`、`prune.mbt` 和 `stats.mbt`——是完整覆盖的。同样的数字按覆盖率从高到低排列：
+
+| 模块 | 覆盖率 |
+| ---- | ------ |
+| `jsonl.mbt`、`paths.mbt`、`prune.mbt`、`stats.mbt` | 100% |
+| `flatten.mbt` | 98.0% |
+| `cli.mbt` | 97.2% |
+| `formatter.mbt` | 94.7% |
+| `color.mbt` | 90.9% |
+| `runner.mbt` | 86.2% |
+| `ai.mbt` | 85.3% |
+| `parser.mbt` | 83.3% |
+| `diagnostics.mbt` | 81.0% |
+| `cmd/main/main.mbt` | 0% |
+
+`cmd/main/main.mbt` 是唯一一个有意为之的零：它是进程入口，而 `moon test` 从不运行 `main`。那八行只是把真实的命令行和两个真实的数据流交给 `run`，而 `run` 本身由测试直接覆盖。
+
+其余没覆盖到的，都是需要进程之外的东西才能触发的分支。`ai.mbt` 里的 `analyze`——唯一与 DeepSeek 通信的函数——从未被调用，因为任何测试都不允许访问真实 API；`parser.mbt` 和 `runner.mbt` 的标准输入路径没有被触及，因为每个测试都指定了文件；`diagnostics.mbt` 则留着测试套件无法构造出来的那些解析错误分支和限制类型。
 
 ## 技术栈
 

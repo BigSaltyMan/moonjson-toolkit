@@ -654,12 +654,63 @@ command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 162 tests
+moon test  --target native   # 166 tests
 moon fmt                     # format
 
 cd frontend
 moon test --target js        # 4 tests
 ```
+
+## Test coverage
+
+`moon test` can be run with instrumentation, which reports how much of every
+module the suite reaches:
+
+```sh
+moon coverage analyze
+```
+
+```
+ai.mbt: 58/68
+cli.mbt: 138/142
+cmd/main/main.mbt: 0/14
+color.mbt: 30/33
+diagnostics.mbt: 64/79
+flatten.mbt: 100/102
+formatter.mbt: 144/152
+parser.mbt: 30/36
+runner.mbt: 150/174
+Total: 855/941
+```
+
+That is 855 of the 941 lines the instrumentation watches, or 90.9%. A module is
+listed only when something in it went unexecuted, so the four this block leaves
+out — `jsonl.mbt`, `paths.mbt`, `prune.mbt` and `stats.mbt` — are covered end to
+end. The same numbers, ordered by how much of each module is reached:
+
+| Module | Coverage |
+| ------ | -------- |
+| `jsonl.mbt`, `paths.mbt`, `prune.mbt`, `stats.mbt` | 100% |
+| `flatten.mbt` | 98.0% |
+| `cli.mbt` | 97.2% |
+| `formatter.mbt` | 94.7% |
+| `color.mbt` | 90.9% |
+| `runner.mbt` | 86.2% |
+| `ai.mbt` | 85.3% |
+| `parser.mbt` | 83.3% |
+| `diagnostics.mbt` | 81.0% |
+| `cmd/main/main.mbt` | 0% |
+
+`cmd/main/main.mbt` is the one deliberate zero: it is the process entry point,
+and `moon test` never runs `main`. The eight lines there hand the real command
+line and the two real streams to `run`, which the suite covers directly instead.
+
+The rest of what is missed is what needs something from outside the process.
+`analyze` in `ai.mbt` — the only function that talks to DeepSeek — is never
+called, because no test may reach the real API. The standard-input paths in
+`parser.mbt` and `runner.mbt` stay untouched, because every test names a file.
+`diagnostics.mbt` keeps the parse-error variants and limit kinds no input in the
+suite manages to provoke.
 
 ## Tech stack
 
