@@ -1,3 +1,5 @@
+**English** | [简体中文](README.zh-CN.md)
+
 # MoonJSON Toolkit
 
 A JSON toolkit for MoonBit: format, validate, diagnose, analyse and visualise
@@ -693,6 +695,34 @@ moon test --target js        # 4 tests
   from the first element of an array named `a`. Keys that use those characters
   are rare enough to be worth the readable form; quote them, or read the path
   list alongside the document, when they turn up.
+
+## Dependencies and Licenses
+
+Every dependency is Apache-2.0, which is permissive and compatible with this
+project's own license: it is not copyleft, it does not require this project to be
+released under the same terms, and it asks only that the copyright and license
+notices be kept. Nothing in the tree is GPL or AGPL.
+
+| Dependency | Version | License |
+| ---------- | ------- | ------- |
+| [`Nanaloveyuki/parsec`](https://mooncakes.io/docs/Nanaloveyuki/parsec) | 0.1.3 | Apache-2.0 |
+| [`oboard/mio`](https://mooncakes.io/docs/oboard/mio) | 0.5.4 | Apache-2.0 |
+| [`moonbitlang/async`](https://mooncakes.io/docs/moonbitlang/async) | 0.22.1 | Apache-2.0 |
+| [`moonbitlang/x`](https://mooncakes.io/docs/moonbitlang/x) | 0.5.5 | Apache-2.0 |
+| [`moonbit-community/rabbita`](https://mooncakes.io/docs/moonbit-community/rabbita) | 0.15.2 | Apache-2.0 |
+
+The first four are the command line tool's dependencies and are declared in
+`moon.mod`; Rabbita is the dashboard's and is declared in `frontend/moon.mod`.
+The license of each is the one declared in that package's own `moon.mod` on
+Mooncakes, which is also what the copy under `.mooncakes/` carries.
+
+The dependencies those pull in are Apache-2.0 as well: `bikallem/compress@0.3.4`
+and `bikallem/blit@0.2.2`, which `oboard/mio` needs, and
+`moonbitlang/async@0.20.5`, which Rabbita pins. `moon tree` prints the whole
+closure from either module. The dashboard build also uses
+[`moonbit-community/warren`](https://mooncakes.io/docs/moonbit-community/warren)
+(Apache-2.0) from the command line, and the chart library is vendored: see the
+license section below.
 
 ## License
 
