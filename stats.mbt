@@ -6,6 +6,15 @@ pub(all) struct TypeCount {
 } derive(ToJson)
 
 ///|
+/// Name the `to_json` method that `derive(ToJson)` provides.
+///
+/// The implicit promotion of an impl's methods to regular methods is deprecated
+/// as of moon 0.1.20260920, and `--deny-warn` refuses it. Spelling the promotion
+/// out changes nothing about the type or the JSON it produces: `derive` still
+/// writes the method, and this says which one it is.
+pub extend TypeCount with ToJson::{to_json}
+
+///|
 /// How many keys one top-level field contains, counting nested ones.
 pub(all) struct KeyCount {
   name : String
@@ -13,11 +22,19 @@ pub(all) struct KeyCount {
 } derive(ToJson)
 
 ///|
+/// As for `TypeCount`: the promotion `derive(ToJson)` makes, spelled out.
+pub extend KeyCount with ToJson::{to_json}
+
+///|
 /// How many nodes sit at one nesting depth.
 pub(all) struct DepthCount {
   depth : Int
   count : Int
 } derive(ToJson)
+
+///|
+/// As for `TypeCount`: the promotion `derive(ToJson)` makes, spelled out.
+pub extend DepthCount with ToJson::{to_json}
 
 ///|
 /// Summary statistics for one JSON document.
@@ -32,6 +49,10 @@ pub(all) struct JsonStats {
   key_counts : Array[KeyCount]
   depth_counts : Array[DepthCount]
 } derive(ToJson)
+
+///|
+/// As for `TypeCount`: the promotion `derive(ToJson)` makes, spelled out.
+pub extend JsonStats with ToJson::{to_json}
 
 ///|
 /// Mutable accumulator threaded through the statistics walk.

@@ -56,12 +56,25 @@ struct ChatMessage {
 } derive(ToJson)
 
 ///|
+/// Name the `to_json` method that `derive(ToJson)` provides.
+///
+/// The implicit promotion of an impl's methods to regular methods is deprecated
+/// as of moon 0.1.20260920, and `--deny-warn` refuses it. Spelling the promotion
+/// out changes nothing about the type or the JSON it produces: `derive` still
+/// writes the method, and this says which one it is.
+pub extend ChatMessage with ToJson::{to_json}
+
+///|
 /// The chat-completions request body.
 struct ChatRequest {
   model : String
   messages : Array[ChatMessage]
   stream : Bool
 } derive(ToJson)
+
+///|
+/// As for `ChatMessage`: the promotion `derive(ToJson)` makes, spelled out.
+pub extend ChatRequest with ToJson::{to_json}
 
 ///|
 /// Build the chat-completions request body for `json_text`.
