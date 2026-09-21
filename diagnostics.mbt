@@ -214,17 +214,75 @@ pub fn JsonDiagnostic::summary(self : JsonDiagnostic) -> String {
 }
 
 ///|
+/// How much of a line a report shows on either side of the column it is
+/// reporting.
+///
+/// A line longer than twice this is elided around the column, which keeps a
+/// report a fixed size however long the line is. Without it a document written
+/// on one line is reported by printing the whole document, so a mistake near the
+/// end of a 10 MB file arrives as 10 MB of terminal.
+let snippet_margin : Int = 60
+
+///|
+/// The part of `line` a report shows, and where the caret falls inside it.
+///
+/// The line comes back whole while it is short enough to read, which is almost
+/// every line; past that the report keeps `snippet_margin` characters on each
+/// side of the reported column — the characters the caret is pointing into are
+/// the point, and they are wherever the mistake is — and writes `...` in place
+/// of each end it cut. The caret is then counted in what is left rather than in
+/// the line, which is what keeps it under the right character.
+fn snippet_window(line : String, column : Int) -> (String, Int) {
+  let characters = line.char_length()
+  let mark = column - 1
+  if characters <= snippet_margin * 2 {
+    return (line, mark)
+  }
+  let start = if mark > snippet_margin { mark - snippet_margin } else { 0 }
+  let stop = if mark + snippet_margin < characters {
+    mark + snippet_margin
+  } else {
+    characters
+  }
+  let buf = StringBuilder()
+  if start > 0 {
+    buf.write_string("...")
+  }
+  let mut index = 0
+  for ch in line {
+    if index >= stop {
+      break
+    }
+    if index >= start {
+      buf.write_char(ch)
+    }
+    index = index + 1
+  }
+  if stop < characters {
+    buf.write_string("...")
+  }
+  let cut = if start > 0 { 3 } else { 0 }
+  (buf.to_string(), mark - start + cut)
+}
+
+///|
 /// A multi-line report: the summary followed by the offending source line and
 /// a caret marking the column.
+///
+/// The line is elided when it is too long to print, the caret keeping its place
+/// under the character the column names; the summary still reports the line and
+/// column of the original document, which is what a person needs to find it in
+/// an editor.
 pub fn JsonDiagnostic::render(self : JsonDiagnostic) -> String {
   let buf = StringBuilder()
   buf.write_string(self.summary())
   if self.snippet != "" {
+    let (shown, caret) = snippet_window(self.snippet, self.column)
     buf.write_char('\n')
-    buf.write_string("  " + self.snippet)
+    buf.write_string("  " + shown)
     buf.write_char('\n')
     buf.write_string("  ")
-    for _ in 1..<self.column {
+    for _ in 0..<caret {
       buf.write_char(' ')
     }
     buf.write_char('^')

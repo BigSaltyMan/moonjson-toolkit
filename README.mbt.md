@@ -40,6 +40,11 @@ charts the statistics the tool writes.
            ^
   ```
 
+  A line too long to print is elided around the column, the two ends it cut
+  replaced by `...`, so a document written on one line is not reported at its
+  full length — the line and column in the summary are always the ones in the
+  document, and the caret is the recomputed one.
+
   A repeated key inside one object is an error for the same reason, reported at
   the second spelling of the key and naming the line and column of the first —
   silently keeping one of the two would mean the value you get back depends on
@@ -654,7 +659,7 @@ command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 172 tests
+moon test  --target native   # 176 tests
 moon fmt                     # format
 
 cd frontend
@@ -675,15 +680,15 @@ ai.mbt: 58/68
 cli.mbt: 138/142
 cmd/main/main.mbt: 0/14
 color.mbt: 30/33
-diagnostics.mbt: 64/79
+diagnostics.mbt: 81/98
 flatten.mbt: 100/102
 formatter.mbt: 151/152
 parser.mbt: 261/276
 runner.mbt: 150/174
-Total: 1093/1181
+Total: 1110/1200
 ```
 
-That is 1093 of the 1181 points the instrumentation watches, or 92.5%. The count
+That is 1110 of the 1200 points the instrumentation watches, or 92.5%. The count
 is of positions in the source rather than lines — a line carrying two expressions
 is two points, and one of them can go unexecuted while the line itself is read as
 covered — so a module is listed whenever any of its points went unexecuted, and
@@ -701,7 +706,7 @@ of each module is reached:
 | `color.mbt` | 90.9% |
 | `runner.mbt` | 86.2% |
 | `ai.mbt` | 85.3% |
-| `diagnostics.mbt` | 81.0% |
+| `diagnostics.mbt` | 82.7% |
 | `cmd/main/main.mbt` | 0% |
 
 `cmd/main/main.mbt` is the one deliberate zero: it is the process entry point,

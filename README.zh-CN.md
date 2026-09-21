@@ -32,6 +32,10 @@
            ^
   ```
 
+  行太长打印不下时，只保留出错那一列前后的一段，两端各用 `...` 顶替，所以写成一行
+  的文档不会被整篇报出来；摘要里的行号列号始终是文档里的行号列号，`^` 则是在截断后
+  的片段里重新对齐的。
+
   同一个对象里出现重复键同样算错误，报在键的第二次书写处，并指出第一次出现在哪一
   行哪一列 —— 悄悄保留其中一个，等于让你拿到的值取决于解析器而不是文档本身。
   `--max-depth <n>` 对嵌套深度做同样的约束：比 `n` 更深的文档一律拒绝，并指出它在
@@ -595,7 +599,7 @@ moonjson-toolkit/
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 172 tests
+moon test  --target native   # 176 tests
 moon fmt                     # format
 
 cd frontend
@@ -615,15 +619,15 @@ ai.mbt: 58/68
 cli.mbt: 138/142
 cmd/main/main.mbt: 0/14
 color.mbt: 30/33
-diagnostics.mbt: 64/79
+diagnostics.mbt: 81/98
 flatten.mbt: 100/102
 formatter.mbt: 151/152
 parser.mbt: 261/276
 runner.mbt: 150/174
-Total: 1093/1181
+Total: 1110/1200
 ```
 
-即插桩监视的 1181 个点中有 1093 个被覆盖，占 92.5%。这里的计数单位是源码中的位置而不是行：一行里放下两个表达式就是两个点，其中一个没被执行时，这一行仍会算作已覆盖，所以只要模块里有任意一个点没被执行，它就会出现在上面这段输出里；反过来说，它没有列出的四个模块——`jsonl.mbt`、`paths.mbt`、`prune.mbt` 和 `stats.mbt`——是逐点完整覆盖的。同样的数字按覆盖率从高到低排列：
+即插桩监视的 1200 个点中有 1110 个被覆盖，占 92.5%。这里的计数单位是源码中的位置而不是行：一行里放下两个表达式就是两个点，其中一个没被执行时，这一行仍会算作已覆盖，所以只要模块里有任意一个点没被执行，它就会出现在上面这段输出里；反过来说，它没有列出的四个模块——`jsonl.mbt`、`paths.mbt`、`prune.mbt` 和 `stats.mbt`——是逐点完整覆盖的。同样的数字按覆盖率从高到低排列：
 
 | 模块 | 覆盖率 |
 | ---- | ------ |
@@ -635,7 +639,7 @@ Total: 1093/1181
 | `color.mbt` | 90.9% |
 | `runner.mbt` | 86.2% |
 | `ai.mbt` | 85.3% |
-| `diagnostics.mbt` | 81.0% |
+| `diagnostics.mbt` | 82.7% |
 | `cmd/main/main.mbt` | 0% |
 
 `cmd/main/main.mbt` 是唯一一个有意为之的零：它是进程入口，而 `moon test` 从不运行 `main`。它做的事只是把真实的命令行和两个真实的数据流交给 `run`，而 `run` 本身由测试直接覆盖。
