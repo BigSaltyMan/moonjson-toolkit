@@ -377,6 +377,39 @@ test "-- ends option parsing" {
 }
 
 ///|
+test "--model names the model to ask for" {
+  assert_eq(
+    cli_ok(["--ai", "--model", "gpt-4o-mini"]).model,
+    Some("gpt-4o-mini"),
+  )
+  // The attached spelling goes through the same path as every other value
+  // option, and the default leaves the choice to the environment.
+  assert_eq(cli_ok(["--ai", "--model=qwen2.5"]).model, Some("qwen2.5"))
+  assert_eq(cli_ok(["--ai"]).model, None)
+  assert_eq(cli_err(["--ai", "--model"]), "option --model requires a value")
+}
+
+///|
+test "--ai-base-url names the endpoint to post to" {
+  let url = "http://localhost:11434/v1/chat/completions"
+  assert_eq(cli_ok(["--ai", "--ai-base-url", url]).ai_base_url, Some(url))
+  assert_eq(
+    cli_err(["--ai", "--ai-base-url"]),
+    "option --ai-base-url requires a value",
+  )
+}
+
+///|
+/// The two describe the one request `--ai` makes and nothing else, so a run
+/// that never asks for a review neither reads them nor refuses them.
+test "the AI options are accepted but ignored without --ai" {
+  let options = cli_ok(["--model", "gpt-4o-mini", "-c"])
+  assert_eq(options.ai, false)
+  assert_eq(options.compact, true)
+  assert_eq(options.model, Some("gpt-4o-mini"))
+}
+
+///|
 test "the usage text documents every option" {
   let text = usage()
   for
@@ -384,7 +417,7 @@ test "the usage text documents every option" {
       "-f", "--file", "-i", "--indent", "-c", "--compact", "-S", "--sort-keys", "--trim-strings",
       "--flatten", "--unflatten", "--prune-null", "--prune-empty", "--jsonl", "--max-depth",
       "--paths", "--keys-only", "-v", "--validate", "-h", "--help", "-V", "--version",
-      "--ai", "--json-out", "--stats", "--no-color",
+      "--ai", "--model", "--ai-base-url", "--json-out", "--stats", "--no-color",
     ] {
     assert_true(text.contains(option))
   }

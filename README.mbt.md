@@ -64,8 +64,9 @@ charts the statistics the tool writes.
 - **Charts** — a [Rabbita](https://github.com/moonbit-community/rabbita) web app
   renders the statistics file as a key-count bar chart, a nesting-depth pie
   chart and a type table.
-- **AI review** — `--ai` sends the formatted document to DeepSeek and prints a
-  quality report with refactoring suggestions.
+- **AI review** — `--ai` sends the formatted document to an OpenAI-compatible
+  API (DeepSeek by default) and prints a quality report with refactoring
+  suggestions. The endpoint, the model and the key are all configurable.
 
 ## Requirements
 
@@ -116,7 +117,10 @@ Options:
   -v, --validate         Only check the input and report the first error
   -h, --help             Show this message and exit
   -V, --version          Show the version and exit
-      --ai               Ask DeepSeek for a quality report and suggestions
+      --ai               Ask the AI for a quality report and suggestions
+      --model <name>     Model to ask for instead of the default
+      --ai-base-url <url>
+                         Endpoint to post to instead of the default
       --json-out <path>  Write a statistics report as JSON to <path>
       --stats            Print a statistics summary instead of the document
       --no-color         Never colour the output, even on a terminal
@@ -158,6 +162,16 @@ to every one of them in turn. A record that is not valid JSON is reported
 with its line in the file and the rest are still printed; the run exits 1 if
 any record failed. It describes many documents at once, so it is refused
 with --json-out and with --ai.
+
+--ai asks an OpenAI-compatible chat-completions API for a review of the
+formatted document. The endpoint, the model and the key are taken from
+--ai-base-url, --model and MOONJSON_AI_API_KEY, each falling back in turn
+to MOONJSON_AI_BASE_URL, MOONJSON_AI_MODEL and DEEPSEEK_API_KEY, and then
+to DeepSeek's own. There is no --api-key: a key on a command line is a key
+in the shell history and in the process list.
+
+--model and --ai-base-url describe that one request, so without --ai they
+are read, accepted and ignored.
 
 Exit codes:
   0  success
@@ -613,18 +627,76 @@ CDN.
 
 ## AI review
 
-`--ai` asks DeepSeek for a review of the formatted document:
+`--ai` asks an OpenAI-compatible API for a review of the formatted document.
+Left alone it asks DeepSeek, which is what this does:
 
 ```sh
 export DEEPSEEK_API_KEY=sk-...
 moon run cmd/main -- --ai -f test.json
 ```
 
-The key is read from the `DEEPSEEK_API_KEY` environment variable and is never
-hardcoded. A review that cannot be produced exits with code `3` and prints the
-reason on standard error, leaving standard output empty. Documents longer
+The key is read from the environment and is never hardcoded, and there is no
+`--api-key`: a key on a command line is a key in the shell history and in the
+process list. A review that cannot be produced exits with code `3` and prints
+the reason on standard error, leaving standard output empty. Documents longer
 than 20 000 characters are truncated before they are sent, and the request times
 out after 60 seconds.
+
+## Using other LLM providers
+
+The request is the chat-completions shape every provider now speaks, so pointing
+it somewhere else is a matter of naming the endpoint and the model. Both come
+from a flag or an environment variable, and a flag wins over the variable, which
+wins over the default:
+
+| Setting | Flag | Environment variable | Default |
+| ------- | ---- | -------------------- | ------- |
+| Endpoint | `--ai-base-url <url>` | `MOONJSON_AI_BASE_URL` | DeepSeek's |
+| Model | `--model <name>` | `MOONJSON_AI_MODEL` | `deepseek-flash` |
+| API key | — | `MOONJSON_AI_API_KEY`, else `DEEPSEEK_API_KEY` | — |
+
+The endpoint is the whole URL rather than a base for the tool to append a path
+to, because that is the spelling every provider documents and the one that
+leaves nothing to guess. The two flags describe the one request `--ai` makes, so
+without `--ai` they are read, accepted and ignored.
+
+| Provider | `--ai-base-url` | `--model` |
+| -------- | --------------- | --------- |
+| DeepSeek (the default) | `https://api.deepseek.com/chat/completions` | `deepseek-flash` |
+| Kimi (Moonshot) | `https://api.moonshot.cn/v1/chat/completions` | `kimi-k3` |
+| 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4/chat/completions` | `glm-4-flash` |
+| OpenAI | `https://api.openai.com/v1/chat/completions` | `gpt-4o-mini` |
+| Ollama (local) | `http://localhost:11434/v1/chat/completions` | `llama3.1` |
+
+One command each, the key passed for that one run rather than exported:
+
+```sh
+# DeepSeek, which needs neither flag: this is the default
+MOONJSON_AI_API_KEY=sk-... moon run cmd/main -- --ai -f test.json
+
+# Kimi
+MOONJSON_AI_API_KEY=sk-... moon run cmd/main -- --ai \
+  --ai-base-url https://api.moonshot.cn/v1/chat/completions --model kimi-k3 -f test.json
+
+# 智谱 GLM
+MOONJSON_AI_API_KEY=... moon run cmd/main -- --ai \
+  --ai-base-url https://open.bigmodel.cn/api/paas/v4/chat/completions --model glm-4-flash -f test.json
+
+# OpenAI
+MOONJSON_AI_API_KEY=sk-... moon run cmd/main -- --ai \
+  --ai-base-url https://api.openai.com/v1/chat/completions --model gpt-4o-mini -f test.json
+
+# Ollama, which asks for no key of its own: the tool still wants one to start
+# a review, so any placeholder will do
+MOONJSON_AI_API_KEY=ollama moon run cmd/main -- --ai \
+  --ai-base-url http://localhost:11434/v1/chat/completions --model llama3.1 -f test.json
+```
+
+A shell that already exports `DEEPSEEK_API_KEY` keeps working untouched: that
+name is still read, second only to `MOONJSON_AI_API_KEY`. Nothing else about the
+exchange changes — the report is read from `choices[0].message.content`, and a
+provider that reports a failure in the usual `error.message` envelope has its
+message shown rather than swallowed.
 
 ## Project layout
 
@@ -641,7 +713,7 @@ moonjson-toolkit/
 ├── cli.mbt               argument parsing and usage text
 ├── parser.mbt            parsing and file/standard-input reading
 ├── paths.mbt             the path of every value, and of every object member
-├── ai.mbt                the DeepSeek request and response handling
+├── ai.mbt                the AI request, its settings and its response handling
 ├── stats.mbt             the statistics model and its JSON form
 ├── runner.mbt            one run of the tool, and the exit codes
 ├── cmd/main/             the process entry point
@@ -659,7 +731,7 @@ command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 176 tests
+moon test  --target native   # 187 tests
 moon fmt                     # format
 
 cd frontend
@@ -676,19 +748,19 @@ moon coverage analyze -- -f summary
 ```
 
 ```
-ai.mbt: 58/68
-cli.mbt: 138/142
+ai.mbt: 80/90
+cli.mbt: 140/144
 cmd/main/main.mbt: 0/14
 color.mbt: 30/33
 diagnostics.mbt: 81/98
 flatten.mbt: 100/102
 formatter.mbt: 151/152
 parser.mbt: 261/276
-runner.mbt: 150/174
-Total: 1110/1200
+runner.mbt: 158/184
+Total: 1142/1234
 ```
 
-That is 1110 of the 1200 points the instrumentation watches, or 92.5%. The count
+That is 1142 of the 1234 points the instrumentation watches, or 92.5%. The count
 is of positions in the source rather than lines — a line carrying two expressions
 is two points, and one of them can go unexecuted while the line itself is read as
 covered — so a module is listed whenever any of its points went unexecuted, and
@@ -704,8 +776,8 @@ of each module is reached:
 | `cli.mbt` | 97.2% |
 | `parser.mbt` | 94.6% |
 | `color.mbt` | 90.9% |
-| `runner.mbt` | 86.2% |
-| `ai.mbt` | 85.3% |
+| `ai.mbt` | 88.9% |
+| `runner.mbt` | 85.9% |
 | `diagnostics.mbt` | 82.7% |
 | `cmd/main/main.mbt` | 0% |
 
@@ -714,8 +786,8 @@ and `moon test` never runs `main`. What it does is hand the real command line an
 the two real streams to `run`, which the suite covers directly instead.
 
 The rest of what is missed is what needs something from outside the process.
-`analyze` in `ai.mbt` — the only function that talks to DeepSeek — is never
-called, because no test may reach the real API. The standard-input paths in
+`analyze` in `ai.mbt` — the only function that talks to a provider — is never
+called, because no test may reach a real API. The standard-input paths in
 `parser.mbt` and `runner.mbt` stay untouched, because every test names a file.
 `diagnostics.mbt` keeps the parse-error variants and limit kinds no input in the
 suite manages to provoke.

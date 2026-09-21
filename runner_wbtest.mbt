@@ -23,27 +23,44 @@ fn Scratch::named(name : String) -> Scratch {
 }
 
 ///|
-/// A stand-in for the network call, so no test ever reaches DeepSeek and the
+/// A stand-in for the network call, so no test ever reaches a real API and the
 /// number of calls can be asserted on.
+///
+/// It keeps the arguments it was handed as well as counting them, because the
+/// settings reach `analyze` as four positional strings, and nothing but a test
+/// can tell a call that put the model where the endpoint belongs from one that
+/// put it where the model belongs.
 struct StubAnalyzer {
   mut calls : Int
+  mut asked : (String, String, String, String)?
   reply : Result[String, String]
 }
 
 ///|
 fn StubAnalyzer::new(reply : Result[String, String]) -> StubAnalyzer {
-  { calls: 0, reply, }
+  { calls: 0, asked: None, reply, }
 }
 
 ///|
 fn StubAnalyzer::analyzer(
   self : StubAnalyzer,
-) -> async (String) -> Result[String, String] {
-  fn(_prompt) {
+) -> async (String, String, String, String) -> Result[String, String] {
+  fn(json_text, endpoint, model, api_key) {
     self.calls = self.calls + 1
+    self.asked = Some((json_text, endpoint, model, api_key))
     self.reply
   }
 }
+
+///|
+/// The key the runner resolves in these tests.
+///
+/// A stub for the call is not enough on its own: the runner reads the
+/// environment before it calls the analyzer, so without a key there every `--ai`
+/// run would stop before reaching the stub. It is planted under the name that
+/// is read first, so a real key in the developer's own environment cannot
+/// change what these tests do.
+let stub_api_key : String = "sk-test-key"
 
 ///|
 /// The shape every test follows: write the document, run the tool over it,
@@ -55,6 +72,7 @@ async fn run_on(
   analyzer : StubAnalyzer,
 ) -> RunResult {
   @fs.write_file(scratch.input, text)
+  @env.set_env_var(api_key_variable, stub_api_key)
   let result = run(["-f", scratch.input] + extra, analyze=analyzer.analyzer())
   discard(scratch.input)
   result
@@ -134,15 +152,45 @@ async test "a successful review follows the document without --json-out" {
 }
 
 ///|
+/// What was asked for is what is sent: the endpoint, the model and the key
+/// travel from the command line and the environment to the request as three
+/// separate strings, and this is the one place they can be checked in the
+/// order `analyze` reads them.
+async test "the review names the endpoint and model the command line asked for" {
+  let scratch = Scratch::named("review_settings")
+  let analyzer = StubAnalyzer::new(Ok("looks fine to me"))
+  let result = run_on(
+    scratch,
+    document_sample,
+    [
+      "--ai", "--model", "a-model", "--ai-base-url", "http://localhost:1234/v1/chat/completions",
+    ],
+    analyzer,
+  )
+  inspect(result.code, content="0")
+  match analyzer.asked {
+    Some((json_text, endpoint, model, api_key)) => {
+      assert_eq(endpoint, "http://localhost:1234/v1/chat/completions")
+      assert_eq(model, "a-model")
+      assert_eq(api_key, stub_api_key)
+      assert_true(json_text.contains("\"name\""))
+    }
+    None => abort("the analyzer should have been asked exactly once")
+  }
+}
+
+///|
 async test "a failed review exits 3 and leaves standard output empty" {
   let scratch = Scratch::named("review_failed")
-  let analyzer = StubAnalyzer::new(Err("DEEPSEEK_API_KEY is not set"))
+  let analyzer = StubAnalyzer::new(
+    Err("MOONJSON_AI_API_KEY or DEEPSEEK_API_KEY is not set"),
+  )
   let result = run_on(scratch, document_sample, ["--ai"], analyzer)
   inspect(result.code, content="3")
   // The document must not be printed: a caller piping the output would
   // otherwise get half a result before the failure.
   inspect(result.out, content="")
-  assert_true(result.err.contains("DEEPSEEK_API_KEY is not set"))
+  assert_true(result.err.contains("is not set"))
   assert_eq(analyzer.calls, 1)
 }
 

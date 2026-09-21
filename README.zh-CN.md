@@ -50,7 +50,8 @@
   一样有效。
 - **图表** —— 一个 [Rabbita](https://github.com/moonbit-community/rabbita) Web 应用把
   统计文件渲染成顶层键数量柱状图、嵌套深度饼图和类型表格。
-- **AI 评审** —— `--ai` 把格式化后的文档发给 DeepSeek，打印一份质量报告和重构建议。
+- **AI 评审** —— `--ai` 把格式化后的文档发给一个 OpenAI 兼容的 API（默认是 DeepSeek），
+  打印一份质量报告和重构建议。端点、模型和密钥都可以配置。
 
 ## 环境要求
 
@@ -103,7 +104,10 @@ Options:
   -v, --validate         Only check the input and report the first error
   -h, --help             Show this message and exit
   -V, --version          Show the version and exit
-      --ai               Ask DeepSeek for a quality report and suggestions
+      --ai               Ask the AI for a quality report and suggestions
+      --model <name>     Model to ask for instead of the default
+      --ai-base-url <url>
+                         Endpoint to post to instead of the default
       --json-out <path>  Write a statistics report as JSON to <path>
       --stats            Print a statistics summary instead of the document
       --no-color         Never colour the output, even on a terminal
@@ -145,6 +149,16 @@ to every one of them in turn. A record that is not valid JSON is reported
 with its line in the file and the rest are still printed; the run exits 1 if
 any record failed. It describes many documents at once, so it is refused
 with --json-out and with --ai.
+
+--ai asks an OpenAI-compatible chat-completions API for a review of the
+formatted document. The endpoint, the model and the key are taken from
+--ai-base-url, --model and MOONJSON_AI_API_KEY, each falling back in turn
+to MOONJSON_AI_BASE_URL, MOONJSON_AI_MODEL and DEEPSEEK_API_KEY, and then
+to DeepSeek's own. There is no --api-key: a key on a command line is a key
+in the shell history and in the process list.
+
+--model and --ai-base-url describe that one request, so without --ai they
+are read, accepted and ignored.
 
 Exit codes:
   0  success
@@ -557,16 +571,70 @@ python3 -m http.server 8000 --directory dist
 
 ## AI 评审
 
-`--ai` 向 DeepSeek 请求一份对格式化后文档的评审：
+`--ai` 向一个 OpenAI 兼容的 API 请求对格式化后文档的评审；什么都不配时请求的就是
+DeepSeek，也就是下面这条：
 
 ```sh
 export DEEPSEEK_API_KEY=sk-...
 moon run cmd/main -- --ai -f test.json
 ```
 
-密钥从 `DEEPSEEK_API_KEY` 环境变量读取，绝不硬编码。评审产出不了时以退出码 `3` 退出，
-并把原因打印到标准错误，标准输出保持为空。超过 20 000 字符的文档在发送前会被截断，
-请求在 60 秒后超时。
+密钥从环境变量读取，绝不硬编码，也没有 `--api-key` 参数：写在命令行上的密钥就是留在
+shell history 和进程列表里的密钥。评审产出不了时以退出码 `3` 退出，并把原因打印到标准
+错误，标准输出保持为空。超过 20 000 字符的文档在发送前会被截断，请求在 60 秒后超时。
+
+## 使用其他大模型服务商
+
+请求体用的就是各家现在都支持的 chat-completions 格式，所以换个服务商只是把端点和模型
+名字换掉。两者都可以由命令行参数或环境变量给出，参数优先于环境变量，环境变量优先于
+默认值：
+
+| 配置 | 命令行参数 | 环境变量 | 默认值 |
+| ---- | ---------- | -------- | ------ |
+| 端点 | `--ai-base-url <url>` | `MOONJSON_AI_BASE_URL` | DeepSeek 的端点 |
+| 模型 | `--model <name>` | `MOONJSON_AI_MODEL` | `deepseek-flash` |
+| 密钥 | — | `MOONJSON_AI_API_KEY`，没有则读 `DEEPSEEK_API_KEY` | — |
+
+端点写的是完整 URL，而不是让工具再拼一段路径的 base URL —— 完整 URL 是各家文档都给的
+写法，也是不需要猜的那一种。这两个参数描述的是 `--ai` 发出的那一次请求，所以不带
+`--ai` 时它们会被读入、接受，然后忽略。
+
+| 服务商 | `--ai-base-url` | `--model` |
+| ------ | --------------- | --------- |
+| DeepSeek（默认） | `https://api.deepseek.com/chat/completions` | `deepseek-flash` |
+| Kimi（月之暗面） | `https://api.moonshot.cn/v1/chat/completions` | `kimi-k3` |
+| 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4/chat/completions` | `glm-4-flash` |
+| OpenAI | `https://api.openai.com/v1/chat/completions` | `gpt-4o-mini` |
+| Ollama（本地） | `http://localhost:11434/v1/chat/completions` | `llama3.1` |
+
+每家一条命令，密钥只在这一条命令里给，不写进 shell：
+
+```sh
+# DeepSeek, which needs neither flag: this is the default
+MOONJSON_AI_API_KEY=sk-... moon run cmd/main -- --ai -f test.json
+
+# Kimi
+MOONJSON_AI_API_KEY=sk-... moon run cmd/main -- --ai \
+  --ai-base-url https://api.moonshot.cn/v1/chat/completions --model kimi-k3 -f test.json
+
+# 智谱 GLM
+MOONJSON_AI_API_KEY=... moon run cmd/main -- --ai \
+  --ai-base-url https://open.bigmodel.cn/api/paas/v4/chat/completions --model glm-4-flash -f test.json
+
+# OpenAI
+MOONJSON_AI_API_KEY=sk-... moon run cmd/main -- --ai \
+  --ai-base-url https://api.openai.com/v1/chat/completions --model gpt-4o-mini -f test.json
+
+# Ollama, which asks for no key of its own: the tool still wants one to start
+# a review, so any placeholder will do
+MOONJSON_AI_API_KEY=ollama moon run cmd/main -- --ai \
+  --ai-base-url http://localhost:11434/v1/chat/completions --model llama3.1 -f test.json
+```
+
+已经导出了 `DEEPSEEK_API_KEY` 的 shell 不用改任何东西：这个名字仍然会被读到，只是排在
+`MOONJSON_AI_API_KEY` 之后。这次交互的其余部分没有变化 —— 评审内容照样从
+`choices[0].message.content` 里取，服务商按惯例用 `error.message` 报告失败时，那条消息
+也会照原样显示出来，而不会被吞掉。
 
 ## 项目结构
 
@@ -583,7 +651,7 @@ moonjson-toolkit/
 ├── cli.mbt               argument parsing and usage text
 ├── parser.mbt            parsing and file/standard-input reading
 ├── paths.mbt             the path of every value, and of every object member
-├── ai.mbt                the DeepSeek request and response handling
+├── ai.mbt                the AI request, its settings and its response handling
 ├── stats.mbt             the statistics model and its JSON form
 ├── runner.mbt            one run of the tool, and the exit codes
 ├── cmd/main/             the process entry point
@@ -599,7 +667,7 @@ moonjson-toolkit/
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 176 tests
+moon test  --target native   # 187 tests
 moon fmt                     # format
 
 cd frontend
@@ -615,19 +683,19 @@ moon coverage analyze -- -f summary
 ```
 
 ```
-ai.mbt: 58/68
-cli.mbt: 138/142
+ai.mbt: 80/90
+cli.mbt: 140/144
 cmd/main/main.mbt: 0/14
 color.mbt: 30/33
 diagnostics.mbt: 81/98
 flatten.mbt: 100/102
 formatter.mbt: 151/152
 parser.mbt: 261/276
-runner.mbt: 150/174
-Total: 1110/1200
+runner.mbt: 158/184
+Total: 1142/1234
 ```
 
-即插桩监视的 1200 个点中有 1110 个被覆盖，占 92.5%。这里的计数单位是源码中的位置而不是行：一行里放下两个表达式就是两个点，其中一个没被执行时，这一行仍会算作已覆盖，所以只要模块里有任意一个点没被执行，它就会出现在上面这段输出里；反过来说，它没有列出的四个模块——`jsonl.mbt`、`paths.mbt`、`prune.mbt` 和 `stats.mbt`——是逐点完整覆盖的。同样的数字按覆盖率从高到低排列：
+即插桩监视的 1234 个点中有 1142 个被覆盖，占 92.5%。这里的计数单位是源码中的位置而不是行：一行里放下两个表达式就是两个点，其中一个没被执行时，这一行仍会算作已覆盖，所以只要模块里有任意一个点没被执行，它就会出现在上面这段输出里；反过来说，它没有列出的四个模块——`jsonl.mbt`、`paths.mbt`、`prune.mbt` 和 `stats.mbt`——是逐点完整覆盖的。同样的数字按覆盖率从高到低排列：
 
 | 模块 | 覆盖率 |
 | ---- | ------ |
@@ -637,14 +705,14 @@ Total: 1110/1200
 | `cli.mbt` | 97.2% |
 | `parser.mbt` | 94.6% |
 | `color.mbt` | 90.9% |
-| `runner.mbt` | 86.2% |
-| `ai.mbt` | 85.3% |
+| `ai.mbt` | 88.9% |
+| `runner.mbt` | 85.9% |
 | `diagnostics.mbt` | 82.7% |
 | `cmd/main/main.mbt` | 0% |
 
 `cmd/main/main.mbt` 是唯一一个有意为之的零：它是进程入口，而 `moon test` 从不运行 `main`。它做的事只是把真实的命令行和两个真实的数据流交给 `run`，而 `run` 本身由测试直接覆盖。
 
-其余没覆盖到的，都是需要进程之外的东西才能触发的分支。`ai.mbt` 里的 `analyze`——唯一与 DeepSeek 通信的函数——从未被调用，因为任何测试都不允许访问真实 API；`parser.mbt` 和 `runner.mbt` 的标准输入路径没有被触及，因为每个测试都指定了文件；`diagnostics.mbt` 则留着测试套件无法构造出来的那些解析错误分支和限制类型。
+其余没覆盖到的，都是需要进程之外的东西才能触发的分支。`ai.mbt` 里的 `analyze`——唯一与服务商通信的函数——从未被调用，因为任何测试都不允许访问真实 API；`parser.mbt` 和 `runner.mbt` 的标准输入路径没有被触及，因为每个测试都指定了文件；`diagnostics.mbt` 则留着测试套件无法构造出来的那些解析错误分支和限制类型。
 
 `parser.mbt` 剩下的那些点大多在快路径里，而它们之所以没被执行，是因为一旦被执行就说明有 bug：两个循环末尾的 `abort` 行（那两个循环只会通过返回离开），以及字符串末尾把转义序列截断时的兜底判断。剩下的点只有测试套件不携带的文档才够得着——一份超过 64 MiB 输入上限的文档，这正是下一节要说的。
 

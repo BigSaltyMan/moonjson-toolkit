@@ -40,6 +40,8 @@ pub(all) struct CliOptions {
   mut help : Bool
   mut version : Bool
   mut ai : Bool
+  mut model : String?
+  mut ai_base_url : String?
   mut json_out : String?
   mut no_color : Bool
 }
@@ -66,6 +68,8 @@ pub fn CliOptions::default() -> CliOptions {
     help: false,
     version: false,
     ai: false,
+    model: None,
+    ai_base_url: None,
     json_out: None,
     no_color: false,
   }
@@ -99,7 +103,10 @@ pub fn usage() -> String {
     "  -v, --validate         Only check the input and report the first error",
     "  -h, --help             Show this message and exit",
     "  -V, --version          Show the version and exit",
-    "      --ai               Ask DeepSeek for a quality report and suggestions",
+    "      --ai               Ask the AI for a quality report and suggestions",
+    "      --model <name>     Model to ask for instead of the default",
+    "      --ai-base-url <url>",
+    "                         Endpoint to post to instead of the default",
     "      --json-out <path>  Write a statistics report as JSON to <path>",
     "      --stats            Print a statistics summary instead of the document",
     "      --no-color         Never colour the output, even on a terminal",
@@ -141,6 +148,16 @@ pub fn usage() -> String {
     "with its line in the file and the rest are still printed; the run exits 1 if",
     "any record failed. It describes many documents at once, so it is refused",
     "with --json-out and with --ai.",
+    "",
+    "--ai asks an OpenAI-compatible chat-completions API for a review of the",
+    "formatted document. The endpoint, the model and the key are taken from",
+    "--ai-base-url, --model and MOONJSON_AI_API_KEY, each falling back in turn",
+    "to MOONJSON_AI_BASE_URL, MOONJSON_AI_MODEL and DEEPSEEK_API_KEY, and then",
+    "to DeepSeek's own. There is no --api-key: a key on a command line is a key",
+    "in the shell history and in the process list.",
+    "",
+    "--model and --ai-base-url describe that one request, so without --ai they",
+    "are read, accepted and ignored.",
     "",
     "Exit codes:",
     "  0  success",
@@ -282,6 +299,14 @@ fn apply_value_option(
       options.json_out = Some(value)
       Ok(())
     }
+    "model" => {
+      options.model = Some(value)
+      Ok(())
+    }
+    "ai-base-url" => {
+      options.ai_base_url = Some(value)
+      Ok(())
+    }
     "max-depth" =>
       match parse_max_depth(value) {
         Ok(limit) => {
@@ -298,8 +323,8 @@ fn apply_value_option(
         }
         Err(message) => Err(message)
       }
-    // Unreachable: `CliOptions::parse` routes only the four names above here.
-    // An error rather than a silent `Ok` so that adding a fifth value-taking
+    // Unreachable: `CliOptions::parse` routes only the six names above here.
+    // An error rather than a silent `Ok` so that adding a seventh value-taking
     // option and forgetting this match is caught rather than ignored.
     _ => Err("unknown option: --" + name)
   }
@@ -343,7 +368,12 @@ pub fn CliOptions::parse(args : Array[String]) -> Result[CliOptions, String] {
         "stats" => options.stats = true
         "no-color" => options.no_color = true
         "ai" => options.ai = true
-        "file" | "json-out" | "indent" | "max-depth" =>
+        "file"
+        | "json-out"
+        | "indent"
+        | "max-depth"
+        | "model"
+        | "ai-base-url" =>
           match option_value("--" + name, inline, args, index) {
             Err(message) => return Err(message)
             Ok((value, next)) =>

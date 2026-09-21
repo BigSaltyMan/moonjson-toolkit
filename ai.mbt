@@ -1,17 +1,34 @@
 ///|
-/// Environment variable holding the DeepSeek API key.
-pub let api_key_variable : String = "DEEPSEEK_API_KEY"
+/// Environment variable holding the API key, read first.
+pub let api_key_variable : String = "MOONJSON_AI_API_KEY"
 
 ///|
-/// DeepSeek's chat-completions endpoint.
-pub let deepseek_endpoint : String = "https://api.deepseek.com/v1/chat/completions"
+/// Environment variable holding the API key, read when the first is unset or
+/// empty.
+///
+/// The tool is no longer DeepSeek-only, but a shell that already exports a
+/// DeepSeek key should not have to be told that, so the old name keeps working
+/// and only takes second place.
+pub let fallback_api_key_variable : String = "DEEPSEEK_API_KEY"
 
 ///|
-/// The model used for the quality report.
-pub let deepseek_model : String = "deepseek-chat"
+/// Environment variable naming the endpoint to post to.
+pub let endpoint_variable : String = "MOONJSON_AI_BASE_URL"
 
 ///|
-/// How long to wait for DeepSeek before giving up, in milliseconds.
+/// Environment variable naming the model to ask for.
+pub let model_variable : String = "MOONJSON_AI_MODEL"
+
+///|
+/// The chat-completions endpoint used when nothing overrides it.
+pub let deepseek_endpoint : String = "https://api.deepseek.com/chat/completions"
+
+///|
+/// The model used for the quality report when nothing overrides it.
+pub let deepseek_model : String = "deepseek-flash"
+
+///|
+/// How long to wait for the API before giving up, in milliseconds.
 pub let request_timeout_ms : Int = 60_000
 
 ///|
@@ -20,7 +37,92 @@ pub let request_timeout_ms : Int = 60_000
 pub let max_prompt_chars : Int = 20_000
 
 ///|
-/// The instruction that turns DeepSeek into a JSON reviewer.
+/// Read `name` from the environment, treating an empty value as absent.
+///
+/// An exported-but-empty variable is a shell that meant to configure something
+/// and did not, and every caller here wants the fallback in that case rather
+/// than an empty endpoint or an empty model name.
+///
+/// This is the only place any of the three settings is read from the process,
+/// and the three resolvers below take what it returns as an argument rather
+/// than calling it. That keeps the precedence — the whole of their behaviour —
+/// a pure function of what they are handed, which is what lets it be tested
+/// without writing to an environment every test in the file shares.
+pub fn non_empty_env(name : String) -> String? {
+  match @env.get_env_var(name) {
+    Some(value) => if value == "" { None } else { Some(value) }
+    None => None
+  }
+}
+
+///|
+/// The model a run should ask for: the one `--model` names, else the one the
+/// environment names, else the default.
+pub fn resolve_model(
+  cli_model : String?,
+  environment_model : String?,
+) -> String {
+  let chosen = match cli_model {
+    Some(model) => Some(model)
+    None => environment_model
+  }
+  match chosen {
+    Some(model) => model
+    None => deepseek_model
+  }
+}
+
+///|
+/// The endpoint a run should post to: the one `--ai-base-url` names, else the
+/// one the environment names, else the default.
+///
+/// The URL is expected to be the whole endpoint rather than a base, because
+/// that is the one spelling every OpenAI-compatible service documents and the
+/// one that leaves nothing to guess: a base would have to have
+/// `/chat/completions` appended to it, which is the path a service is most
+/// likely to spell differently.
+pub fn resolve_endpoint(cli_url : String?, environment_url : String?) -> String {
+  let chosen = match cli_url {
+    Some(url) => Some(url)
+    None => environment_url
+  }
+  match chosen {
+    Some(url) => url
+    None => deepseek_endpoint
+  }
+}
+
+///|
+/// The API key a run should send: the newer variable when it holds something,
+/// else the older one.
+///
+/// The two arguments are `MOONJSON_AI_API_KEY` and `DEEPSEEK_API_KEY` read
+/// through `non_empty_env`, in that order. The failure names both variables,
+/// because a reader who has exported neither needs to know which name to
+/// export, and one who has exported the other needs to know why it was not
+/// found.
+pub fn resolve_api_key(
+  newer : String?,
+  older : String?,
+) -> Result[String, String] {
+  let chosen = match newer {
+    Some(key) => Some(key)
+    None => older
+  }
+  match chosen {
+    Some(key) => Ok(key)
+    None =>
+      Err(
+        api_key_variable +
+        " or " +
+        fallback_api_key_variable +
+        " is not set; export a key to use --ai",
+      )
+  }
+}
+
+///|
+/// The instruction that turns a chat model into a JSON reviewer.
 fn system_prompt() -> String {
   [
     "You are a JSON quality reviewer embedded in a command-line tool.", "Reply in plain text without markdown fences.",
@@ -80,10 +182,13 @@ pub extend ChatRequest with ToJson::{to_json}
 /// Build the chat-completions request body for `json_text`.
 ///
 /// The body is serialised from a typed record so that the document reaches the
-/// API escaped correctly, however unusual its strings are.
-fn build_request_body(json_text : String) -> String {
+/// API escaped correctly, however unusual its strings are. The model is
+/// labelled because it and the document are both strings, and a call that
+/// swapped the two would build a request that no API would accept and no
+/// type-checker would refuse.
+fn build_request_body(json_text : String, model~ : String) -> String {
   let request : ChatRequest = {
-    model: deepseek_model,
+    model,
     messages: [
       { role: "system", content: system_prompt(), },
       {
@@ -173,33 +278,40 @@ fn extract_report(response : String) -> Result[String, String] {
 }
 
 ///|
-/// Ask DeepSeek for a quality report and refactoring suggestions for the
-/// formatted `json_text`.
+/// Ask the configured API for a quality report and refactoring suggestions for
+/// the formatted `json_text`.
 ///
-/// The API key is read from the environment and never taken from a file or an
-/// argument, so it cannot leak through shell history or a process listing.
-pub async fn analyze(json_text : String) -> Result[String, String] {
-  let api_key = match @env.get_env_var(api_key_variable) {
-    Some(key) =>
-      if key == "" {
-        return Err(api_key_variable + " is empty; export a key to use --ai")
-      } else {
-        key
-      }
-    None =>
-      return Err(api_key_variable + " is not set; export a key to use --ai")
-  }
-  let body = build_request_body(json_text)
+/// Everything the call needs is handed in, so this function reads no
+/// environment and holds no opinion about who is answering: `endpoint` is
+/// posted to as given, `model` is the name the request asks for, and `api_key`
+/// goes into the `Authorization` header. The three come from `resolve_model`,
+/// `resolve_endpoint` and `resolve_api_key`, which the runner calls — the key
+/// is still never taken from a file or an argument, so it cannot leak through
+/// shell history or a process listing.
+///
+/// The key is expected to be non-empty, which is what the resolver guarantees;
+/// an empty one would be sent as a bare `Bearer` and rejected by the service
+/// with a less useful message than the resolver's.
+pub async fn analyze(
+  json_text : String,
+  endpoint : String,
+  model : String,
+  api_key : String,
+) -> Result[String, String] {
+  let body = build_request_body(json_text, model~)
   let response = @async.with_timeout(request_timeout_ms, async fn() {
     let headers : Map[String, String] = {
       "Content-Type": "application/json",
       "Authorization": "Bearer " + api_key,
     }
-    @mio.post(deepseek_endpoint, body, headers~).text()
+    @mio.post(endpoint, body, headers~).text()
   }) catch {
     error =>
+      // The endpoint is named in the failure because a request that never
+      // arrived is most often a request sent to the wrong place, and which
+      // place is exactly what the reader cannot see from here.
       return Err(
-        "could not reach the DeepSeek API: " + describe_io_error(error),
+        "could not reach " + endpoint + ": " + describe_io_error(error),
       )
   }
   extract_report(response)

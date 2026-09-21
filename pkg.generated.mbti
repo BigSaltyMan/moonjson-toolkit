@@ -7,7 +7,7 @@ import {
 }
 
 // Values
-pub async fn analyze(String) -> Result[String, String]
+pub async fn analyze(String, String, String, String) -> Result[String, String]
 
 pub let api_key_variable : String
 
@@ -31,6 +31,8 @@ pub fn describe_limit_kind(@json.JsonLimitKind) -> String
 
 pub fn describe_syntax_error(@parsec.ParseError) -> String
 
+pub let endpoint_variable : String
+
 pub fn env_allows_color(String?, String?) -> Bool
 
 pub fn escape_json_string(String) -> String
@@ -42,6 +44,8 @@ pub let exit_input_error : Int
 pub let exit_success : Int
 
 pub let exit_usage_error : Int
+
+pub let fallback_api_key_variable : String
 
 pub fn flatten(@json.Json) -> Result[@json.Json, String]
 
@@ -56,6 +60,10 @@ pub fn line_text(String, Int) -> String
 pub let max_indent : Int
 
 pub let max_prompt_chars : Int
+
+pub let model_variable : String
+
+pub fn non_empty_env(String) -> String?
 
 pub fn offset_to_line_col(String, Int) -> (Int, Int)
 
@@ -83,7 +91,13 @@ pub fn red(String) -> String
 
 pub let request_timeout_ms : Int
 
-pub async fn run(Array[String], analyze~ : async (String) -> Result[String, String]) -> RunResult
+pub fn resolve_api_key(String?, String?) -> Result[String, String]
+
+pub fn resolve_endpoint(String?, String?) -> String
+
+pub fn resolve_model(String?, String?) -> String
+
+pub async fn run(Array[String], analyze~ : async (String, String, String, String) -> Result[String, String]) -> RunResult
 
 pub fn set_color_enabled(Bool) -> Unit
 
@@ -135,6 +149,8 @@ pub(all) struct CliOptions {
   mut help : Bool
   mut version : Bool
   mut ai : Bool
+  mut model : String?
+  mut ai_base_url : String?
   mut json_out : String?
   mut no_color : Bool
 }

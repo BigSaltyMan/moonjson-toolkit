@@ -50,16 +50,16 @@ fn repeat_char(ch : Char, length : Int) -> String {
 }
 
 ///|
-test "the request body is valid JSON that names the model" {
-  let body = build_request_body("{\"a\":1}")
-  assert_eq(require_text(body, ["model"]), deepseek_model)
+test "the request body is valid JSON that names the model it was given" {
+  let body = build_request_body("{\"a\":1}", model="a-model-of-my-own")
+  assert_eq(require_text(body, ["model"]), "a-model-of-my-own")
   assert_eq(require_text(body, ["messages", "0", "role"]), "system")
   assert_eq(require_text(body, ["messages", "1", "role"]), "user")
 }
 
 ///|
 test "the request body is not streamed" {
-  let parsed = require_json(build_request_body("{}"))
+  let parsed = require_json(build_request_body("{}", model=deepseek_model))
   match object_field(parsed, "stream") {
     Some(Bool(value~)) => assert_eq(value, false)
     _ => abort("expected a boolean stream field")
@@ -69,7 +69,7 @@ test "the request body is not streamed" {
 ///|
 test "the user message embeds the document verbatim when it is small" {
   let document = "{\"a\":1}"
-  let body = build_request_body(document)
+  let body = build_request_body(document, model=deepseek_model)
   assert_true(
     require_text(body, ["messages", "1", "content"]).contains(document),
   )
@@ -98,7 +98,7 @@ test "a document at the limit is left alone" {
 ///|
 test "awkward document text survives the round trip into the body" {
   let document = "{\"quote\":\"\\\"\",\"nl\":\"a\\nb\",\"slash\":\"a\\\\b\"}"
-  let body = build_request_body(document)
+  let body = build_request_body(document, model=deepseek_model)
   // Re-reading the body proves the escaping is correct rather than merely
   // well-intentioned: a broken escape would not parse back.
   assert_true(
@@ -156,29 +156,101 @@ test "a non-text message content is reported" {
 }
 
 ///|
-test "the API key is read from the documented environment variable" {
-  assert_eq(api_key_variable, "DEEPSEEK_API_KEY")
+/// The four variable names are the contract with the outside world: everything
+/// below them decides precedence among values already in hand, so the names are
+/// the only part of the resolution a test cannot state in the abstract.
+test "the configuration variables are named" {
+  assert_eq(api_key_variable, "MOONJSON_AI_API_KEY")
+  assert_eq(fallback_api_key_variable, "DEEPSEEK_API_KEY")
+  assert_eq(model_variable, "MOONJSON_AI_MODEL")
+  assert_eq(endpoint_variable, "MOONJSON_AI_BASE_URL")
 }
 
 ///|
-async test "analyze reports a missing API key instead of calling the API" {
-  @env.unset_env_var(api_key_variable)
-  match analyze("{\"a\":1}") {
-    Ok(_) => abort("analyze should not succeed without an API key")
-    Err(message) => {
-      assert_true(message.contains(api_key_variable))
-      assert_true(message.contains("not set"))
-    }
-  }
+/// The three tests for each setting are the same three: what a run was told
+/// wins over what the shell was set up with, which wins over the default. They
+/// are written against `None` for "the environment says nothing" rather than
+/// against an unset variable, so they neither read nor write the environment
+/// and cannot disagree with each other when `moon test` runs them at once.
+test "the model named on the command line wins over the environment" {
+  assert_eq(
+    resolve_model(Some("from-the-command-line"), Some("from-the-environment")),
+    "from-the-command-line",
+  )
 }
 
 ///|
-async test "analyze reports an empty API key" {
-  @env.set_env_var(api_key_variable, "")
-  let result = analyze("{\"a\":1}")
-  @env.unset_env_var(api_key_variable)
-  match result {
-    Ok(_) => abort("analyze should not succeed with an empty API key")
-    Err(message) => assert_true(message.contains("is empty"))
-  }
+test "the environment names the model when the command line does not" {
+  assert_eq(
+    resolve_model(None, Some("from-the-environment")),
+    "from-the-environment",
+  )
+}
+
+///|
+test "the default model is used when nothing names one" {
+  assert_eq(resolve_model(None, None), deepseek_model)
+}
+
+///|
+test "the endpoint named on the command line wins over the environment" {
+  assert_eq(
+    resolve_endpoint(
+      Some("http://from-the-command-line/v1/chat/completions"),
+      Some("http://from-the-environment/v1/chat/completions"),
+    ),
+    "http://from-the-command-line/v1/chat/completions",
+  )
+}
+
+///|
+test "the environment names the endpoint when the command line does not" {
+  assert_eq(
+    resolve_endpoint(
+      None,
+      Some("http://from-the-environment/v1/chat/completions"),
+    ),
+    "http://from-the-environment/v1/chat/completions",
+  )
+}
+
+///|
+test "the default endpoint is used when nothing names one" {
+  assert_eq(resolve_endpoint(None, None), deepseek_endpoint)
+}
+
+///|
+test "the newer API key variable is read first" {
+  assert_eq(resolve_api_key(Some("sk-new"), Some("sk-old")), Ok("sk-new"))
+}
+
+///|
+/// The old name is neither an error nor a last resort: a shell that already
+/// exports a DeepSeek key goes on working without being told to rename
+/// anything. An empty variable reads as absent rather than as a key, which is
+/// the difference between this and the version that refused an empty key
+/// outright.
+test "an unusable newer key falls back to the older variable" {
+  assert_eq(resolve_api_key(None, Some("sk-old")), Ok("sk-old"))
+  // An exported-but-blank variable reads as absent, which is the one thing the
+  // pure functions cannot be asked: they are handed `None`, and this is what
+  // produces it. The name is used by no other test, so setting it here cannot
+  // change what any of them sees.
+  let scratch : String = "MOONJSON_AI_UNUSED_BY_ANYTHING"
+  @env.unset_env_var(scratch)
+  assert_eq(non_empty_env(scratch), None)
+  @env.set_env_var(scratch, "")
+  let blank = non_empty_env(scratch)
+  @env.unset_env_var(scratch)
+  assert_eq(blank, None)
+}
+
+///|
+test "a missing API key names both variables" {
+  assert_eq(
+    resolve_api_key(None, None),
+    Err(
+      "MOONJSON_AI_API_KEY or DEEPSEEK_API_KEY is not set; export a key to use --ai",
+    ),
+  )
 }

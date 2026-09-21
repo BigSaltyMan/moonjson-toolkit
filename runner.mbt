@@ -216,7 +216,7 @@ fn format_document(options : CliOptions, json : @pjson.Json) -> String {
 /// failures are already on standard error beside it.
 pub async fn run(
   args : Array[String],
-  analyze~ : async (String) -> Result[String, String],
+  analyze~ : async (String, String, String, String) -> Result[String, String],
 ) -> RunResult {
   let options = match CliOptions::parse(args) {
     Ok(options) => options
@@ -308,7 +308,7 @@ async fn run_document(
   options : CliOptions,
   source : String,
   text : String,
-  analyze : async (String) -> Result[String, String],
+  analyze : async (String, String, String, String) -> Result[String, String],
 ) -> RunResult {
   let json = match parse_with_diagnostic(text, options.max_depth) {
     Ok(json) => json
@@ -330,7 +330,7 @@ async fn render_document(
   options : CliOptions,
   source : String,
   json : @pjson.Json,
-  analyze : async (String) -> Result[String, String],
+  analyze : async (String, String, String, String) -> Result[String, String],
 ) -> RunResult {
   let prepared = match prepare_document(options, json) {
     Ok(prepared) => prepared
@@ -341,7 +341,27 @@ async fn render_document(
   // leaves standard output empty rather than trailing a document that the
   // caller may be piping somewhere.
   let review = if options.ai {
-    match analyze(formatted) {
+    // The three settings the request is made of are settled here rather than
+    // inside `analyze`, which is handed nothing but strings: the command line
+    // is read by this layer, and the environment is read here too and handed
+    // in, so that the resolvers themselves decide only the precedence. They
+    // are resolved only under `--ai`, so a run without it neither reads nor
+    // needs any of them — a missing key is not an error for a document that
+    // was never going to be reviewed.
+    let model = resolve_model(options.model, non_empty_env(model_variable))
+    let endpoint = resolve_endpoint(
+      options.ai_base_url,
+      non_empty_env(endpoint_variable),
+    )
+    let api_key = match
+      resolve_api_key(
+        non_empty_env(api_key_variable),
+        non_empty_env(fallback_api_key_variable),
+      ) {
+      Ok(key) => key
+      Err(message) => return failure("error: " + message, exit_ai_error)
+    }
+    match analyze(formatted, endpoint, model, api_key) {
       Ok(report) => Some(report)
       Err(message) => return failure("error: " + message, exit_ai_error)
     }
