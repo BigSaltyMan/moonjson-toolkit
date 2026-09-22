@@ -67,6 +67,11 @@ charts the statistics the tool writes.
 - **AI review** — `--ai` sends the formatted document to an OpenAI-compatible
   API (DeepSeek by default) and prints a quality report with refactoring
   suggestions. The endpoint, the model and the key are all configurable.
+- **MoonBit dependency analysis** — `--moon-deps` reads a module manifest and
+  prints the tree of modules it depends on, drawn from the manifests in
+  `.mooncakes`, and reports a module required at more than one version or a
+  circular dependency beneath the tree. See
+  [analyzing MoonBit dependencies](#analyzing-moonbit-dependencies).
 
 ## Requirements
 
@@ -121,6 +126,8 @@ Options:
       --model <name>     Model to ask for instead of the default
       --ai-base-url <url>
                          Endpoint to post to instead of the default
+      --moon-deps        Print the dependency tree of a MoonBit module
+                         manifest
       --json-out <path>  Write a statistics report as JSON to <path>
       --stats            Print a statistics summary instead of the document
       --no-color         Never colour the output, even on a terminal
@@ -172,6 +179,16 @@ in the shell history and in the process list.
 
 --model and --ai-base-url describe that one request, so without --ai they
 are read, accepted and ignored.
+
+--moon-deps reads the input as a MoonBit module manifest and prints the
+tree of modules it depends on, each dependency read in turn from the
+.mooncakes directory beside the manifest. Both manifest forms are read:
+moon.mod.json, and the moon.mod whose dependencies sit in an import block.
+A dependency that has not been downloaded is shown with nothing under it,
+and a module required at more than one version, or a circular dependency,
+is reported beneath the tree. The tree is the whole of the output, so no
+other option is consulted; --ai reviews the document instead, so under it
+--moon-deps does nothing.
 
 Exit codes:
   0  success
@@ -698,6 +715,107 @@ exchange changes — the report is read from `choices[0].message.content`, and a
 provider that reports a failure in the usual `error.message` envelope has its
 message shown rather than swallowed.
 
+## Analyzing MoonBit dependencies
+
+`--moon-deps` reads its input as a MoonBit module manifest rather than as a
+document, and prints the tree of modules it depends on. Run it in this
+repository:
+
+```sh
+moon run cmd/main -- --moon-deps -f moon.mod
+# BigSaltyMan/moonjson-toolkit@0.1.0
+# ├── Nanaloveyuki/parsec@0.1.3
+# ├── oboard/mio@0.5.4
+# │   ├── moonbitlang/x@0.5.5
+# │   ├── moonbitlang/async@0.22.1
+# │   └── bikallem/compress@0.3.4
+# │       ├── moonbitlang/async@0.22.1
+# │       └── bikallem/blit@0.2.2
+# ├── moonbitlang/x@0.5.5
+# └── moonbitlang/async@0.22.1
+#
+# warning: 2 versions of moonbitlang/x are required
+#   0.5.5 by BigSaltyMan/moonjson-toolkit@0.1.0
+#   0.4.50 by oboard/mio@0.5.4
+#
+# warning: 3 versions of moonbitlang/async are required
+#   0.22.1 by BigSaltyMan/moonjson-toolkit@0.1.0
+#   0.20.6 by oboard/mio@0.5.4
+#   0.16.7 by bikallem/compress@0.3.4
+```
+
+Each dependency's own manifest is read from the `.mooncakes` directory beside
+the manifest, which is where `moon` downloads them for a run made from that
+directory. A dependency that was not downloaded is shown by name with nothing
+beneath it, so the tree reaches exactly as far as the fetch that preceded it.
+
+A module is printed with the version of the manifest that was read from it. For
+a module that was downloaded that is the version the toolchain resolved — the
+copy sitting in `.mooncakes` — so `moonbitlang/x` above is shown under
+`oboard/mio` as `0.5.5` even though `mio` asks for `0.4.50`: that is the copy
+that is there. The warnings underneath are where the asking is written down
+instead, and the same module reached from two places is drawn twice rather than
+recognised, which is what `moon tree` does and what makes each warning readable
+on its own.
+
+Both manifest forms are read. `moon.mod.json` is JSON:
+
+```sh
+echo '{"name":"myproject","version":"0.1.0","deps":{"moonbitlang/x":"0.5.5"}}' \
+  | moon run cmd/main -- --moon-deps
+# myproject@0.1.0
+# └── moonbitlang/x@0.5.5
+```
+
+`moon.mod` is a list of `key = value` lines whose dependencies sit in an
+`import { "name@version", ... }` block, which is what the manifest of this
+repository ends with:
+
+```sh
+tail -6 moon.mod
+# import {
+#   "Nanaloveyuki/parsec@0.1.3",
+#   "oboard/mio@0.5.4",
+#   "moonbitlang/x@0.5.5",
+#   "moonbitlang/async@0.22.1",
+# }
+```
+
+Which form a manifest is in is decided by the first character that is not white
+space, not by the file name, so a manifest is read as what it is rather than as
+what it is called. An entry that pins no version — `"moonbitlang/x"` on its own
+— is a dependency that may be any version, and is printed by name.
+
+A circular dependency is reported in the same place as the version warnings,
+with the path that closes it:
+
+```sh
+# Two manifests in a scratch directory, each asking for the other.
+mkdir -p /tmp/cycle/.mooncakes/b
+printf 'name = "b"\n\nversion = "1.0.0"\n\nimport {\n  "a@1.0.0",\n}\n' > /tmp/cycle/.mooncakes/b/moon.mod
+printf 'name = "a"\n\nversion = "1.0.0"\n\nimport {\n  "b@1.0.0",\n}\n' > /tmp/cycle/moon.mod
+
+moon run cmd/main -- --moon-deps -f /tmp/cycle/moon.mod
+# a@1.0.0
+# └── b@1.0.0
+#     └── a@1.0.0
+#
+# warning: circular dependency detected
+#   a → b → a
+```
+
+Nothing that was published can have one — no build order exists for a module
+that depends on itself — so this is a reading of a manifest rather than of a
+working project. The walk stops at the module it would have entered a second
+time rather than going round forever, which is why the name that closes the
+circle is left in the tree as well as named underneath it.
+
+The tree is the whole of the output: `--moon-deps` replaces the document rather
+than adding to it, so no other option is consulted. `--jsonl` and `--json-out`
+are refused beside it, since each would be answering about a different kind of
+input than the one the tree describes, and `--ai` wins over it, since a review
+describes the document.
+
 ## Project layout
 
 ```
@@ -714,6 +832,7 @@ moonjson-toolkit/
 ├── parser.mbt            parsing and file/standard-input reading
 ├── paths.mbt             the path of every value, and of every object member
 ├── ai.mbt                the AI request, its settings and its response handling
+├── moondeps.mbt          module manifests, read into a dependency tree
 ├── stats.mbt             the statistics model and its JSON form
 ├── runner.mbt            one run of the tool, and the exit codes
 ├── cmd/main/             the process entry point
@@ -723,15 +842,15 @@ moonjson-toolkit/
 ```
 
 Every module is covered by whitebox tests in the matching `_wbtest.mbt` file.
-The formatter, the diagnostics, the argument parser, the statistics and the AI
-response handling all run without network access, so `moon test` is the same
-command on every machine.
+The formatter, the diagnostics, the argument parser, the statistics, the
+dependency analysis and the AI response handling all run without network access,
+so `moon test` is the same command on every machine.
 
 ## Development
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 187 tests
+moon test  --target native   # 207 tests
 moon fmt                     # format
 
 cd frontend
@@ -749,35 +868,35 @@ moon coverage analyze -- -f summary
 
 ```
 ai.mbt: 80/90
-cli.mbt: 140/144
+cli.mbt: 141/145
 cmd/main/main.mbt: 0/14
 color.mbt: 30/33
 diagnostics.mbt: 81/98
 flatten.mbt: 100/102
 formatter.mbt: 151/152
 parser.mbt: 261/276
-runner.mbt: 158/184
-Total: 1142/1234
+runner.mbt: 162/188
+Total: 1421/1513
 ```
 
-That is 1142 of the 1234 points the instrumentation watches, or 92.5%. The count
+That is 1421 of the 1513 points the instrumentation watches, or 93.9%. The count
 is of positions in the source rather than lines — a line carrying two expressions
 is two points, and one of them can go unexecuted while the line itself is read as
 covered — so a module is listed whenever any of its points went unexecuted, and
-the four this block leaves out, `jsonl.mbt`, `paths.mbt`, `prune.mbt` and
-`stats.mbt`, are covered point for point. The same numbers, ordered by how much
-of each module is reached:
+the five this block leaves out, `jsonl.mbt`, `moondeps.mbt`, `paths.mbt`,
+`prune.mbt` and `stats.mbt`, are covered point for point. The same numbers,
+ordered by how much of each module is reached:
 
 | Module | Coverage |
 | ------ | -------- |
-| `jsonl.mbt`, `paths.mbt`, `prune.mbt`, `stats.mbt` | 100% |
+| `jsonl.mbt`, `moondeps.mbt`, `paths.mbt`, `prune.mbt`, `stats.mbt` | 100% |
 | `formatter.mbt` | 99.3% |
 | `flatten.mbt` | 98.0% |
 | `cli.mbt` | 97.2% |
 | `parser.mbt` | 94.6% |
 | `color.mbt` | 90.9% |
 | `ai.mbt` | 88.9% |
-| `runner.mbt` | 85.9% |
+| `runner.mbt` | 86.2% |
 | `diagnostics.mbt` | 82.7% |
 | `cmd/main/main.mbt` | 0% |
 

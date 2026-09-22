@@ -11,6 +11,10 @@ pub async fn analyze(String, String, String, String) -> Result[String, String]
 
 pub let api_key_variable : String
 
+pub async fn build_dep_tree(ModuleInfo, String) -> DepNode
+
+pub async fn build_dep_tree_from(ModuleInfo, async (String) -> Result[ModuleInfo, String]) -> DepNode
+
 pub fn clamp_indent(Int) -> Int
 
 pub fn collect_key_paths(@json.Json) -> Array[String]
@@ -24,6 +28,10 @@ pub let deepseek_endpoint : String
 pub let deepseek_model : String
 
 pub let default_indent : Int
+
+pub fn dependency_directory(String) -> String
+
+pub fn dependency_warnings(DepNode) -> Array[String]
 
 pub fn describe_json_error(@json.JsonError) -> String
 
@@ -46,6 +54,10 @@ pub let exit_success : Int
 pub let exit_usage_error : Int
 
 pub let fallback_api_key_variable : String
+
+pub fn find_cycles(DepNode) -> Array[Array[String]]
+
+pub fn find_version_conflicts(DepNode) -> Array[VersionConflict]
 
 pub fn flatten(@json.Json) -> Result[@json.Json, String]
 
@@ -73,6 +85,10 @@ pub fn parse_jsonl(String) -> Array[Result[@json.Json, JsonDiagnostic]]
 
 pub fn parse_jsonl_with_depth(String, Int?) -> Array[Result[@json.Json, JsonDiagnostic]]
 
+pub fn parse_module_file(@json.Json) -> Result[ModuleInfo, String]
+
+pub fn parse_module_text(String) -> Result[ModuleInfo, String]
+
 pub fn parse_with_diagnostic(String, Int?) -> Result[@json.Json, JsonDiagnostic]
 
 pub let program_name : String
@@ -85,9 +101,13 @@ pub fn quote_for_message(String) -> String
 
 pub async fn read_file(String) -> Result[String, String]
 
+pub async fn read_module_manifest(String) -> Result[ModuleInfo, String]
+
 pub async fn read_stdin() -> Result[String, String]
 
 pub fn red(String) -> String
+
+pub fn render_dep_tree(DepNode) -> String
 
 pub let request_timeout_ms : Int
 
@@ -151,11 +171,17 @@ pub(all) struct CliOptions {
   mut ai : Bool
   mut model : String?
   mut ai_base_url : String?
+  mut moon_deps : Bool
   mut json_out : String?
   mut no_color : Bool
 }
 pub fn CliOptions::default() -> Self
 pub fn CliOptions::parse(Array[String]) -> Result[Self, String]
+
+pub(all) struct DepNode {
+  info : ModuleInfo
+  children : Array[DepNode]
+}
 
 pub(all) struct DepthCount {
   depth : Int
@@ -195,6 +221,12 @@ pub(all) struct KeyCount {
 } derive(ToJson)
 pub fn KeyCount::to_json(Self) -> Json
 
+pub(all) struct ModuleInfo {
+  name : String
+  version : String
+  deps : Array[(String, String)]
+}
+
 pub(all) struct RunResult {
   out : String
   err : String
@@ -206,6 +238,11 @@ pub(all) struct TypeCount {
   count : Int
 } derive(ToJson)
 pub fn TypeCount::to_json(Self) -> Json
+
+pub(all) struct VersionConflict {
+  name : String
+  requests : Array[(String, String)]
+}
 
 // Type aliases
 

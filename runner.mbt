@@ -74,6 +74,19 @@ fn validate_options(options : CliOptions) -> Result[Unit, String] {
       "--flatten and --unflatten are inverses, so only one of them can be given",
     )
   }
+  // The dependency tree is a reading of a module manifest, and a statistics
+  // file is a reading of a JSON document; the two questions have nothing to do
+  // with each other, and a run that asks both is answered by neither.
+  if options.moon_deps && options.json_out != None {
+    return Err(
+      "--json-out describes a JSON document, and --moon-deps reads a module manifest: the two cannot be combined",
+    )
+  }
+  if options.moon_deps && options.jsonl {
+    return Err(
+      "--moon-deps reads one module manifest, and --jsonl reads many documents: the two cannot be combined",
+    )
+  }
   if options.files.length() > 1 && options.json_out != None {
     return Err(
       "--json-out describes a single document, but " +
@@ -310,6 +323,13 @@ async fn run_document(
   text : String,
   analyze : async (String, String, String, String) -> Result[String, String],
 ) -> RunResult {
+  // `--moon-deps` asks a question about a module manifest rather than about a
+  // document, so it stands in front of the parse below and answers on its own.
+  // Under `--ai` it stands aside: a review describes the document, so a run
+  // that asks for one is asking about the document after all.
+  if options.moon_deps && !options.ai {
+    return run_moon_deps(source, text)
+  }
   let json = match parse_with_diagnostic(text, options.max_depth) {
     Ok(json) => json
     Err(diagnostic) =>

@@ -52,6 +52,9 @@
   统计文件渲染成顶层键数量柱状图、嵌套深度饼图和类型表格。
 - **AI 评审** —— `--ai` 把格式化后的文档发给一个 OpenAI 兼容的 API（默认是 DeepSeek），
   打印一份质量报告和重构建议。端点、模型和密钥都可以配置。
+- **MoonBit 依赖分析** —— `--moon-deps` 读取模块清单，打印它依赖的模块树（每个模块的
+  清单从 `.mooncakes` 里读取），并在树下方报告同名依赖的多个版本或循环依赖。见
+  [分析 MoonBit 依赖](#分析-moonbit-依赖)。
 
 ## 环境要求
 
@@ -108,6 +111,8 @@ Options:
       --model <name>     Model to ask for instead of the default
       --ai-base-url <url>
                          Endpoint to post to instead of the default
+      --moon-deps        Print the dependency tree of a MoonBit module
+                         manifest
       --json-out <path>  Write a statistics report as JSON to <path>
       --stats            Print a statistics summary instead of the document
       --no-color         Never colour the output, even on a terminal
@@ -159,6 +164,16 @@ in the shell history and in the process list.
 
 --model and --ai-base-url describe that one request, so without --ai they
 are read, accepted and ignored.
+
+--moon-deps reads the input as a MoonBit module manifest and prints the
+tree of modules it depends on, each dependency read in turn from the
+.mooncakes directory beside the manifest. Both manifest forms are read:
+moon.mod.json, and the moon.mod whose dependencies sit in an import block.
+A dependency that has not been downloaded is shown with nothing under it,
+and a module required at more than one version, or a circular dependency,
+is reported beneath the tree. The tree is the whole of the output, so no
+other option is consulted; --ai reviews the document instead, so under it
+--moon-deps does nothing.
 
 Exit codes:
   0  success
@@ -636,6 +651,94 @@ MOONJSON_AI_API_KEY=ollama moon run cmd/main -- --ai \
 `choices[0].message.content` 里取，服务商按惯例用 `error.message` 报告失败时，那条消息
 也会照原样显示出来，而不会被吞掉。
 
+## 分析 MoonBit 依赖
+
+`--moon-deps` 把输入当成 MoonBit 模块清单来读，而不是当成文档，然后打印出它依赖的模块树。
+在本仓库里跑一次：
+
+```sh
+moon run cmd/main -- --moon-deps -f moon.mod
+# BigSaltyMan/moonjson-toolkit@0.1.0
+# ├── Nanaloveyuki/parsec@0.1.3
+# ├── oboard/mio@0.5.4
+# │   ├── moonbitlang/x@0.5.5
+# │   ├── moonbitlang/async@0.22.1
+# │   └── bikallem/compress@0.3.4
+# │       ├── moonbitlang/async@0.22.1
+# │       └── bikallem/blit@0.2.2
+# ├── moonbitlang/x@0.5.5
+# └── moonbitlang/async@0.22.1
+#
+# warning: 2 versions of moonbitlang/x are required
+#   0.5.5 by BigSaltyMan/moonjson-toolkit@0.1.0
+#   0.4.50 by oboard/mio@0.5.4
+#
+# warning: 3 versions of moonbitlang/async are required
+#   0.22.1 by BigSaltyMan/moonjson-toolkit@0.1.0
+#   0.20.6 by oboard/mio@0.5.4
+#   0.16.7 by bikallem/compress@0.3.4
+```
+
+每个依赖自己的清单都从清单旁边的 `.mooncakes` 目录里读取 —— `moon` 在某个目录里跑构建时，
+依赖就下载在那里。没有下载下来的依赖只显示一个名字、下面什么都不挂，所以树能长到多深，取决
+于之前那次拉取拉到了哪里。
+
+节点上打印的版本来自它自己那份清单。对已经下载的模块来说，那就是工具链解析出来的版本，也
+就是躺在 `.mooncakes` 里的那一份 —— 上面 `oboard/mio` 底下的 `moonbitlang/x` 显示的是
+`0.5.5`，而 `mio` 要求的是 `0.4.50`，因为放在那里的就是 `0.5.5`。谁要了哪个版本，写在树
+下面的警告里；同一个模块被两处依赖时会画两次而不是合并成一个，这既是 `moon tree` 的做法，
+也是每条警告能单独读懂的原因。
+
+两种清单格式都会读。`moon.mod.json` 是 JSON：
+
+```sh
+echo '{"name":"myproject","version":"0.1.0","deps":{"moonbitlang/x":"0.5.5"}}' \
+  | moon run cmd/main -- --moon-deps
+# myproject@0.1.0
+# └── moonbitlang/x@0.5.5
+```
+
+`moon.mod` 则是一串 `key = value` 行，依赖放在一个 `import { "name@version", ... }` 块里，
+本仓库的清单结尾正是如此：
+
+```sh
+tail -6 moon.mod
+# import {
+#   "Nanaloveyuki/parsec@0.1.3",
+#   "oboard/mio@0.5.4",
+#   "moonbitlang/x@0.5.5",
+#   "moonbitlang/async@0.22.1",
+# }
+```
+
+一份清单属于哪一种，由第一个非空白字符决定，与文件名无关 —— 读到的因此是它实际的样子，而不是
+它被叫做什么。没写版本的条目（比如单写的 `"moonbitlang/x"`）表示不限定版本，打印时只显示名字。
+
+循环依赖和版本警告出现在同一个地方，后面跟着那条闭合的路径：
+
+```sh
+# Two manifests in a scratch directory, each asking for the other.
+mkdir -p /tmp/cycle/.mooncakes/b
+printf 'name = "b"\n\nversion = "1.0.0"\n\nimport {\n  "a@1.0.0",\n}\n' > /tmp/cycle/.mooncakes/b/moon.mod
+printf 'name = "a"\n\nversion = "1.0.0"\n\nimport {\n  "b@1.0.0",\n}\n' > /tmp/cycle/moon.mod
+
+moon run cmd/main -- --moon-deps -f /tmp/cycle/moon.mod
+# a@1.0.0
+# └── b@1.0.0
+#     └── a@1.0.0
+#
+# warning: circular dependency detected
+#   a → b → a
+```
+
+已经发布出去的模块不可能有循环依赖 —— 依赖自己的模块没有构建顺序可言 —— 所以这是对一份清单的
+解读，而不是对一个能构建的项目的解读。遍历走到那个本该第二次进入的模块就停下，不会一直绕下去，
+这也是为什么闭合圆环的那个名字既留在树里、又写在树下面。
+
+输出里只有这棵树和它的警告：`--moon-deps` 是替换文档而不是附加在文档之后，所以其它选项都不参与；
+`--jsonl` 和 `--json-out` 会和它一起被拒绝，因为这两个问的是另一种输入；`--ai` 的优先级高于它，
+因为评审评的是文档。
+
 ## 项目结构
 
 ```
@@ -652,6 +755,7 @@ moonjson-toolkit/
 ├── parser.mbt            parsing and file/standard-input reading
 ├── paths.mbt             the path of every value, and of every object member
 ├── ai.mbt                the AI request, its settings and its response handling
+├── moondeps.mbt          module manifests, read into a dependency tree
 ├── stats.mbt             the statistics model and its JSON form
 ├── runner.mbt            one run of the tool, and the exit codes
 ├── cmd/main/             the process entry point
@@ -660,14 +764,14 @@ moonjson-toolkit/
     └── public/           index.html, styles.css, charts.js, echarts.min.js
 ```
 
-每个模块都有配套的 `_wbtest.mbt` 白盒测试。格式化、诊断、参数解析、统计和 AI 响应处理
-都不需要联网，所以在任何机器上 `moon test` 都是同一条命令。
+每个模块都有配套的 `_wbtest.mbt` 白盒测试。格式化、诊断、参数解析、统计、依赖分析和
+AI 响应处理都不需要联网，所以在任何机器上 `moon test` 都是同一条命令。
 
 ## 开发
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 187 tests
+moon test  --target native   # 207 tests
 moon fmt                     # format
 
 cd frontend
@@ -684,29 +788,29 @@ moon coverage analyze -- -f summary
 
 ```
 ai.mbt: 80/90
-cli.mbt: 140/144
+cli.mbt: 141/145
 cmd/main/main.mbt: 0/14
 color.mbt: 30/33
 diagnostics.mbt: 81/98
 flatten.mbt: 100/102
 formatter.mbt: 151/152
 parser.mbt: 261/276
-runner.mbt: 158/184
-Total: 1142/1234
+runner.mbt: 162/188
+Total: 1421/1513
 ```
 
-即插桩监视的 1234 个点中有 1142 个被覆盖，占 92.5%。这里的计数单位是源码中的位置而不是行：一行里放下两个表达式就是两个点，其中一个没被执行时，这一行仍会算作已覆盖，所以只要模块里有任意一个点没被执行，它就会出现在上面这段输出里；反过来说，它没有列出的四个模块——`jsonl.mbt`、`paths.mbt`、`prune.mbt` 和 `stats.mbt`——是逐点完整覆盖的。同样的数字按覆盖率从高到低排列：
+即插桩监视的 1513 个点中有 1421 个被覆盖，占 93.9%。这里的计数单位是源码中的位置而不是行：一行里放下两个表达式就是两个点，其中一个没被执行时，这一行仍会算作已覆盖，所以只要模块里有任意一个点没被执行，它就会出现在上面这段输出里；反过来说，它没有列出的五个模块——`jsonl.mbt`、`moondeps.mbt`、`paths.mbt`、`prune.mbt` 和 `stats.mbt`——是逐点完整覆盖的。同样的数字按覆盖率从高到低排列：
 
 | 模块 | 覆盖率 |
 | ---- | ------ |
-| `jsonl.mbt`、`paths.mbt`、`prune.mbt`、`stats.mbt` | 100% |
+| `jsonl.mbt`、`moondeps.mbt`、`paths.mbt`、`prune.mbt`、`stats.mbt` | 100% |
 | `formatter.mbt` | 99.3% |
 | `flatten.mbt` | 98.0% |
 | `cli.mbt` | 97.2% |
 | `parser.mbt` | 94.6% |
 | `color.mbt` | 90.9% |
 | `ai.mbt` | 88.9% |
-| `runner.mbt` | 85.9% |
+| `runner.mbt` | 86.2% |
 | `diagnostics.mbt` | 82.7% |
 | `cmd/main/main.mbt` | 0% |
 

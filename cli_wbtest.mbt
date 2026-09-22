@@ -37,6 +37,7 @@ test "no arguments yields the documented defaults" {
   assert_eq(options.help, false)
   assert_eq(options.version, false)
   assert_eq(options.ai, false)
+  assert_eq(options.moon_deps, false)
   assert_eq(options.json_out, None)
   assert_eq(options.no_color, false)
 }
@@ -410,6 +411,18 @@ test "the AI options are accepted but ignored without --ai" {
 }
 
 ///|
+test "--moon-deps asks for the dependency tree" {
+  assert_eq(cli_ok(["--moon-deps"]).moon_deps, true)
+  assert_eq(cli_ok([]).moon_deps, false)
+  // It describes another reading of the input rather than another request about
+  // the document, so it is read and accepted beside anything that does not
+  // answer about the document as well.
+  let options = cli_ok(["--moon-deps", "-c", "--indent", "4"])
+  assert_eq(options.moon_deps, true)
+  assert_eq(options.compact, true)
+}
+
+///|
 test "the usage text documents every option" {
   let text = usage()
   for
@@ -417,7 +430,8 @@ test "the usage text documents every option" {
       "-f", "--file", "-i", "--indent", "-c", "--compact", "-S", "--sort-keys", "--trim-strings",
       "--flatten", "--unflatten", "--prune-null", "--prune-empty", "--jsonl", "--max-depth",
       "--paths", "--keys-only", "-v", "--validate", "-h", "--help", "-V", "--version",
-      "--ai", "--model", "--ai-base-url", "--json-out", "--stats", "--no-color",
+      "--ai", "--model", "--ai-base-url", "--moon-deps", "--json-out", "--stats",
+      "--no-color",
     ] {
     assert_true(text.contains(option))
   }

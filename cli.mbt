@@ -42,6 +42,7 @@ pub(all) struct CliOptions {
   mut ai : Bool
   mut model : String?
   mut ai_base_url : String?
+  mut moon_deps : Bool
   mut json_out : String?
   mut no_color : Bool
 }
@@ -70,6 +71,7 @@ pub fn CliOptions::default() -> CliOptions {
     ai: false,
     model: None,
     ai_base_url: None,
+    moon_deps: false,
     json_out: None,
     no_color: false,
   }
@@ -107,6 +109,8 @@ pub fn usage() -> String {
     "      --model <name>     Model to ask for instead of the default",
     "      --ai-base-url <url>",
     "                         Endpoint to post to instead of the default",
+    "      --moon-deps        Print the dependency tree of a MoonBit module",
+    "                         manifest",
     "      --json-out <path>  Write a statistics report as JSON to <path>",
     "      --stats            Print a statistics summary instead of the document",
     "      --no-color         Never colour the output, even on a terminal",
@@ -158,6 +162,16 @@ pub fn usage() -> String {
     "",
     "--model and --ai-base-url describe that one request, so without --ai they",
     "are read, accepted and ignored.",
+    "",
+    "--moon-deps reads the input as a MoonBit module manifest and prints the",
+    "tree of modules it depends on, each dependency read in turn from the",
+    ".mooncakes directory beside the manifest. Both manifest forms are read:",
+    "moon.mod.json, and the moon.mod whose dependencies sit in an import block.",
+    "A dependency that has not been downloaded is shown with nothing under it,",
+    "and a module required at more than one version, or a circular dependency,",
+    "is reported beneath the tree. The tree is the whole of the output, so no",
+    "other option is consulted; --ai reviews the document instead, so under it",
+    "--moon-deps does nothing.",
     "",
     "Exit codes:",
     "  0  success",
@@ -368,6 +382,7 @@ pub fn CliOptions::parse(args : Array[String]) -> Result[CliOptions, String] {
         "stats" => options.stats = true
         "no-color" => options.no_color = true
         "ai" => options.ai = true
+        "moon-deps" => options.moon_deps = true
         "file"
         | "json-out"
         | "indent"
