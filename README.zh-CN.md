@@ -14,7 +14,8 @@
   行，`--sort-keys` 在打印前对每个对象的键排序，`--trim-strings` 去掉每个字符串值
   两端的空白，而字符串内部的空格原样保留。
 - **一次处理多份文档** —— `--file` 可以重复。每个文件依次处理，多于一个时各自带一
-  行 `==> path <==` 表头，某个文件出错不会影响后面的文件。
+  行 `==> path <==` 表头，某个文件出错不会影响后面的文件。`--fail-fast` 则要求运行就
+  在那个文件上收尾，`--continue-on-error` 会在末尾补一份「哪些通过、哪些失败」的汇总。
 - **JSON Lines** —— `--jsonl` 把输入当作「一行一个文档」来读，每条记录打印到自己的
   一行上。某一行不是合法 JSON 时会带上它在文件中的行号报错，其余记录照常打印。
 - **重塑结构** —— `--flatten` 把每层嵌套对象压成点号键，`{"a":{"b":1}}` 变成
@@ -113,6 +114,9 @@ Options:
                          Endpoint to post to instead of the default
       --moon-deps        Print the dependency tree of a MoonBit module
                          manifest
+      --fail-fast        Stop at the first input that fails
+      --continue-on-error
+                         Process every input, then summarise the failures
       --json-out <path>  Write a statistics report as JSON to <path>
       --stats            Print a statistics summary instead of the document
       --no-color         Never colour the output, even on a terminal
@@ -123,6 +127,16 @@ may be attached, as in -i4, -i=4, --indent=4 or --indent 4.
 --file may be repeated. Each file is handled in turn, each under a
 '==> path <==' heading once more than one is given, and the run exits with
 the first non-zero code among them.
+
+--fail-fast stops the run at the first input that fails, so a batch of
+files ends at the one that went wrong rather than at the end of the list.
+Without it every input named is read and every failure is reported as it
+happens, which is the default; --continue-on-error asks for that same
+reading and adds a summary of it at the end, naming each input that failed
+and the message it failed with. The two describe one run in opposite
+directions, so asking for both is refused. Under --jsonl the input is one
+file however many records it holds, so --fail-fast stops at the first
+record that fails, and --continue-on-error summarises the file.
 
 --paths and --keys-only each replace the printed document with a list of
 names, one per line. Asking for both prints the longer list, and -v wins
@@ -199,6 +213,35 @@ Exit codes:
 
 `--file` 可以重复，每份文档各自独立处理。`--json-out` 描述的是单份文档，所以给了多个
 文件时会直接拒绝，而不是只给最先读到的那份写文件。
+
+一次处理多个文件的运行不会停在出错的那一个上：错误在发生时报出来，后面的文件照读，
+整个运行以它们当中第一个非零退出码结束。`--fail-fast` 要的是相反的一种读法，遇到第一
+个失败输入就收尾，它之后的输入根本不会被打开。`--continue-on-error` 保留默认读法，并
+在末尾补一份点名清单，列出每个失败的输入和它给出的消息：
+
+```sh
+moonjson-toolkit -f a.json -f broken.json -f c.json --continue-on-error
+# ==> a.json <==
+# {
+#   "a": 1
+# }
+# ==> c.json <==
+# {
+#   "c": 3
+# }
+#
+# Summary: 2 passed, 1 failed
+#   failed: broken.json
+#     error: broken.json is not valid JSON
+#     line 1, column 8: expected opening quote
+#       {"a":1,}
+#              ^
+```
+
+这条错误在发生时就已写到标准错误上 —— 多文件的运行会在还在跑的时候就说清楚哪里出了
+问题；汇总把它重复一遍写到标准输出上，让运行收尾的地方也说清自己发现了什么。计数单位
+是输入而不是文档：一份 JSON Lines 文件不管装着多少条记录都算一个输入，所以 `--fail-fast`
+对这样的文件是在第一条失败记录处停下，而不是停在下一条。
 
 `--jsonl` 声明的是输入**是什么**，而不是要拿它做什么：每一行都当成一份独立文档来读，
 其余选项依次作用于每一条记录，所以 `--compact`、`--sort-keys`、`--trim-strings` 到达

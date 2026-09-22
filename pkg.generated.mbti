@@ -172,6 +172,8 @@ pub(all) struct CliOptions {
   mut model : String?
   mut ai_base_url : String?
   mut moon_deps : Bool
+  mut fail_fast : Bool
+  mut continue_on_error : Bool
   mut json_out : String?
   mut no_color : Bool
 }

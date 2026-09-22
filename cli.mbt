@@ -43,6 +43,8 @@ pub(all) struct CliOptions {
   mut model : String?
   mut ai_base_url : String?
   mut moon_deps : Bool
+  mut fail_fast : Bool
+  mut continue_on_error : Bool
   mut json_out : String?
   mut no_color : Bool
 }
@@ -72,6 +74,8 @@ pub fn CliOptions::default() -> CliOptions {
     model: None,
     ai_base_url: None,
     moon_deps: false,
+    fail_fast: false,
+    continue_on_error: false,
     json_out: None,
     no_color: false,
   }
@@ -111,6 +115,9 @@ pub fn usage() -> String {
     "                         Endpoint to post to instead of the default",
     "      --moon-deps        Print the dependency tree of a MoonBit module",
     "                         manifest",
+    "      --fail-fast        Stop at the first input that fails",
+    "      --continue-on-error",
+    "                         Process every input, then summarise the failures",
     "      --json-out <path>  Write a statistics report as JSON to <path>",
     "      --stats            Print a statistics summary instead of the document",
     "      --no-color         Never colour the output, even on a terminal",
@@ -121,6 +128,16 @@ pub fn usage() -> String {
     "--file may be repeated. Each file is handled in turn, each under a",
     "'==> path <==' heading once more than one is given, and the run exits with",
     "the first non-zero code among them.",
+    "",
+    "--fail-fast stops the run at the first input that fails, so a batch of",
+    "files ends at the one that went wrong rather than at the end of the list.",
+    "Without it every input named is read and every failure is reported as it",
+    "happens, which is the default; --continue-on-error asks for that same",
+    "reading and adds a summary of it at the end, naming each input that failed",
+    "and the message it failed with. The two describe one run in opposite",
+    "directions, so asking for both is refused. Under --jsonl the input is one",
+    "file however many records it holds, so --fail-fast stops at the first",
+    "record that fails, and --continue-on-error summarises the file.",
     "",
     "--paths and --keys-only each replace the printed document with a list of",
     "names, one per line. Asking for both prints the longer list, and -v wins",
@@ -383,6 +400,8 @@ pub fn CliOptions::parse(args : Array[String]) -> Result[CliOptions, String] {
         "no-color" => options.no_color = true
         "ai" => options.ai = true
         "moon-deps" => options.moon_deps = true
+        "fail-fast" => options.fail_fast = true
+        "continue-on-error" => options.continue_on_error = true
         "file"
         | "json-out"
         | "indent"

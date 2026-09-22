@@ -42,18 +42,32 @@ fn error_prefix() -> String {
 }
 
 ///|
+/// How an input is named: the path it was named by, or the stream it was read
+/// from when no file was given.
+///
+/// A run that reports a failure as it happens has the name at hand; one that
+/// summarises at the end has only what it kept, so the name is decided here,
+/// once, rather than at each place that needs it.
+fn input_label(input : String?) -> String {
+  match input {
+    Some(path) => path
+    None => "<stdin>"
+  }
+}
+
+///|
 /// Read the JSON text, from `--file` when given and from standard input
-/// otherwise. Returns the text together with a label naming its source.
-async fn read_input(file : String?) -> Result[(String, String), String] {
-  match file {
+/// otherwise.
+async fn read_input(input : String?) -> Result[String, String] {
+  match input {
     Some(path) =>
       match read_file(path) {
-        Ok(text) => Ok((text, path))
+        Ok(text) => Ok(text)
         Err(message) => Err("cannot read " + path + ": " + message)
       }
     None =>
       match read_stdin() {
-        Ok(text) => Ok((text, "<stdin>"))
+        Ok(text) => Ok(text)
         Err(message) => Err("cannot read standard input: " + message)
       }
   }
@@ -72,6 +86,13 @@ fn validate_options(options : CliOptions) -> Result[Unit, String] {
   if options.flatten && options.unflatten {
     return Err(
       "--flatten and --unflatten are inverses, so only one of them can be given",
+    )
+  }
+  // One says the run ends at the first failure and the other says it does not,
+  // so asking for both is not two requests but a question about which was meant.
+  if options.fail_fast && options.continue_on_error {
+    return Err(
+      "--fail-fast stops at the first failure and --continue-on-error carries on past it, so the two cannot be given together",
     )
   }
   // The dependency tree is a reading of a module manifest, and a statistics
@@ -227,6 +248,12 @@ fn format_document(options : CliOptions, json : @pjson.Json) -> String {
 /// state of the rest. The run ends with the first non-zero code any of them
 /// produced — the earliest failure is the one worth naming, and the other
 /// failures are already on standard error beside it.
+///
+/// `--fail-fast` gives up that reading for the opposite one and stops at the
+/// first input that fails, and `--continue-on-error` keeps it and adds the
+/// roll-call at the end. The default is neither: every input is read and every
+/// failure is reported as it happens, which is what the two flags are each half
+/// of, one way round or the other.
 pub async fn run(
   args : Array[String],
   analyze~ : async (String, String, String, String) -> Result[String, String],
@@ -281,32 +308,112 @@ pub async fn run(
   let out = StringBuilder()
   let err = StringBuilder()
   let mut code = exit_success
+  let mut passed = 0
+  // The inputs that failed, in the order they were read, each with what it
+  // failed with. Every run keeps them, and only `--continue-on-error` prints
+  // them: a run that stops at the first failure is the one that keeps the
+  // fewest, and a run that never fails keeps none.
+  let failures : Array[(String, String)] = []
   for input in inputs {
-    let (text, source) = match read_input(input) {
-      Ok(read) => read
-      Err(message) => {
-        err.write_string(error_prefix() + message + "\n")
-        if code == exit_success {
-          code = exit_input_error
-        }
-        continue
+    let outcome = handle_input(options, input, analyze)
+    if many && outcome.out != "" {
+      out.write_string("==> " + outcome.source + " <==\n")
+    }
+    out.write_string(outcome.out)
+    err.write_string(outcome.err)
+    if outcome.code == exit_success {
+      passed = passed + 1
+    } else {
+      failures.push((outcome.source, outcome.err))
+      if code == exit_success {
+        code = outcome.code
+      }
+      // Nothing after the first failure is read: `--fail-fast` asks for the run
+      // to end where the trouble is rather than at the end of the list.
+      if options.fail_fast {
+        break
       }
     }
-    let result = if options.jsonl {
-      run_jsonl(options, source, text)
-    } else {
-      run_document(options, source, text, analyze)
-    }
-    if many && result.out != "" {
-      out.write_string("==> " + source + " <==\n")
-    }
-    out.write_string(result.out)
-    err.write_string(result.err)
-    if code == exit_success {
-      code = result.code
-    }
+  }
+  if options.continue_on_error && failures.length() > 0 {
+    append_summary(out, passed, failures)
   }
   { out: out.to_string(), err: err.to_string(), code, }
+}
+
+///|
+/// Everything one input of a batch contributed: what it printed, what it failed
+/// with, and the code the run would end with if it were the only input.
+priv struct InputOutcome {
+  source : String
+  out : String
+  err : String
+  code : Int
+}
+
+///|
+/// Read one input and handle it, in whichever way the command line asked for.
+///
+/// An input that cannot be read is answered like one that was read and could
+/// not be handled: a message on standard error, nothing on standard output, and
+/// the code that goes with it. The two differ only in the message, which is why
+/// neither of them is a special case here.
+async fn handle_input(
+  options : CliOptions,
+  input : String?,
+  analyze : async (String, String, String, String) -> Result[String, String],
+) -> InputOutcome {
+  let source = input_label(input)
+  let text = match read_input(input) {
+    Ok(text) => text
+    Err(message) =>
+      return {
+        source,
+        out: "",
+        err: error_prefix() + message + "\n",
+        code: exit_input_error,
+      }
+  }
+  let result = if options.jsonl {
+    run_jsonl(options, source, text)
+  } else {
+    run_document(options, source, text, analyze)
+  }
+  { source, out: result.out, err: result.err, code: result.code, }
+}
+
+///|
+/// The roll-call a `--continue-on-error` run ends with: how many inputs passed,
+/// how many failed, and what each failure said.
+///
+/// A blank line sets it apart from the documents above it, and each failure is
+/// named once with its message indented under it, the way a diagnostic underlines
+/// the line it is about. The messages are the ones the run already reported as it
+/// went: the two streams are read apart from one another, so the summary repeats
+/// them where the run ends rather than leaving the reader to pair a report with
+/// the input it belongs to.
+fn append_summary(
+  out : StringBuilder,
+  passed : Int,
+  failures : Array[(String, String)],
+) -> Unit {
+  out.write_string(
+    "\nSummary: " +
+    passed.to_string() +
+    " passed, " +
+    failures.length().to_string() +
+    " failed\n",
+  )
+  for failure in failures {
+    let (source, message) = failure
+    out.write_string("  failed: " + source + "\n")
+    for line in message.split("\n") {
+      let text = line.to_owned()
+      if text != "" {
+        out.write_string("    " + text + "\n")
+      }
+    }
+  }
 }
 
 ///|
@@ -455,11 +562,12 @@ async fn render_document(
 /// Handle one JSON Lines input: every record is rendered onto a line of its
 /// own, and every record that is not valid JSON is reported on standard error.
 ///
-/// A bad record does not stop the run. Each line of the input stands alone by
-/// definition, so the ones that can be read are printed whether or not the
-/// others could be, and a mistake on the fourth line does not cost the reader
-/// the fifth. The code is the first non-zero one any record produced, so a run
-/// with a single bad record ends 1 however many good ones followed it.
+/// A bad record does not stop the run, unless `--fail-fast` asks it to. Each
+/// line of the input stands alone by definition, so the ones that can be read
+/// are printed whether or not the others could be, and a mistake on the fourth
+/// line does not cost the reader the fifth. The code is the first non-zero one
+/// any record produced, so a run with a single bad record ends 1 however many
+/// good ones followed it.
 ///
 /// `-v` asks for no document output at all, so a run where every record parsed
 /// is answered with the one verdict line it prints for a single document, and a
@@ -485,6 +593,9 @@ fn run_jsonl(options : CliOptions, source : String, text : String) -> RunResult 
             if code == exit_success {
               code = report.code
             }
+            if options.fail_fast {
+              break
+            }
           }
         }
       Err(diagnostic) => {
@@ -497,6 +608,9 @@ fn run_jsonl(options : CliOptions, source : String, text : String) -> RunResult 
         )
         if code == exit_success {
           code = exit_input_error
+        }
+        if options.fail_fast {
+          break
         }
       }
     }

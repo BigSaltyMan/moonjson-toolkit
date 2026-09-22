@@ -18,7 +18,9 @@ charts the statistics the tool writes.
   around every string value while leaving the spaces inside one alone.
 - **Several documents at once** — `--file` may be repeated. Each file is
   handled in turn, under a `==> path <==` heading once there is more than one
-  of them, and a file that fails does not stop the ones after it.
+  of them, and a file that fails does not stop the ones after it. `--fail-fast`
+  asks for the run to end at that file instead, and `--continue-on-error` adds
+  a summary of which inputs passed and which failed.
 - **JSON Lines** — `--jsonl` reads an input whose lines are documents, one per
   line, and formats each of them onto a line of its own. A line that is not
   valid JSON is reported by its line number while the others are still printed.
@@ -128,6 +130,9 @@ Options:
                          Endpoint to post to instead of the default
       --moon-deps        Print the dependency tree of a MoonBit module
                          manifest
+      --fail-fast        Stop at the first input that fails
+      --continue-on-error
+                         Process every input, then summarise the failures
       --json-out <path>  Write a statistics report as JSON to <path>
       --stats            Print a statistics summary instead of the document
       --no-color         Never colour the output, even on a terminal
@@ -138,6 +143,16 @@ may be attached, as in -i4, -i=4, --indent=4 or --indent 4.
 --file may be repeated. Each file is handled in turn, each under a
 '==> path <==' heading once more than one is given, and the run exits with
 the first non-zero code among them.
+
+--fail-fast stops the run at the first input that fails, so a batch of
+files ends at the one that went wrong rather than at the end of the list.
+Without it every input named is read and every failure is reported as it
+happens, which is the default; --continue-on-error asks for that same
+reading and adds a summary of it at the end, naming each input that failed
+and the message it failed with. The two describe one run in opposite
+directions, so asking for both is refused. Under --jsonl the input is one
+file however many records it holds, so --fail-fast stops at the first
+record that fails, and --continue-on-error summarises the file.
 
 --paths and --keys-only each replace the printed document with a list of
 names, one per line. Asking for both prints the longer list, and -v wins
@@ -220,6 +235,39 @@ as usual.
 `--file` may be repeated, and each document is handled on its own. `--json-out`
 describes a single document, so it is refused when several files are named
 rather than written for whichever one came first.
+
+A run over several files does not stop at one that fails: the failure is
+reported as it happens, the files after it are still read, and the run ends with
+the first non-zero code among them. `--fail-fast` asks for the opposite reading
+and ends the run at the first input that fails, so the inputs after it are never
+opened. `--continue-on-error` keeps the default reading and adds a roll-call at
+the end, naming every input that failed and what it said:
+
+```sh
+moonjson-toolkit -f a.json -f broken.json -f c.json --continue-on-error
+# ==> a.json <==
+# {
+#   "a": 1
+# }
+# ==> c.json <==
+# {
+#   "c": 3
+# }
+#
+# Summary: 2 passed, 1 failed
+#   failed: broken.json
+#     error: broken.json is not valid JSON
+#     line 1, column 8: expected opening quote
+#       {"a":1,}
+#              ^
+```
+
+The failure was reported on standard error as it happened, where a run of many
+files says what went wrong while it is still going; the summary repeats it on
+standard output, so the place a run ends also says what it found. The count is
+of inputs rather than of documents: `--jsonl` reads one file however many
+records it holds, so a JSON Lines file counts once, and `--fail-fast` stops such
+a file at the first record that fails rather than at the next one.
 
 `--jsonl` declares what the input is, not what to do with it: each line is read
 as a document of its own and the other options apply to every one of them in

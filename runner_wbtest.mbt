@@ -414,6 +414,136 @@ async test "a file that fails does not stop the ones after it" {
 }
 
 ///|
+/// The same bad file in the middle of three, with `--continue-on-error` asking
+/// the run to say at the end what it found on the way.
+///
+/// The count is of inputs rather than of documents: the bad one is the input
+/// that failed and the two around it are the ones that passed, which is why a
+/// run of three files can be two and one. Each failure is named once, with the
+/// message it produced indented under it — the same message standard error
+/// already carries, printed where the run ends instead of where it happened.
+async test "--continue-on-error carries on past a failure and summarises the run" {
+  let first = Scratch::named("recover_first")
+  let bad = Scratch::named("recover_bad")
+  let last = Scratch::named("recover_last")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  @fs.write_file(first.input, "{\"a\":1}")
+  @fs.write_file(bad.input, "{\"a\":1,}")
+  @fs.write_file(last.input, "{\"c\":3}")
+  let result = run(
+    [
+      "-f",
+      first.input,
+      "-f",
+      bad.input,
+      "-f",
+      last.input,
+      "--continue-on-error",
+    ],
+    analyze=analyzer.analyzer(),
+  )
+  discard(first.input)
+  discard(bad.input)
+  discard(last.input)
+  inspect(result.code, content="1")
+  inspect(
+    result.out,
+    content="==> " +
+      first.input +
+      " <==\n{\n  \"a\": 1\n}\n==> " +
+      last.input +
+      " <==\n{\n  \"c\": 3\n}\n\nSummary: 2 passed, 1 failed\n  failed: " +
+      bad.input +
+      "\n    error: " +
+      bad.input +
+      " is not valid JSON\n    line 1, column 8: expected opening quote\n      {\"a\":1,}\n             ^\n",
+  )
+  // The same failure as standard error carries it, with the run's own
+  // indentation taken back off.
+  inspect(
+    result.err,
+    content="error: " +
+      bad.input +
+      " is not valid JSON\nline 1, column 8: expected opening quote\n  {\"a\":1,}\n         ^\n",
+  )
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+/// A summary is a report of failures, and a run that had none has nothing to
+/// report: the output must not grow a line saying that nothing went wrong.
+async test "--continue-on-error says nothing when every input passed" {
+  let first = Scratch::named("quiet_first")
+  let second = Scratch::named("quiet_second")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  @fs.write_file(first.input, "{\"a\":1}")
+  @fs.write_file(second.input, "{\"b\":2}")
+  let result = run(
+    ["-f", first.input, "-f", second.input, "--continue-on-error"],
+    analyze=analyzer.analyzer(),
+  )
+  discard(first.input)
+  discard(second.input)
+  inspect(result.code, content="0")
+  assert_false(result.out.contains("Summary"))
+  inspect(result.err, content="")
+}
+
+///|
+/// `--fail-fast` is the other reading of the same run: the first input that
+/// fails is the last one read, so the files after it never appear.
+///
+/// Both orders are tried, because stopping early is only visible when there was
+/// something left to stop before: after a bad file at the front, nothing is
+/// printed at all, and after a good one everything printed so far stands.
+async test "--fail-fast stops at the input that failed" {
+  let good = Scratch::named("fast_good")
+  let bad = Scratch::named("fast_bad")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  @fs.write_file(good.input, "{\"a\":1}")
+  @fs.write_file(bad.input, "{\"a\":1,}")
+  let leading = run(
+    ["-f", bad.input, "-f", good.input, "--fail-fast"],
+    analyze=analyzer.analyzer(),
+  )
+  inspect(leading.code, content="1")
+  // The good file is never read, so it prints nothing and gets no heading.
+  inspect(leading.out, content="")
+  assert_true(leading.err.contains(bad.input + " is not valid JSON"))
+  let trailing = run(
+    ["-f", good.input, "-f", bad.input, "-f", good.input, "--fail-fast"],
+    analyze=analyzer.analyzer(),
+  )
+  discard(good.input)
+  discard(bad.input)
+  inspect(trailing.code, content="1")
+  // The file before the failure is printed and the one after it is not: the
+  // same file is named twice, and only the first of the two is handled.
+  inspect(
+    trailing.out,
+    content="==> " + good.input + " <==\n{\n  \"a\": 1\n}\n",
+  )
+  assert_true(trailing.err.contains(bad.input + " is not valid JSON"))
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "--fail-fast and --continue-on-error are refused together" {
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  // The name does not exist, which is the point: the two flags are about the
+  // run as a whole, so they are settled before anything is opened.
+  let result = run(
+    ["-f", "no_such.json", "--fail-fast", "--continue-on-error"],
+    analyze=analyzer.analyzer(),
+  )
+  inspect(result.code, content="2")
+  inspect(result.out, content="")
+  assert_true(result.err.contains("--fail-fast stops at the first failure"))
+  assert_false(result.err.contains("no such file"))
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
 async test "--json-out is refused when several files are named" {
   let analyzer = StubAnalyzer::new(Ok("unused"))
   // Neither name exists, which is the point: the command line is refused
@@ -483,6 +613,26 @@ async test "--jsonl keeps going past a bad record and exits 1" {
   assert_true(result.err.contains(scratch.input + " is not valid JSON"))
   assert_true(result.err.contains("line 2"))
   assert_true(result.err.contains("{\"b\":}"))
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+/// `--fail-fast` inside one input: the records are handled in turn like the
+/// files of a batch, so a bad record is where the reading stops. The record
+/// after it is not printed, which is the whole difference from the run above.
+async test "--jsonl --fail-fast stops at the record that failed" {
+  let scratch = Scratch::named("jsonl_fast")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_on(
+    scratch,
+    "{\"a\":1}\n{\"b\":}\n{\"c\":3}\n",
+    ["--jsonl", "--compact", "--fail-fast"],
+    analyzer,
+  )
+  inspect(result.code, content="1")
+  inspect(result.out, content="{\"a\":1}\n")
+  assert_true(result.err.contains(scratch.input + " is not valid JSON"))
+  assert_true(result.err.contains("line 2"))
   assert_eq(analyzer.calls, 0)
 }
 

@@ -38,6 +38,8 @@ test "no arguments yields the documented defaults" {
   assert_eq(options.version, false)
   assert_eq(options.ai, false)
   assert_eq(options.moon_deps, false)
+  assert_eq(options.fail_fast, false)
+  assert_eq(options.continue_on_error, false)
   assert_eq(options.json_out, None)
   assert_eq(options.no_color, false)
 }
@@ -423,6 +425,19 @@ test "--moon-deps asks for the dependency tree" {
 }
 
 ///|
+test "--fail-fast and --continue-on-error are each read on their own" {
+  assert_true(cli_ok(["--fail-fast"]).fail_fast)
+  assert_true(cli_ok(["--continue-on-error"]).continue_on_error)
+  // Reading them is not deciding between them: the pair is settled where the
+  // run is settled, beside every other question about the command line as a
+  // whole, so each is read as the flag it is and neither turns the other on.
+  assert_false(cli_ok(["--fail-fast"]).continue_on_error)
+  assert_false(cli_ok(["--continue-on-error"]).fail_fast)
+  assert_eq(cli_err(["--failfast"]), "unknown option: --failfast")
+  assert_eq(cli_err(["--continue"]), "unknown option: --continue")
+}
+
+///|
 test "the usage text documents every option" {
   let text = usage()
   for
@@ -430,8 +445,8 @@ test "the usage text documents every option" {
       "-f", "--file", "-i", "--indent", "-c", "--compact", "-S", "--sort-keys", "--trim-strings",
       "--flatten", "--unflatten", "--prune-null", "--prune-empty", "--jsonl", "--max-depth",
       "--paths", "--keys-only", "-v", "--validate", "-h", "--help", "-V", "--version",
-      "--ai", "--model", "--ai-base-url", "--moon-deps", "--json-out", "--stats",
-      "--no-color",
+      "--ai", "--model", "--ai-base-url", "--moon-deps", "--fail-fast", "--continue-on-error",
+      "--json-out", "--stats", "--no-color",
     ] {
     assert_true(text.contains(option))
   }
