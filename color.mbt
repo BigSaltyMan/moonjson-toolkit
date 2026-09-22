@@ -64,33 +64,97 @@ pub fn color_allowed(
 }
 
 ///|
-/// Whether colour may be used on standard output in this run.
+/// Whether standard output is a terminal, as far as the kernel will say.
 ///
-/// On Linux the fact is available rather than guessed at: `/proc/self/fd/1`
-/// resolves to the terminal device when output is a terminal and to a pipe or a
-/// regular file when it has been redirected. That half matters because a
-/// formatter is usually run as `moonjson-toolkit -f a.json > b.json`, and
-/// colouring that output would put escape sequences inside the file it was
-/// asked to produce. `TERM` is no help there, since it stays set when output is
-/// redirected.
+/// `kind` is what the file at `/proc/self/fd/1` is, and `target` is where that
+/// link points, or `None` when there was no way to read it.
 ///
-/// `color_allowed` holds the rule; this function only finds out the one fact
-/// the rule needs and then applies it.
-pub async fn is_tty() -> Bool {
-  let kind = @fs.kind("/proc/self/fd/1", follow_symlink=true) catch {
-    _ => @fs.Unknown
-  }
-  let output_is_terminal = match kind {
-    @fs.CharDevice => Some(true)
+/// The kind is most of the answer. A terminal is a character device, so
+/// everything else — a pipe, a regular file, a socket — is not one and cannot
+/// become one, and that is the half `moonjson-toolkit -f a.json > b.json` is
+/// asked about.
+///
+/// What the kind cannot say is *which* character device, and the ones output is
+/// sent to are not all terminals. `/dev/null` is the one worth naming: running
+/// a program for its exit code alone means `tool -f a.json > /dev/null`, and
+/// that is not a terminal, however much a character device resembles one. It
+/// has to be excluded for consistency as much as for looks — the same command
+/// redirected to a file is coloured nothing, and only the destination's name
+/// differs.
+///
+/// The remaining character devices are taken at their word. `/dev/zero` and
+/// `/dev/full` are read the same way a terminal is, and a run sent to one of
+/// them would be coloured, which is wrong for the same reason `/dev/null` was.
+/// They are not where output is normally sent, so they are left out rather than
+/// listed; a list would be a device taxonomy this program has no business
+/// keeping.
+///
+/// This is a function of its three arguments rather than of the process, so
+/// every case can be stated — including the ones a test suite cannot otherwise
+/// reach, since the standard output of the test process is not a terminal and
+/// cannot be made into `/dev/null` for the duration of one test.
+fn output_is_terminal(
+  kind : @fs.FileKind,
+  target : String?,
+  null_device : String,
+) -> Bool? {
+  match kind {
+    @fs.CharDevice =>
+      match target {
+        // The one character device that is definitely not a terminal.
+        Some(path) => Some(path != null_device)
+        // A character device whose link could not be followed: it is a
+        // terminal as far as anything here can tell, which is what this
+        // function answered before the link was read at all.
+        None => Some(true)
+      }
     // Either the probe failed or this platform does not describe its
     // descriptors this way; nothing is known, so nothing is claimed.
     @fs.Unknown => None
     _ => Some(false)
   }
+}
+
+///|
+/// Where `/proc/self/fd/1` leads, spelled the way the kernel spells it.
+///
+/// The link reads back as a path for everything that has one: the terminal
+/// device when output is a terminal, `/dev/null` when the run was sent there,
+/// and the name of the file when it was redirected to one. A pipe is the case
+/// that has no path — the link says `pipe:[12345]`, which names nothing on the
+/// filesystem — and the null answer is what comes back for it. Nothing is lost:
+/// a pipe is not a character device, so the kind has already answered for it,
+/// and the path is only ever wanted for the character devices.
+async fn output_target() -> String? {
+  try @fs.realpath("/proc/self/fd/1") catch {
+    _ => None
+  } noraise {
+    path => Some(path)
+  }
+}
+
+///|
+/// Whether colour may be used on standard output in this run.
+///
+/// On Linux the fact is available rather than guessed at: `/proc/self/fd/1` is
+/// a link to whatever standard output is connected to, and its kind and its
+/// target between them say which. That half matters because a formatter is
+/// usually run as `moonjson-toolkit -f a.json > b.json`, and colouring that
+/// output would put escape sequences inside the file it was asked to produce.
+/// `TERM` is no help there, since it stays set when output is redirected — and
+/// it stays set when output goes to `/dev/null`, which is the other destination
+/// that must not be coloured.
+///
+/// `color_allowed` holds the rule and `output_is_terminal` holds the reading of
+/// the two facts; this function is what finds the facts out and hands them over.
+pub async fn is_tty() -> Bool {
+  let kind = @fs.kind("/proc/self/fd/1", follow_symlink=true) catch {
+    _ => @fs.Unknown
+  }
   color_allowed(
     @env.get_env_var("NO_COLOR"),
     @env.get_env_var("TERM"),
-    output_is_terminal,
+    output_is_terminal(kind, output_target(), "/dev/null"),
   )
 }
 

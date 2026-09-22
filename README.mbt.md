@@ -902,7 +902,7 @@ so `moon test` is the same command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 217 tests
+moon test  --target native   # 221 tests
 moon fmt                     # format
 
 cd frontend
@@ -922,16 +922,16 @@ moon coverage analyze -- -f summary
 ai.mbt: 80/90
 cli.mbt: 143/147
 cmd/main/main.mbt: 0/14
-color.mbt: 30/33
+color.mbt: 41/43
 diagnostics.mbt: 81/98
 flatten.mbt: 100/102
 formatter.mbt: 151/152
 parser.mbt: 261/276
 runner.mbt: 213/239
-Total: 1474/1566
+Total: 1485/1576
 ```
 
-That is 1474 of the 1566 points the instrumentation watches, or 94.1%. The count
+That is 1485 of the 1576 points the instrumentation watches, or 94.2%. The count
 is of positions in the source rather than lines — a line carrying two expressions
 is two points, and one of them can go unexecuted while the line itself is read as
 covered — so a module is listed whenever any of its points went unexecuted, and
@@ -945,8 +945,8 @@ ordered by how much of each module is reached:
 | `formatter.mbt` | 99.3% |
 | `flatten.mbt` | 98.0% |
 | `cli.mbt` | 97.3% |
+| `color.mbt` | 95.3% |
 | `parser.mbt` | 94.6% |
-| `color.mbt` | 90.9% |
 | `runner.mbt` | 89.1% |
 | `ai.mbt` | 88.9% |
 | `diagnostics.mbt` | 82.7% |
@@ -960,6 +960,10 @@ The rest of what is missed is what needs something from outside the process.
 `analyze` in `ai.mbt` — the only function that talks to a provider — is never
 called, because no test may reach a real API. The standard-input paths in
 `parser.mbt` and `runner.mbt` stay untouched, because every test names a file.
+The two points left in `color.mbt` are both answers the kernel gives about a
+standard output the suite cannot choose: a pipe resolves to no path, so the
+branch that reads one back is never taken, and a pipe is a kind the kernel
+describes plainly, so the branch for a probe that fails is never taken either.
 `diagnostics.mbt` keeps the parse-error variants and limit kinds no input in the
 suite manages to provoke.
 
@@ -1074,6 +1078,15 @@ and read the same values out of them.
   `TERM` is taken as the answer there instead. `TERM` stays set when output is
   redirected, so a redirected run on those platforms may be coloured after all;
   `--no-color` or `NO_COLOR=1` is the answer there, and both work everywhere.
+
+- **A redirected run is recognised as not a terminal by its destination, and
+  `/dev/null` is the only character device named.** `> /dev/null` is coloured
+  nothing, because a character device output was sent to on purpose is otherwise
+  what a terminal looks like, and the null device is the one such destination
+  worth listing. `> /dev/zero` and `> /dev/full` are consequently treated as
+  terminals, which costs nothing visible — the output is thrown away either
+  way — and the alternative, listing which character devices *are* terminals,
+  would risk the opposite mistake on a terminal this project has not seen.
 
 - **A path is ambiguous when a key contains `.`, `[` or `]`.** Paths are written
   the way they are read rather than escaped, so `{"a.b": 1}` and
