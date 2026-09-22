@@ -242,9 +242,10 @@ fn format_document(options : CliOptions, json : @pjson.Json) -> String {
 ///|
 /// Run the tool over `args` and collect everything it produced.
 ///
-/// Several `--file` arguments mean several documents, and each is handled in
-/// turn by `run_document`: a file that fails is reported on standard error and
-/// the ones after it are still processed, so one bad input does not hide the
+/// Several `--file` arguments mean several documents, each handled by
+/// `run_document`. They are read `max_parallel_inputs` at a time and answered in
+/// the order they were named: a file that fails is reported on standard error
+/// and the ones after it are still processed, so one bad input does not hide the
 /// state of the rest. The run ends with the first non-zero code any of them
 /// produced — the earliest failure is the one worth naming, and the other
 /// failures are already on standard error beside it.
@@ -302,6 +303,10 @@ pub async fn run(
   } else {
     options.files.map(fn(path) { Some(path) })
   }
+  // Every input is read and handled before any of it is printed, so the
+  // printing below is only ever a walk over the answers in the order they were
+  // asked for.
+  let outcomes = run_batch(options, inputs, analyze)
   // A heading is only worth printing when there is more than one document to
   // tell apart, which is why a single file reads exactly as it always has.
   let many = inputs.length() > 1
@@ -314,8 +319,7 @@ pub async fn run(
   // them: a run that stops at the first failure is the one that keeps the
   // fewest, and a run that never fails keeps none.
   let failures : Array[(String, String)] = []
-  for input in inputs {
-    let outcome = handle_input(options, input, analyze)
+  for outcome in outcomes {
     if many && outcome.out != "" {
       out.write_string("==> " + outcome.source + " <==\n")
     }
@@ -328,8 +332,12 @@ pub async fn run(
       if code == exit_success {
         code = outcome.code
       }
-      // Nothing after the first failure is read: `--fail-fast` asks for the run
-      // to end where the trouble is rather than at the end of the list.
+      // Nothing after the first failure is printed: `--fail-fast` asks for the
+      // run to end where the trouble is rather than at the end of the list.
+      // The walk stops here rather than trusting the batch to have stopped
+      // everything in time — an input behind the failure can have been read
+      // before the cancellation reached it, and finishing it is not a reason to
+      // print it after the failure that ended the run.
       if options.fail_fast {
         break
       }
@@ -339,6 +347,91 @@ pub async fn run(
     append_summary(out, passed, failures)
   }
   { out: out.to_string(), err: err.to_string(), code, }
+}
+
+///|
+/// How many inputs a batch reads at once.
+///
+/// Four: enough that the wait for one input's bytes to arrive is spent on
+/// another input's, and few enough that a run over a long list of files does
+/// not hold all of them open at the same time.
+let max_parallel_inputs : Int = 4
+
+///|
+/// Read and handle every input, at most `max_parallel_inputs` of them at a
+/// time, and answer with one outcome per input in the order they were named.
+///
+/// The work runs concurrently and the answers are collected in order: each task
+/// writes into the slot it was given, so the order the inputs finish in — which
+/// is not the order they were asked for, and is not the same from one run to
+/// the next — never reaches the reader. Nothing is printed here either, for the
+/// same reason: a task that printed as it went would put the documents in
+/// whatever order the machine happened to finish them in. A slot left empty is
+/// an input the run gave up on, which only `--fail-fast` produces.
+///
+/// The permit is taken before the task is spawned rather than inside it, which
+/// is what makes the limit the number of inputs *in flight* rather than the
+/// number of tasks that exist: an input with no permit yet is one that has not
+/// been started at all. This is the shape `moonbitlang/async` uses for its own
+/// `all`, down to the deferred release.
+async fn run_batch(
+  options : CliOptions,
+  inputs : Array[String?],
+  analyze : async (String, String, String, String) -> Result[String, String],
+) -> Array[InputOutcome] {
+  let slots : Array[InputOutcome?] = []
+  for _ in inputs {
+    slots.push(None)
+  }
+  let permits = @semaphore.Semaphore(max_parallel_inputs)
+  // The tasks that have been started, by the index of the input each is
+  // reading. Only `--fail-fast` ever looks at them, and it looks only at the
+  // ones behind the input that failed.
+  let started : Array[@async.Task[Unit]] = []
+  // A failure is noticed by the task that failed and acted on by the loop that
+  // starts tasks, so it has to be said somewhere both can see.
+  let stopped : @ref.Ref[Bool] = @ref.new(false)
+  @async.with_task_group(group => {
+    for index, input in inputs {
+      permits.acquire()
+      if stopped.val {
+        // A failure was reported while this input was waiting for a turn. It is
+        // not started, and neither is anything behind it.
+        permits.release()
+        break
+      }
+      let task : @async.Task[Unit] = group.spawn(() => {
+        // Released however this task ends, cancellation included: the permit
+        // was taken for the task, not for the work it managed to do.
+        defer permits.release()
+        let outcome = handle_input(options, input, analyze)
+        slots[index] = Some(outcome)
+        if options.fail_fast && outcome.code != exit_success {
+          stopped.val = true
+          // The inputs behind the one that failed are cancelled rather than
+          // waited for. The ones in front of it are left alone: they were
+          // already under way when the run stopped, and stopping at the first
+          // failure means the run has everything up to it to show, not that it
+          // throws away what it has already read.
+          for later = index + 1; later < started.length(); later = later + 1 {
+            started[later].cancel()
+          }
+        }
+      })
+      started.push(task)
+    }
+  })
+  // The slots are compacted rather than printed as they are, because a run that
+  // stopped early leaves holes in them: an input that was cancelled has nothing
+  // to say and is passed over, and what is left keeps the order it was named in.
+  let outcomes : Array[InputOutcome] = []
+  for slot in slots {
+    match slot {
+      Some(outcome) => outcomes.push(outcome)
+      None => ()
+    }
+  }
+  outcomes
 }
 
 ///|

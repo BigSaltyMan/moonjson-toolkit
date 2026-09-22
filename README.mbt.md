@@ -16,11 +16,12 @@ charts the statistics the tool writes.
   the whole document on one line instead, `--sort-keys` orders the keys of
   every object before printing, and `--trim-strings` removes the whitespace
   around every string value while leaving the spaces inside one alone.
-- **Several documents at once** — `--file` may be repeated. Each file is
-  handled in turn, under a `==> path <==` heading once there is more than one
-  of them, and a file that fails does not stop the ones after it. `--fail-fast`
-  asks for the run to end at that file instead, and `--continue-on-error` adds
-  a summary of which inputs passed and which failed.
+- **Several documents at once** — `--file` may be repeated. A few files are
+  read at a time and answered in the order they were named, each under a
+  `==> path <==` heading once there is more than one of them, and a file that
+  fails does not stop the ones after it. `--fail-fast` asks for the run to end
+  at that file instead, and `--continue-on-error` adds a summary of which inputs
+  passed and which failed.
 - **JSON Lines** — `--jsonl` reads an input whose lines are documents, one per
   line, and formats each of them onto a line of its own. A line that is not
   valid JSON is reported by its line number while the others are still printed.
@@ -238,10 +239,13 @@ rather than written for whichever one came first.
 
 A run over several files does not stop at one that fails: the failure is
 reported as it happens, the files after it are still read, and the run ends with
-the first non-zero code among them. `--fail-fast` asks for the opposite reading
-and ends the run at the first input that fails, so the inputs after it are never
-opened. `--continue-on-error` keeps the default reading and adds a roll-call at
-the end, naming every input that failed and what it said:
+the first non-zero code among them. A batch is read a few files at a time and
+answered in the order they were named, so the documents keep the order of the
+command line whatever order they were ready in. `--fail-fast` asks for the
+opposite reading and ends the run at the first input that fails: what is already
+in hand is printed, and the inputs after it are given up rather than waited for.
+`--continue-on-error` keeps the default reading and adds a roll-call at the end,
+naming every input that failed and what it said:
 
 ```sh
 moonjson-toolkit -f a.json -f broken.json -f c.json --continue-on-error
@@ -898,7 +902,7 @@ so `moon test` is the same command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 207 tests
+moon test  --target native   # 217 tests
 moon fmt                     # format
 
 cd frontend
@@ -916,18 +920,18 @@ moon coverage analyze -- -f summary
 
 ```
 ai.mbt: 80/90
-cli.mbt: 141/145
+cli.mbt: 143/147
 cmd/main/main.mbt: 0/14
 color.mbt: 30/33
 diagnostics.mbt: 81/98
 flatten.mbt: 100/102
 formatter.mbt: 151/152
 parser.mbt: 261/276
-runner.mbt: 162/188
-Total: 1421/1513
+runner.mbt: 213/239
+Total: 1474/1566
 ```
 
-That is 1421 of the 1513 points the instrumentation watches, or 93.9%. The count
+That is 1474 of the 1566 points the instrumentation watches, or 94.1%. The count
 is of positions in the source rather than lines — a line carrying two expressions
 is two points, and one of them can go unexecuted while the line itself is read as
 covered — so a module is listed whenever any of its points went unexecuted, and
@@ -940,11 +944,11 @@ ordered by how much of each module is reached:
 | `jsonl.mbt`, `moondeps.mbt`, `paths.mbt`, `prune.mbt`, `stats.mbt` | 100% |
 | `formatter.mbt` | 99.3% |
 | `flatten.mbt` | 98.0% |
-| `cli.mbt` | 97.2% |
+| `cli.mbt` | 97.3% |
 | `parser.mbt` | 94.6% |
 | `color.mbt` | 90.9% |
+| `runner.mbt` | 89.1% |
 | `ai.mbt` | 88.9% |
-| `runner.mbt` | 86.2% |
 | `diagnostics.mbt` | 82.7% |
 | `cmd/main/main.mbt` | 0% |
 
@@ -992,6 +996,38 @@ source, and are in `.gitignore`. The three are shaped differently on purpose —
 1 KB of nested objects, 1 MB of objects and arrays mixed, and 10 MB of a
 forty-deep chain beside a 60,000-item array, a 200×250 matrix and a
 250,000-character string.
+
+A list of files is read four at a time, and what that overlaps is the reading.
+`bench/batch.sh` copies `bench/small.json` two hundred times and times one
+process per file against one process for all of them:
+
+```sh
+bench/batch.sh
+```
+
+```
+moonjson-toolkit 0.1.0
+best of 7 runs, times in seconds
+
+input          files      separate   batch
+small.json     200        0.735 s    0.039 s
+```
+
+The same batch takes 0.117 s with the window set to one file. That row is not in
+the script's table because the window is not a flag: it is `max_parallel_inputs`
+in `runner.mbt`, so measuring it means rebuilding with that constant set to 1.
+With two hundred documents of a kilobyte each, the window is worth three times
+the speed — 0.039 s against 0.117 s — and eight files at a time measures no
+better than four. A small file is mostly the wait for it to arrive, and four of
+those waits are enough to cover each other.
+
+The window is worth nothing measurable on sixteen documents of a megabyte each:
+0.68 s against 0.71 s, which is inside the run-to-run spread. What a megabyte
+costs is formatting it, and two files are never formatted at the same time —
+`moonbitlang/async` runs its tasks on one thread and switches between them only
+where one of them waits, so a batch overlaps its reading and nothing else. Over a
+handful of large documents a batch is worth having for the one process and the
+one command line, not for the window.
 
 Ten megabytes is a size this tool could not read at all until recently. The
 library parser refuses any document over 1 MiB, a cap it keeps to itself and

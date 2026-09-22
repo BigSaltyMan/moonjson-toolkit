@@ -8,6 +8,7 @@ import {
   "moonbitlang/async",
   "moonbitlang/async/fs",
   "moonbitlang/async/os_error",
+  "moonbitlang/async/semaphore",
   "moonbitlang/async/stdio",
   "oboard/mio",
 }

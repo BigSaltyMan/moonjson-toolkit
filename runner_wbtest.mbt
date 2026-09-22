@@ -544,6 +544,229 @@ async test "--fail-fast and --continue-on-error are refused together" {
 }
 
 ///|
+/// Where `marker` first appears in `text`, failing the test when it does not
+/// appear at all.
+///
+/// Ordering is what these tests are about, and a test that asserted on the
+/// whole page would be asserting the printer's own mind rather than the order
+/// the printer wrote in.
+fn offset_of(text : String, marker : String) -> Int {
+  match text.find(marker) {
+    Some(at) => at
+    None => abort("the output does not mention " + marker + ":\n" + text)
+  }
+}
+
+///|
+/// A batch reads its inputs at once, and what comes back is still one answer per
+/// input in the order the inputs were named.
+///
+/// The three reviews are held at a barrier until all three have been asked for,
+/// which is a gate a run that handled the files one after another could never
+/// pass: the first call would sit waiting for a call that the waiting is itself
+/// what stands in the way of. The timeout turns that into a failure with
+/// something to read instead of a test that never ends.
+///
+/// The first input is then the slowest of the three by a wide margin, so the
+/// answers are ready in an order that is not the order they were asked for.
+/// Printing each one as it arrived would put the second file first, which is the
+/// mistake the ordering below is looking for.
+async test "a batch reads several inputs at once and answers them in order" {
+  let first = Scratch::named("parallel_first")
+  let second = Scratch::named("parallel_second")
+  let third = Scratch::named("parallel_third")
+  @fs.write_file(first.input, "{\"one\":1}")
+  @fs.write_file(second.input, "{\"two\":2}")
+  @fs.write_file(third.input, "{\"three\":3}")
+  @env.set_env_var(api_key_variable, stub_api_key)
+  let arrived : @ref.Ref[Int] = @ref.new(0)
+  let result = try
+    @async.with_timeout(4000, async fn() {
+      run(["-f", first.input, "-f", second.input, "-f", third.input, "--ai"], analyze=async fn(
+        document,
+        _endpoint,
+        _model,
+        _api_key,
+      ) {
+        // Nothing below is reached until the other two have arrived, so a run
+        // that is not reading all three at once stops here and is timed out.
+        arrived.val = arrived.val + 1
+        while arrived.val < 3 {
+          @async.sleep(1)
+        }
+        if document.contains("\"one\"") {
+          // The slow one, and the first one named, so the answers finish in
+          // the opposite order to the one they are printed in.
+          @async.sleep(200)
+          return Ok("REVIEW-ONE")
+        }
+        if document.contains("\"two\"") {
+          return Ok("REVIEW-TWO")
+        }
+        Ok("REVIEW-THREE")
+      })
+    })
+  catch {
+    err => abort("the three inputs were not read at once: " + err.to_string())
+  } noraise {
+    result => result
+  }
+  discard(first.input)
+  discard(second.input)
+  discard(third.input)
+  inspect(result.code, content="0")
+  inspect(result.err, content="")
+  // Each document, then its own review, then the next document: the answers are
+  // back in the order the inputs were named even though they were not ready in
+  // that order, and no review has been filed under another input's name.
+  let first_document = offset_of(result.out, "==> " + first.input + " <==")
+  let first_review = offset_of(result.out, "REVIEW-ONE")
+  let second_document = offset_of(result.out, "==> " + second.input + " <==")
+  let second_review = offset_of(result.out, "REVIEW-TWO")
+  let third_document = offset_of(result.out, "==> " + third.input + " <==")
+  let third_review = offset_of(result.out, "REVIEW-THREE")
+  assert_true(first_document < first_review)
+  assert_true(first_review < second_document)
+  assert_true(second_document < second_review)
+  assert_true(second_review < third_document)
+  assert_true(third_document < third_review)
+}
+
+///|
+/// `--fail-fast` cancels the inputs that are still being read rather than
+/// waiting for them: a run that stops at the first failure gives up the inputs
+/// behind it where they stand, which is the difference between a run that ends
+/// early and one that only stops printing early.
+///
+/// The second input's review is asked for and does not answer for far longer
+/// than the timeout, so the run can only finish in time by taking it away. The
+/// first input's own failure is held back long enough for the second to be under
+/// way — which is asserted on, since a run that never started the second input
+/// would be easy to mistake for one that cancelled it.
+async test "--fail-fast cancels the inputs that are still being read" {
+  let failing = Scratch::named("cancelled_failing")
+  let parked = Scratch::named("cancelled_parked")
+  @fs.write_file(failing.input, "{\"fails\":1}")
+  @fs.write_file(parked.input, "{\"parks\":2}")
+  @env.set_env_var(api_key_variable, stub_api_key)
+  let parked_calls : @ref.Ref[Int] = @ref.new(0)
+  let result = try
+    @async.with_timeout(4000, async fn() {
+      run(["-f", failing.input, "-f", parked.input, "--ai", "--fail-fast"], analyze=async fn(
+        document,
+        _endpoint,
+        _model,
+        _api_key,
+      ) {
+        if document.contains("\"fails\"") {
+          // The failure the run stops at, held back until the other input has
+          // had time to reach its own review.
+          @async.sleep(200)
+          return Err("the review could not be asked for")
+        }
+        parked_calls.val = parked_calls.val + 1
+        // Far beyond the timeout: only being cancelled ends this.
+        @async.sleep(30000)
+        Ok("never printed")
+      })
+    })
+  catch {
+    err =>
+      abort(
+        "the input that failed did not take the one behind it with it: " +
+        err.to_string(),
+      )
+  } noraise {
+    result => result
+  }
+  discard(failing.input)
+  discard(parked.input)
+  inspect(result.code, content="3")
+  // Neither input prints a document: one failed, and the other was taken away
+  // while it was still being read.
+  inspect(result.out, content="")
+  assert_true(result.err.contains("the review could not be asked for"))
+  assert_eq(parked_calls.val, 1)
+}
+
+///|
+/// More inputs than the run reads at once: the ones that have to wait for a turn
+/// are not dropped and not reordered, they are read after the ones in front of
+/// them, and the answer still names every input the command line did.
+async test "a batch longer than the window answers every input in order" {
+  let paths : Array[String] = []
+  for index in 0..<6 {
+    paths.push(Scratch::named("window_" + index.to_string()).input)
+  }
+  for index, path in paths {
+    @fs.write_file(path, "{\"n\":" + index.to_string() + "}")
+  }
+  let args : Array[String] = ["-c"]
+  for path in paths {
+    args.push("-f")
+    args.push(path)
+  }
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run(args, analyze=analyzer.analyzer())
+  for path in paths {
+    discard(path)
+  }
+  let expected = StringBuilder()
+  for index, path in paths {
+    expected.write_string(
+      "==> " + path + " <==\n{\"n\":" + index.to_string() + "}\n",
+    )
+  }
+  inspect(result.code, content="0")
+  inspect(result.out, content=expected.to_string())
+  inspect(result.err, content="")
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+/// `--fail-fast` over more inputs than the window: the inputs that are waiting
+/// for a turn when the failure arrives are not started at all, so nothing the
+/// run does after the failure is work the reader will never see.
+///
+/// Six inputs and a window of four means two of them are still queued when the
+/// task that fails is done, which is the only shape in which the waiting can be
+/// given up on rather than cancelled.
+async test "--fail-fast starts no input after the one that failed" {
+  let paths : Array[String] = []
+  for index in 0..<6 {
+    paths.push(Scratch::named("stopped_" + index.to_string()).input)
+  }
+  for index, path in paths {
+    // The second one is the failure; nothing else about it matters.
+    let text = if index == 1 {
+      "{\"bad\":,}"
+    } else {
+      "{\"n\":" + index.to_string() + "}"
+    }
+    @fs.write_file(path, text)
+  }
+  let args : Array[String] = ["--fail-fast"]
+  for path in paths {
+    args.push("-f")
+    args.push(path)
+  }
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run(args, analyze=analyzer.analyzer())
+  for path in paths {
+    discard(path)
+  }
+  inspect(result.code, content="1")
+  // The first input was in hand when the second failed, and the four behind it
+  // were only ever waiting: one document, then the failure and nothing else.
+  inspect(result.out, content="==> " + paths[0] + " <==\n{\n  \"n\": 0\n}\n")
+  assert_true(result.err.contains(paths[1] + " is not valid JSON"))
+  for index in 2..<6 {
+    assert_false(result.out.contains("==> " + paths[index] + " <=="))
+  }
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
 async test "--json-out is refused when several files are named" {
   let analyzer = StubAnalyzer::new(Ok("unused"))
   // Neither name exists, which is the point: the command line is refused
