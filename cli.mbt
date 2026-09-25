@@ -33,6 +33,9 @@ pub(all) struct CliOptions {
   mut unflatten : Bool
   mut prune_null : Bool
   mut prune_empty : Bool
+  mut select : String?
+  mut sort_by : String?
+  mut unique : String?
   mut paths : Bool
   mut keys_only : Bool
   mut stats : Bool
@@ -64,6 +67,9 @@ pub fn CliOptions::default() -> CliOptions {
     unflatten: false,
     prune_null: false,
     prune_empty: false,
+    select: None,
+    sort_by: None,
+    unique: None,
     paths: false,
     keys_only: false,
     stats: false,
@@ -102,6 +108,9 @@ pub fn usage() -> String {
     "      --unflatten        Expand every dotted key back into nested objects",
     "      --prune-null       Remove every object member whose value is null",
     "      --prune-empty      Remove every empty object and every empty array",
+    "      --select <fields>  Keep only the named top-level fields of an object",
+    "      --sort-by <path>   Sort an array by the value <path> names in each item",
+    "      --unique [path]    Drop repeated items, whole ones or by the value at <path>",
     "      --jsonl            Read the input as JSON Lines, one document per line",
     "      --max-depth <n>    Refuse documents nested deeper than <n> (default: 128)",
     "      --paths            Print the path of every value instead of the document",
@@ -162,6 +171,38 @@ pub fn usage() -> String {
     "--prune-null keeps every item of an array: a null in an object is a member with",
     "no value, while a null in an array is a value in a place, and dropping it would",
     "renumber the items after it.",
+    "",
+    "--select, --sort-by and --unique rewrite the document rather than lay it out,",
+    "and each answers one question about what it should hold. At most one of the",
+    "three may be given: two of them are two answers to the same question, and",
+    "neither is more nearly right than the other. They run before everything else",
+    "that removes or reshapes values, so --select decides what --prune-null,",
+    "--prune-empty, --flatten and --unflatten then see. Deduplicating is the one",
+    "of the three that compares values with one another, and it does so through",
+    "the tidying the run asked for, so --trim-strings and --sort-keys share in",
+    "deciding what counts as the same item there.",
+    "",
+    "--select keeps the top-level fields its comma-separated list names, in the",
+    "order the list gives them, and drops the rest. A name the object does not",
+    "have is skipped rather than reported, so one selection works across a folder",
+    "of documents whose fields have drifted apart.",
+    "",
+    "--sort-by sorts an array by the value its path names inside each item. The",
+    "document may be an array itself or an object holding exactly one, which is",
+    "sorted where it sits; an object holding several is refused, since there is no",
+    "telling which was meant. Numbers are ordered as numbers and strings by code",
+    "point, and values of different kinds are ordered by kind, as jq orders them:",
+    "null, false, true, numbers, strings, arrays, objects. Two arrays, and two",
+    "objects, are equal and keep the order they were written in. A record whose",
+    "path reaches nothing is sorted as though the field held null, which puts it",
+    "before the records that have a value there. The sort is stable.",
+    "",
+    "--unique drops the items that repeat one already seen, keeping the first.",
+    "What is compared is the item as the run would print it, so --sort-keys makes",
+    "two objects whose members were written in a different order one item, and",
+    "--trim-strings makes \" a\" and \"a\" one item. With no path the whole item is",
+    "compared; with a path it is the value the path names that is. An item whose",
+    "path reaches nothing is kept, since it has no value to be compared.",
     "",
     "--jsonl reads the input as JSON Lines: one document per line, with blank",
     "lines skipped. Each record is handled on its own, so the other options apply",
@@ -330,6 +371,14 @@ fn apply_value_option(
       options.json_out = Some(value)
       Ok(())
     }
+    "select" => {
+      options.select = Some(value)
+      Ok(())
+    }
+    "sort-by" => {
+      options.sort_by = Some(value)
+      Ok(())
+    }
     "model" => {
       options.model = Some(value)
       Ok(())
@@ -354,8 +403,8 @@ fn apply_value_option(
         }
         Err(message) => Err(message)
       }
-    // Unreachable: `CliOptions::parse` routes only the six names above here.
-    // An error rather than a silent `Ok` so that adding a seventh value-taking
+    // Unreachable: `CliOptions::parse` routes only the names above here. An
+    // error rather than a silent `Ok` so that adding another value-taking
     // option and forgetting this match is caught rather than ignored.
     _ => Err("unknown option: --" + name)
   }
@@ -402,8 +451,31 @@ pub fn CliOptions::parse(args : Array[String]) -> Result[CliOptions, String] {
         "moon-deps" => options.moon_deps = true
         "fail-fast" => options.fail_fast = true
         "continue-on-error" => options.continue_on_error = true
+        // The one option whose value is optional. Without one it compares whole
+        // items, which is the empty path — a path that names the item itself —
+        // and that is all the difference between the two forms, so the rest of
+        // the program reads one option rather than two.
+        "unique" =>
+          match inline {
+            Some(value) => options.unique = Some(value)
+            None =>
+              // A following argument is the path only if it is not another
+              // option: `--unique --flatten` is the whole-item form followed by
+              // a flag, and reading `--flatten` as a field name would leave the
+              // run asking for a field called `--flatten` and no flattening.
+              // Nothing else can follow `--unique` bare, since files are named
+              // with --file, so the only argument that can be meant is a path.
+              if index < total && !args[index].has_prefix("-") {
+                options.unique = Some(args[index])
+                index = index + 1
+              } else {
+                options.unique = Some("")
+              }
+          }
         "file"
         | "json-out"
+        | "select"
+        | "sort-by"
         | "indent"
         | "max-depth"
         | "model"

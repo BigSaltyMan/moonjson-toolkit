@@ -95,6 +95,28 @@ fn validate_options(options : CliOptions) -> Result[Unit, String] {
       "--fail-fast stops at the first failure and --continue-on-error carries on past it, so the two cannot be given together",
     )
   }
+  // Each of the three answers what the document should hold, so two of them is
+  // not two rewrites but a question about which shape was wanted. Unlike the
+  // removals and reshapings, these do not compose: --select drops what
+  // --sort-by would have sorted and --sort-by reorders what --unique would have
+  // deduplicated against, so there is no order to put them in that would make
+  // asking for two of them mean anything in particular.
+  let transforms : Array[String] = []
+  if options.select != None {
+    transforms.push("--select")
+  }
+  if options.sort_by != None {
+    transforms.push("--sort-by")
+  }
+  if options.unique != None {
+    transforms.push("--unique")
+  }
+  if transforms.length() > 1 {
+    return Err(
+      transforms.join(" and ") +
+      " each rewrite the document, so at most one of them can be given",
+    )
+  }
   // The dependency tree is a reading of a module manifest, and a statistics
   // file is a reading of a JSON document; the two questions have nothing to do
   // with each other, and a run that asks both is answered by neither.
@@ -147,18 +169,87 @@ fn validate_options(options : CliOptions) -> Result[Unit, String] {
 }
 
 ///|
+/// The rewrite the command line asked for, if it asked for one.
+///
+/// At most one of the three can be set — `validate_options` refuses the rest —
+/// so this is a choice rather than a sequence, and the option carries its own
+/// argument: the field list, the path to sort by, or the path to compare. The
+/// `None` that comes back is a run that left the document as it found it.
+fn transform_document(
+  options : CliOptions,
+  json : @pjson.Json,
+) -> Result[@pjson.Json, String] {
+  match (options.select, options.sort_by, options.unique) {
+    (Some(fields), _, _) => select(json, split_fields(fields))
+    (_, Some(path), _) => sort_by(json, path)
+    // Deduplicating is the one rewrite that compares values against each other,
+    // and what it compares is the item as the run would print it — so the
+    // tidying the run asked for is applied first. With --sort-keys, two objects
+    // whose members were written in different orders are one item; with
+    // --trim-strings so are " a" and "a". Both are asked for again at the end
+    // of the pipeline, which is where they always were: --sort-keys is defined
+    // as the order the keys are printed in, so it has to be the last thing that
+    // happens. Applying one of them twice changes nothing — sorting keys twice
+    // is sorting them once — and what changes here is only what "the same item"
+    // was taken to mean.
+    (_, _, Some(path)) => unique(tidy_document(options, json), Some(path))
+    _ => Ok(json)
+  }
+}
+
+///|
+/// The tidying the command line asked for: the whitespace around every string,
+/// and the order of every object's keys.
+///
+/// This is the last thing done to a document before it is printed, and it is
+/// also done before `--unique` compares its items, since what that compares is
+/// an item as the run would print it. Both steps are idempotent and neither
+/// looks at what the other changes, so the second pass a `--unique` run makes
+/// cannot tell that it is the second.
+fn tidy_document(options : CliOptions, json : @pjson.Json) -> @pjson.Json {
+  let trimmed = if options.trim_strings { trim_strings(json) } else { json }
+  if options.sort_keys {
+    sort_keys(trimmed)
+  } else {
+    trimmed
+  }
+}
+
+///|
+/// Split the comma-separated list given to `--select` into field names.
+///
+/// Nothing is trimmed: a space around a name is part of the name, since a JSON
+/// key may contain one, and a document whose member is called `"a"` is not a
+/// document whose member is called `" a"`. The list is a list of names rather
+/// than a list of things to be tidied up.
+fn split_fields(list : String) -> Array[String] {
+  let fields : Array[String] = []
+  for field in list.split(",") {
+    fields.push(field.to_owned())
+  }
+  fields
+}
+
+///|
 /// Apply the changes that alter the document rather than its layout.
 ///
 /// These happen before anything is printed, so the review, the statistics file
-/// and the path list all see the result. The order is: drop what is not wanted,
-/// reshape the keys, then tidy the values and the order they are printed in.
+/// and the path list all see the result. The order is: keep and reorder what is
+/// wanted, drop what is not, reshape the keys, then tidy the values and the
+/// order they are printed in.
 ///
 /// Every one of them rebuilds the containers rather than editing them, so the
 /// tree handed in is left as it was found. The order of the last two does not
 /// matter: neither looks at what the other changes, one moving keys and the
 /// other rewriting values.
 ///
-/// Removing comes first because what is gone cannot then be in the way: a
+/// Selecting, sorting and deduplicating come first because they decide what the
+/// document holds, and everything after them is about the shape of what is
+/// left: `--select name,age --prune-null` drops the null members that survived
+/// the selection rather than the ones it was about to drop anyway. They also
+/// come first among themselves because only one of them can be asked for.
+///
+/// Removing comes next because what is gone cannot then be in the way: a
 /// document whose null member sits beside a dotted key it would collide with
 /// flattens once the member has been dropped, and one that is entirely empty
 /// has nothing left to reshape. The two removals are ordered between
@@ -166,12 +257,16 @@ fn validate_options(options : CliOptions) -> Result[Unit, String] {
 /// gone and the member holding it is left empty, but `{"a":{}}` if the emptying
 /// is asked for first.
 ///
-/// The reshaping is the one step that can fail, and only for a document that
-/// has no flattened or unflattened form to be had.
+/// Two steps can fail, and only for a document that has no form to be had: the
+/// reshaping, and the rewrite, which needs a document of the shape it rewrites.
 fn prepare_document(
   options : CliOptions,
   json : @pjson.Json,
 ) -> Result[@pjson.Json, String] {
+  let json = match transform_document(options, json) {
+    Ok(json) => json
+    Err(message) => return Err(message)
+  }
   let pruned = if options.prune_null { prune_null(json) } else { json }
   let json = if options.prune_empty { prune_empty(pruned) } else { pruned }
   let shaped = if options.flatten {
@@ -183,25 +278,27 @@ fn prepare_document(
   }
   match shaped {
     Err(message) => Err(message)
-    Ok(shaped) => {
-      let trimmed = if options.trim_strings {
-        trim_strings(shaped)
-      } else {
-        shaped
-      }
-      Ok(if options.sort_keys { sort_keys(trimmed) } else { trimmed })
-    }
+    Ok(shaped) => Ok(tidy_document(options, shaped))
   }
 }
 
 ///|
-/// The word for the reshaping a command line asked of the document.
+/// The word for the change a command line asked of the document.
 ///
-/// Only read when that reshaping failed, and then only for the sentence that
-/// says so: `cannot be flattened` names what was refused, where `conflicting
-/// keys` on its own would leave the reader guessing what it was about to do.
+/// Only read when that change failed, and then only for the sentence that says
+/// so: `cannot be flattened` names what was refused, where `conflicting keys`
+/// on its own would leave the reader guessing what it was about to do. The
+/// rewrites are named the same way, in the same sentence: `cannot be sorted`
+/// says which of the run's requests the document could not answer, and the line
+/// under it says why.
 fn shape_verb(options : CliOptions) -> String {
-  if options.flatten {
+  if options.select != None {
+    "selected from"
+  } else if options.sort_by != None {
+    "sorted"
+  } else if options.unique != None {
+    "deduplicated"
+  } else if options.flatten {
     "flattened"
   } else {
     "unflattened"

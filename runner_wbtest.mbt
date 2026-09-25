@@ -334,6 +334,115 @@ async test "--prune-null and --prune-empty reach the printed document" {
 }
 
 ///|
+async test "--select, --sort-by and --unique reach the printed document" {
+  let scratch = Scratch::named("transform")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let selected = run_on(
+    scratch,
+    "{\"name\":\"moon\",\"version\":1,\"tags\":[\"json\"]}",
+    ["--select", "tags,name", "--compact"],
+    analyzer,
+  )
+  inspect(selected.code, content="0")
+  // The list is the order the fields are printed in, and the ones it leaves out
+  // are gone rather than kept for later.
+  inspect(selected.out, content="{\"tags\":[\"json\"],\"name\":\"moon\"}\n")
+  inspect(selected.err, content="")
+  let sorted = run_on(
+    scratch,
+    "{\"records\":[{\"n\":2},{\"n\":1}]}",
+    ["--sort-by", "n", "--compact"],
+    analyzer,
+  )
+  // The array inside the object is the one sorted, and the rest of the object
+  // is printed as it was written.
+  inspect(sorted.out, content="{\"records\":[{\"n\":1},{\"n\":2}]}\n")
+  let deduplicated = run_on(
+    scratch,
+    "[{\"id\":1,\"v\":\"a\"},{\"id\":2},{\"id\":1,\"v\":\"c\"}]",
+    ["--unique", "id", "--compact"],
+    analyzer,
+  )
+  inspect(deduplicated.out, content="[{\"id\":1,\"v\":\"a\"},{\"id\":2}]\n")
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "--unique compares items as the run would print them" {
+  let scratch = Scratch::named("transform_tidied")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  // Two records whose members were written in different orders are one record
+  // once the keys are ordered, so the pair collapses to the one that came
+  // first — and what is printed is that one with its keys in order.
+  let sorted_keys = run_on(
+    scratch,
+    "[{\"a\":1,\"b\":2},{\"b\":2,\"a\":1}]",
+    ["--unique", "--sort-keys", "--compact"],
+    analyzer,
+  )
+  inspect(sorted_keys.code, content="0")
+  inspect(sorted_keys.out, content="[{\"a\":1,\"b\":2}]\n")
+  // The same reading for the whitespace: the two strings print the same once it
+  // is trimmed, so keeping both would print the same item twice.
+  let trimmed = run_on(
+    scratch,
+    "[\" moon \",\"moon\"]",
+    ["--unique", "--trim-strings", "--compact"],
+    analyzer,
+  )
+  inspect(trimmed.out, content="[\"moon\"]\n")
+  // Without either of the two, the items are compared as they were written, and
+  // both survive.
+  let as_written = run_on(
+    scratch,
+    "[{\"a\":1,\"b\":2},{\"b\":2,\"a\":1}]",
+    ["--unique", "--compact"],
+    analyzer,
+  )
+  inspect(as_written.out, content="[{\"a\":1,\"b\":2},{\"b\":2,\"a\":1}]\n")
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "a rewrite the document cannot answer exits 1 and prints nothing" {
+  let scratch = Scratch::named("transform_shape")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_on(scratch, "{\"a\":1}", ["--sort-by", "a"], analyzer)
+  inspect(result.code, content="1")
+  // A document of the wrong shape is a failure like one that does not parse:
+  // there is no answer to print, and the sentence says what was asked of it.
+  inspect(result.out, content="")
+  assert_true(result.err.contains("cannot be sorted"))
+  assert_true(result.err.contains("no array in it"))
+}
+
+///|
+async test "two of the three rewrites are refused" {
+  let scratch = Scratch::named("transform_pair")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_on(scratch, "[1,2]", ["--select", "a", "--unique"], analyzer)
+  // Refused before anything is read, since it is the command line that is
+  // wrong rather than the document: exit 2, and nothing on standard output.
+  inspect(result.code, content="2")
+  inspect(result.out, content="")
+  assert_true(
+    result.err.contains(
+      "--select and --unique each rewrite the document, so at most one of them can be given",
+    ),
+  )
+  // The document is never even parsed, so a file that is not JSON is not what
+  // the run reports.
+  let broken = run_on(
+    scratch,
+    "{not json",
+    ["--select", "a", "--unique"],
+    analyzer,
+  )
+  inspect(broken.code, content="2")
+  assert_false(broken.err.contains("not valid JSON"))
+}
+
+///|
 async test "--stats counts the document the run produced" {
   let scratch = Scratch::named("prune_stats")
   let analyzer = StubAnalyzer::new(Ok("unused"))

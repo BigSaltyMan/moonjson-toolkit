@@ -25,6 +25,9 @@
 - **修剪** —— `--prune-null` 删掉所有值为 `null` 的对象成员，`--prune-empty` 删掉所有
   空对象和空数组，以及因此变空的容器。两者可以一起给，null 先删，所以
   `{"a":{"b":null}}` 一趟就变成 `{}`。
+- **数据变换** —— `--select` 只保留逗号分隔列表点名的顶层字段，并按点名的先后排列；
+  `--sort-by` 按点号路径在每项里指到的值给数组排序；`--unique` 丢弃重复出现过的元素。
+  三个里最多只能给一个。见[数据变换](#数据变换)。
 - **校验与诊断** —— 格式错误的文档会报告行、列和原因，并指出出错的那个字符：
 
   ```
@@ -102,6 +105,9 @@ Options:
       --unflatten        Expand every dotted key back into nested objects
       --prune-null       Remove every object member whose value is null
       --prune-empty      Remove every empty object and every empty array
+      --select <fields>  Keep only the named top-level fields of an object
+      --sort-by <path>   Sort an array by the value <path> names in each item
+      --unique [path]    Drop repeated items, whole ones or by the value at <path>
       --jsonl            Read the input as JSON Lines, one document per line
       --max-depth <n>    Refuse documents nested deeper than <n> (default: 128)
       --paths            Print the path of every value instead of the document
@@ -162,6 +168,38 @@ case the nulls go first, so a member left holding {} is dropped as well.
 --prune-null keeps every item of an array: a null in an object is a member with
 no value, while a null in an array is a value in a place, and dropping it would
 renumber the items after it.
+
+--select, --sort-by and --unique rewrite the document rather than lay it out,
+and each answers one question about what it should hold. At most one of the
+three may be given: two of them are two answers to the same question, and
+neither is more nearly right than the other. They run before everything else
+that removes or reshapes values, so --select decides what --prune-null,
+--prune-empty, --flatten and --unflatten then see. Deduplicating is the one
+of the three that compares values with one another, and it does so through
+the tidying the run asked for, so --trim-strings and --sort-keys share in
+deciding what counts as the same item there.
+
+--select keeps the top-level fields its comma-separated list names, in the
+order the list gives them, and drops the rest. A name the object does not
+have is skipped rather than reported, so one selection works across a folder
+of documents whose fields have drifted apart.
+
+--sort-by sorts an array by the value its path names inside each item. The
+document may be an array itself or an object holding exactly one, which is
+sorted where it sits; an object holding several is refused, since there is no
+telling which was meant. Numbers are ordered as numbers and strings by code
+point, and values of different kinds are ordered by kind, as jq orders them:
+null, false, true, numbers, strings, arrays, objects. Two arrays, and two
+objects, are equal and keep the order they were written in. A record whose
+path reaches nothing is sorted as though the field held null, which puts it
+before the records that have a value there. The sort is stable.
+
+--unique drops the items that repeat one already seen, keeping the first.
+What is compared is the item as the run would print it, so --sort-keys makes
+two objects whose members were written in a different order one item, and
+--trim-strings makes " a" and "a" one item. With no path the whole item is
+compared; with a path it is the value the path names that is. An item whose
+path reaches nothing is kept, since it has no value to be compared.
 
 --jsonl reads the input as JSON Lines: one document per line, with blank
 lines skipped. Each record is handled on its own, so the other options apply
@@ -603,6 +641,131 @@ moon run cmd/main -- --stats -f test.json
 这两行说的就是上面那份报告的内容，顺序也和它一致，只是文档里没有的类型直接省略，而不是
 写成 `=0`。
 
+## 数据变换
+
+有三个选项改的是文档装什么，而不是它长什么样：`--select` 挑字段，`--sort-by` 给列表
+排序，`--unique` 去重。它们也是仅有的三个可能被要求做文档做不到的事的选项，遇到这种
+情况，回答是一句话说清要求的是什么、落在什么东西上，而不是一份没人要的文档。三个里
+最多只能给一个，而且一个字节都还没读就会拒绝：给两个，等于对「文档该装什么」这个
+问题给了两个答案。
+
+从顶层对象里挑出几个字段，按列表点名的先后顺序排列：
+
+```sh
+printf '{"name":"moon","version":"0.1.0","tags":["json"],"debug":true}' \
+  | moon run cmd/main -- --select name,tags -c
+# {"name":"moon","tags":["json"]}
+```
+
+文档里没有的字段会被跳过而不是报错，于是一次写好的挑选可以用在一整个目录上，哪怕这些
+文档的字段已经各自走样：
+
+```sh
+printf '{"name":"moon","private":true}' | moon run cmd/main -- --select name,version -c
+# {"name":"moon"}
+```
+
+给一组记录排序，或者给对象里装着的那一个列表排序。路径用点号分隔，因此能伸进每条记录
+里面：
+
+```sh
+printf '[{"n":3,"tag":"c"},{"n":1,"tag":"a"},{"n":2,"tag":"b"}]' \
+  | moon run cmd/main -- --sort-by n -c
+# [{"n":1,"tag":"a"},{"n":2,"tag":"b"},{"n":3,"tag":"c"}]
+```
+
+```sh
+printf '{"records":[{"user":{"age":30}},{"user":{"age":25}}]}' \
+  | moon run cmd/main -- --sort-by user.age -c
+# {"records":[{"user":{"age":25}},{"user":{"age":30}}]}
+```
+
+数字按它表示的数比大小（超出 double 范围的写法，比如 `1e400`，按它越过的那个端点
+算，而不是变成一个无处安放的值），字符串按码位比较，不同类型之间按类型排序 —— 也就
+是 `jq` 的那套顺序 —— 于是任意两个值之间都有先后，排序结果不取决于算法恰好先看了
+哪一对：
+
+```sh
+printf '[{"k":"9"},{"k":10},{"k":2},{"k":"3"}]' | moon run cmd/main -- --sort-by k -c
+# [{"k":2},{"k":10},{"k":"3"},{"k":"9"}]
+```
+
+这套顺序是 null、false、true、数字、字符串、数组、对象。路径什么都没指到的记录按字段
+为 null 参与排序，因此排在真的在那里有值的记录前面：
+
+```sh
+printf '[{"n":2},{"other":1},{"n":1}]' | moon run cmd/main -- --sort-by n -c
+# [{"other":1},{"n":1},{"n":2}]
+```
+
+空路径指的是元素本身，一串普通值就是这么排序的：
+
+```sh
+printf '[3,1,2]' | moon run cmd/main -- --sort-by '' -c
+# [1,2,3]
+```
+
+排序是稳定的：键相等的元素保持文档给的先后，所以本来就排好的列表原样返回。装着不止
+一个数组的对象会被拒绝而不是靠猜，那句话会把它找到的数组都点出来，因为无从得知路径是
+冲哪一个说的。
+
+去重丢弃重复出现过的元素，保留第一个。给了路径时，比较的是路径点到的那个值：
+
+```sh
+printf '[{"id":1,"v":"a"},{"id":2,"v":"b"},{"id":1,"v":"c"}]' \
+  | moon run cmd/main -- --unique id -c
+# [{"id":1,"v":"a"},{"id":2,"v":"b"}]
+```
+
+不给路径时比较整个元素，而且比的是这次运行会打印出来的样子 —— 所以 `--sort-keys` 会让
+两个成员书写顺序不同的记录算作同一条，`--trim-strings` 会让 `" a"` 和 `"a"` 算作同一
+条。两个都没给时，比较的就是写下来的文本本身：
+
+```sh
+printf '["a","b","a"]' | moon run cmd/main -- --unique -c
+# ["a","b"]
+```
+
+```sh
+printf '[{"a":1,"b":2},{"b":2,"a":1}]' | moon run cmd/main -- --unique --sort-keys -c
+# [{"a":1,"b":2}]
+```
+
+路径什么都没指到的元素会保留，而不是当成另一个同样指不到的元素的重复：它没有值可以
+比较，也就无从说起谁和谁一样。
+
+这三个都在其它「删东西、改形状」的选项之前运行，所以后面看到的正是它们留下的结果 ——
+这里 `--select` 决定了 `--prune-null` 接下来可以去删哪些字段：
+
+```sh
+printf '{"name":"moon","note":null,"tags":[]}' \
+  | moon run cmd/main -- --select name,note,tags --prune-null -c
+# {"name":"moon","tags":[]}
+```
+
+```sh
+printf '{"name":"moon","note":null,"tags":[]}' \
+  | moon run cmd/main -- --select name,note,tags --prune-null --prune-empty -c
+# {"name":"moon"}
+```
+
+三个里给两个，是一条无法执行的命令行，所以运行在读取任何输入之前就停下，退出码 `2`：
+
+```sh
+printf '[1,2]' | moon run cmd/main -- --select a --unique -c
+# error: --select and --unique each rewrite the document, so at most one of them can be given
+# run 'moonjson-toolkit --help' to see the available options
+```
+
+文档答不了被问的那个问题时，算作和解析失败同一类的错误：退出码 `1`，标准输出上没有
+任何内容，原因写在标准错误上。
+
+```sh
+printf '{"a":1}' | moon run cmd/main -- --sort-by a
+# error: <stdin> cannot be sorted
+# --sort-by sorts an array, and this document is an object with no array in it
+```
+
 ## 统计仪表盘
 
 仪表盘读的是 `--json-out` 写出的文件。它是 `frontend/` 下一个独立的 MoonBit 模块，用
@@ -794,6 +957,7 @@ moonjson-toolkit/
 ├── formatter.mbt         pretty-printing
 ├── flatten.mbt           dotted keys out of nesting, and back again
 ├── prune.mbt             dropping null members and empty containers
+├── transform.mbt         selecting, sorting and deduplicating
 ├── jsonl.mbt             splitting a JSON Lines input into records
 ├── diagnostics.mbt       offsets to line/column, rendered error snippets
 ├── color.mbt             the colour decision and the escape wrapping
@@ -817,7 +981,7 @@ AI 响应处理都不需要联网，所以在任何机器上 `moon test` 都是�
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 221 tests
+moon test  --target native   # 244 tests
 moon fmt                     # format
 
 cd frontend
@@ -834,35 +998,35 @@ moon coverage analyze -- -f summary
 
 ```
 ai.mbt: 80/90
-cli.mbt: 143/147
+cli.mbt: 152/156
 cmd/main/main.mbt: 0/14
 color.mbt: 41/43
 diagnostics.mbt: 81/98
 flatten.mbt: 100/102
-formatter.mbt: 151/152
 parser.mbt: 261/276
-runner.mbt: 213/239
-Total: 1485/1576
+runner.mbt: 245/272
+transform.mbt: 141/143
+Total: 1668/1761
 ```
 
-即插桩监视的 1576 个点中有 1485 个被覆盖，占 94.2%。这里的计数单位是源码中的位置而不是行：一行里放下两个表达式就是两个点，其中一个没被执行时，这一行仍会算作已覆盖，所以只要模块里有任意一个点没被执行，它就会出现在上面这段输出里；反过来说，它没有列出的五个模块——`jsonl.mbt`、`moondeps.mbt`、`paths.mbt`、`prune.mbt` 和 `stats.mbt`——是逐点完整覆盖的。同样的数字按覆盖率从高到低排列：
+即插桩监视的 1761 个点中有 1668 个被覆盖，占 94.7%。这里的计数单位是源码中的位置而不是行：一行里放下两个表达式就是两个点，其中一个没被执行时，这一行仍会算作已覆盖，所以只要模块里有任意一个点没被执行，它就会出现在上面这段输出里；反过来说，它没有列出的六个模块——`formatter.mbt`、`jsonl.mbt`、`moondeps.mbt`、`paths.mbt`、`prune.mbt` 和 `stats.mbt`——是逐点完整覆盖的。同样的数字按覆盖率从高到低排列：
 
 | 模块 | 覆盖率 |
 | ---- | ------ |
-| `jsonl.mbt`、`moondeps.mbt`、`paths.mbt`、`prune.mbt`、`stats.mbt` | 100% |
-| `formatter.mbt` | 99.3% |
+| `formatter.mbt`、`jsonl.mbt`、`moondeps.mbt`、`paths.mbt`、`prune.mbt`、`stats.mbt` | 100% |
+| `transform.mbt` | 98.6% |
 | `flatten.mbt` | 98.0% |
-| `cli.mbt` | 97.3% |
+| `cli.mbt` | 97.4% |
 | `color.mbt` | 95.3% |
 | `parser.mbt` | 94.6% |
-| `runner.mbt` | 89.1% |
+| `runner.mbt` | 90.1% |
 | `ai.mbt` | 88.9% |
 | `diagnostics.mbt` | 82.7% |
 | `cmd/main/main.mbt` | 0% |
 
 `cmd/main/main.mbt` 是唯一一个有意为之的零：它是进程入口，而 `moon test` 从不运行 `main`。它做的事只是把真实的命令行和两个真实的数据流交给 `run`，而 `run` 本身由测试直接覆盖。
 
-其余没覆盖到的，都是需要进程之外的东西才能触发的分支。`ai.mbt` 里的 `analyze`——唯一与服务商通信的函数——从未被调用，因为任何测试都不允许访问真实 API；`parser.mbt` 和 `runner.mbt` 的标准输入路径没有被触及，因为每个测试都指定了文件；`color.mbt` 剩下的两个点都是内核针对一个测试套件选不了的标准输出给出的回答：管道解析不出路径，所以把路径读回来的那一支不会走到；而管道是内核描述得很清楚的一种类型，所以探测失败时的那一支也不会走到；`diagnostics.mbt` 则留着测试套件无法构造出来的那些解析错误分支和限制类型。
+其余没覆盖到的，都是需要进程之外的东西才能触发的分支。`ai.mbt` 里的 `analyze`——唯一与服务商通信的函数——从未被调用，因为任何测试都不允许访问真实 API；`parser.mbt` 和 `runner.mbt` 的标准输入路径没有被触及，因为每个测试都指定了文件；`color.mbt` 剩下的两个点都是内核针对一个测试套件选不了的标准输出给出的回答：管道解析不出路径，所以把路径读回来的那一支不会走到；而管道是内核描述得很清楚的一种类型，所以探测失败时的那一支也不会走到；`diagnostics.mbt` 则留着测试套件无法构造出来的那些解析错误分支和限制类型；`transform.mbt` 剩下的两个点在同一行上，是逐成员重建一个装着数组的对象时走的那一支，它到不了，因为被重建的那个成员正是名字的来源。这一行写出来而不是省掉，是为了万一哪天它不再成立，也不至于悄悄丢掉一个成员。
 
 `parser.mbt` 剩下的那些点大多在快路径里，而它们之所以没被执行，是因为一旦被执行就说明有 bug：两个循环末尾的 `abort` 行（那两个循环只会通过返回离开），以及字符串末尾把转义序列截断时的兜底判断。剩下的点只有测试套件不携带的文档才够得着——一份超过 64 MiB 输入上限的文档，这正是下一节要说的。
 
@@ -960,7 +1124,9 @@ small.json     200        0.735 s    0.039 s
 - **键里含 `.`、`[` 或 `]` 时路径有歧义。** 路径是按读起来的样子写的，而不是转义过的，
   所以 `{"a.b": 1}` 和 `{"a": {"b": 1}}` 都产生 `a.b`，而 `{"a[0]": 1}` 与名为 `a` 的
   数组的第一个元素无法区分。用到这些字符的键足够罕见，值得换取可读的形式；真遇到时，
-  给它们加引号，或者把路径列表和文档对照着读。
+  给它们加引号，或者把路径列表和文档对照着读。`--sort-by` 和 `--unique` 拿到的路径也是
+  这么读的，所以名字里带点号的成员没法拿来排序或去重；`--select` 则是原样取顶层名字，
+  里头有点号也一样算。
 
 ## 依赖与许可证
 

@@ -33,6 +33,11 @@ charts the statistics the tool writes.
   `null`, and `--prune-empty` removes every empty object and every empty array,
   then the containers left empty by that. The two may be given together, nulls
   first, so `{"a":{"b":null}}` becomes `{}` in one pass.
+- **Transforming** — `--select` keeps the top-level fields a comma-separated
+  list names, in the order it names them, `--sort-by` orders an array by the
+  value a dotted path reaches inside each item, and `--unique` drops the items
+  that repeat one already seen. At most one of the three may be given. See
+  [transforming data](#transforming-data).
 - **Validation with diagnostics** — a malformed document reports the line, the
   column and the reason, and points at the offending character:
 
@@ -118,6 +123,9 @@ Options:
       --unflatten        Expand every dotted key back into nested objects
       --prune-null       Remove every object member whose value is null
       --prune-empty      Remove every empty object and every empty array
+      --select <fields>  Keep only the named top-level fields of an object
+      --sort-by <path>   Sort an array by the value <path> names in each item
+      --unique [path]    Drop repeated items, whole ones or by the value at <path>
       --jsonl            Read the input as JSON Lines, one document per line
       --max-depth <n>    Refuse documents nested deeper than <n> (default: 128)
       --paths            Print the path of every value instead of the document
@@ -178,6 +186,38 @@ case the nulls go first, so a member left holding {} is dropped as well.
 --prune-null keeps every item of an array: a null in an object is a member with
 no value, while a null in an array is a value in a place, and dropping it would
 renumber the items after it.
+
+--select, --sort-by and --unique rewrite the document rather than lay it out,
+and each answers one question about what it should hold. At most one of the
+three may be given: two of them are two answers to the same question, and
+neither is more nearly right than the other. They run before everything else
+that removes or reshapes values, so --select decides what --prune-null,
+--prune-empty, --flatten and --unflatten then see. Deduplicating is the one
+of the three that compares values with one another, and it does so through
+the tidying the run asked for, so --trim-strings and --sort-keys share in
+deciding what counts as the same item there.
+
+--select keeps the top-level fields its comma-separated list names, in the
+order the list gives them, and drops the rest. A name the object does not
+have is skipped rather than reported, so one selection works across a folder
+of documents whose fields have drifted apart.
+
+--sort-by sorts an array by the value its path names inside each item. The
+document may be an array itself or an object holding exactly one, which is
+sorted where it sits; an object holding several is refused, since there is no
+telling which was meant. Numbers are ordered as numbers and strings by code
+point, and values of different kinds are ordered by kind, as jq orders them:
+null, false, true, numbers, strings, arrays, objects. Two arrays, and two
+objects, are equal and keep the order they were written in. A record whose
+path reaches nothing is sorted as though the field held null, which puts it
+before the records that have a value there. The sort is stable.
+
+--unique drops the items that repeat one already seen, keeping the first.
+What is compared is the item as the run would print it, so --sort-keys makes
+two objects whose members were written in a different order one item, and
+--trim-strings makes " a" and "a" one item. With no path the whole item is
+compared; with a path it is the value the path names that is. An item whose
+path reaches nothing is kept, since it has no value to be compared.
 
 --jsonl reads the input as JSON Lines: one document per line, with blank
 lines skipped. Each record is handled on its own, so the other options apply
@@ -665,6 +705,145 @@ moon run cmd/main -- --stats -f test.json
 The two lines say what the report above says, in the order it says it, with the
 types the document does not contain left out rather than shown as `=0`.
 
+## Transforming data
+
+Three options change what a document holds rather than how it looks: `--select`
+chooses fields, `--sort-by` orders a list and `--unique` drops repeats. They are
+the only three that can be asked for something a document cannot give, and each
+answers that with a sentence naming what was asked for and what it was asked of
+rather than with a document nobody asked for. At most one of the three may be
+given, and the run refuses the pair before it reads a byte: two of them are two
+answers to the same question about what the document should hold.
+
+Keep a few fields of a top-level object, in the order the list names them:
+
+```sh
+printf '{"name":"moon","version":"0.1.0","tags":["json"],"debug":true}' \
+  | moon run cmd/main -- --select name,tags -c
+# {"name":"moon","tags":["json"]}
+```
+
+A field that is not there is skipped rather than reported, so one selection can
+be written once and used over a folder of documents whose fields have drifted
+apart:
+
+```sh
+printf '{"name":"moon","private":true}' | moon run cmd/main -- --select name,version -c
+# {"name":"moon"}
+```
+
+Sort a list of records, or the one list an object holds under a name. The path
+is dotted, so it reaches inside each record:
+
+```sh
+printf '[{"n":3,"tag":"c"},{"n":1,"tag":"a"},{"n":2,"tag":"b"}]' \
+  | moon run cmd/main -- --sort-by n -c
+# [{"n":1,"tag":"a"},{"n":2,"tag":"b"},{"n":3,"tag":"c"}]
+```
+
+```sh
+printf '{"records":[{"user":{"age":30}},{"user":{"age":25}}]}' \
+  | moon run cmd/main -- --sort-by user.age -c
+# {"records":[{"user":{"age":25}},{"user":{"age":30}}]}
+```
+
+Numbers are ordered as the numbers they denote — a literal past the end of a
+double's range, such as `1e400`, is read as the end it went past rather than
+left with no place at all — and strings by code point, and values of different
+kinds are ordered by kind, the way `jq` orders them, so every two values have an
+order between them:
+
+```sh
+printf '[{"k":"9"},{"k":10},{"k":2},{"k":"3"}]' | moon run cmd/main -- --sort-by k -c
+# [{"k":2},{"k":10},{"k":"3"},{"k":"9"}]
+```
+
+That order is null, false, true, numbers, strings, arrays, objects. A record
+whose path reaches nothing sorts as though the field held null, which puts it in
+front of the records that have a value there:
+
+```sh
+printf '[{"n":2},{"other":1},{"n":1}]' | moon run cmd/main -- --sort-by n -c
+# [{"other":1},{"n":1},{"n":2}]
+```
+
+An empty path names the item itself, which is how a list of plain values is
+sorted:
+
+```sh
+printf '[3,1,2]' | moon run cmd/main -- --sort-by '' -c
+# [1,2,3]
+```
+
+The sort is stable: items whose keys compare equal keep the order the document
+gave them, so a list already in order comes back unchanged. An object holding
+more than one array is refused rather than guessed at, and the sentence names
+the arrays it found, since there is no telling which of them the path was meant
+for.
+
+Drop the items that repeat one already seen, keeping the first. With a path, it
+is the value the path names that is compared:
+
+```sh
+printf '[{"id":1,"v":"a"},{"id":2,"v":"b"},{"id":1,"v":"c"}]' \
+  | moon run cmd/main -- --unique id -c
+# [{"id":1,"v":"a"},{"id":2,"v":"b"}]
+```
+
+With no path the whole item is compared, and it is compared as the run would
+print it — so `--sort-keys` makes two records whose members were written in
+different orders one item, and `--trim-strings` does the same for `" a"` and
+`"a"`. Without either of those the comparison is of the text as it was written:
+
+```sh
+printf '["a","b","a"]' | moon run cmd/main -- --unique -c
+# ["a","b"]
+```
+
+```sh
+printf '[{"a":1,"b":2},{"b":2,"a":1}]' | moon run cmd/main -- --unique --sort-keys -c
+# [{"a":1,"b":2}]
+```
+
+An item whose path reaches nothing is kept rather than counted as a repeat of
+another such item: it has no value to be compared, and there is nothing to say
+which of the two was the same as which.
+
+These run before everything else that removes or reshapes values, so what they
+leave is what the rest of the run sees — `--select` decides here which fields
+`--prune-null` is then free to drop:
+
+```sh
+printf '{"name":"moon","note":null,"tags":[]}' \
+  | moon run cmd/main -- --select name,note,tags --prune-null -c
+# {"name":"moon","tags":[]}
+```
+
+```sh
+printf '{"name":"moon","note":null,"tags":[]}' \
+  | moon run cmd/main -- --select name,note,tags --prune-null --prune-empty -c
+# {"name":"moon"}
+```
+
+Two of the three at once is a command line that cannot be obeyed, so the run
+stops before it reads anything and exits `2`:
+
+```sh
+printf '[1,2]' | moon run cmd/main -- --select a --unique -c
+# error: --select and --unique each rewrite the document, so at most one of them can be given
+# run 'moonjson-toolkit --help' to see the available options
+```
+
+A document that cannot answer the one that was asked is a failure like a
+document that does not parse: exit `1`, nothing on standard output, and the
+reason on standard error.
+
+```sh
+printf '{"a":1}' | moon run cmd/main -- --sort-by a
+# error: <stdin> cannot be sorted
+# --sort-by sorts an array, and this document is an object with no array in it
+```
+
 ## The statistics dashboard
 
 The dashboard reads the file written by `--json-out`. It is a separate MoonBit
@@ -877,6 +1056,7 @@ moonjson-toolkit/
 ├── formatter.mbt         pretty-printing
 ├── flatten.mbt           dotted keys out of nesting, and back again
 ├── prune.mbt             dropping null members and empty containers
+├── transform.mbt         selecting, sorting and deduplicating
 ├── jsonl.mbt             splitting a JSON Lines input into records
 ├── diagnostics.mbt       offsets to line/column, rendered error snippets
 ├── color.mbt             the colour decision and the escape wrapping
@@ -902,7 +1082,7 @@ so `moon test` is the same command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 221 tests
+moon test  --target native   # 244 tests
 moon fmt                     # format
 
 cd frontend
@@ -920,34 +1100,34 @@ moon coverage analyze -- -f summary
 
 ```
 ai.mbt: 80/90
-cli.mbt: 143/147
+cli.mbt: 152/156
 cmd/main/main.mbt: 0/14
 color.mbt: 41/43
 diagnostics.mbt: 81/98
 flatten.mbt: 100/102
-formatter.mbt: 151/152
 parser.mbt: 261/276
-runner.mbt: 213/239
-Total: 1485/1576
+runner.mbt: 245/272
+transform.mbt: 141/143
+Total: 1668/1761
 ```
 
-That is 1485 of the 1576 points the instrumentation watches, or 94.2%. The count
+That is 1668 of the 1761 points the instrumentation watches, or 94.7%. The count
 is of positions in the source rather than lines — a line carrying two expressions
 is two points, and one of them can go unexecuted while the line itself is read as
 covered — so a module is listed whenever any of its points went unexecuted, and
-the five this block leaves out, `jsonl.mbt`, `moondeps.mbt`, `paths.mbt`,
-`prune.mbt` and `stats.mbt`, are covered point for point. The same numbers,
-ordered by how much of each module is reached:
+the six this block leaves out, `formatter.mbt`, `jsonl.mbt`, `moondeps.mbt`,
+`paths.mbt`, `prune.mbt` and `stats.mbt`, are covered point for point. The same
+numbers, ordered by how much of each module is reached:
 
 | Module | Coverage |
 | ------ | -------- |
-| `jsonl.mbt`, `moondeps.mbt`, `paths.mbt`, `prune.mbt`, `stats.mbt` | 100% |
-| `formatter.mbt` | 99.3% |
+| `formatter.mbt`, `jsonl.mbt`, `moondeps.mbt`, `paths.mbt`, `prune.mbt`, `stats.mbt` | 100% |
+| `transform.mbt` | 98.6% |
 | `flatten.mbt` | 98.0% |
-| `cli.mbt` | 97.3% |
+| `cli.mbt` | 97.4% |
 | `color.mbt` | 95.3% |
 | `parser.mbt` | 94.6% |
-| `runner.mbt` | 89.1% |
+| `runner.mbt` | 90.1% |
 | `ai.mbt` | 88.9% |
 | `diagnostics.mbt` | 82.7% |
 | `cmd/main/main.mbt` | 0% |
@@ -965,7 +1145,11 @@ standard output the suite cannot choose: a pipe resolves to no path, so the
 branch that reads one back is never taken, and a pipe is a kind the kernel
 describes plainly, so the branch for a probe that fails is never taken either.
 `diagnostics.mbt` keeps the parse-error variants and limit kinds no input in the
-suite manages to provoke.
+suite manages to provoke. The two points left in `transform.mbt` are one line:
+the branch taken while an object holding an array is rebuilt a member at a time,
+which cannot be reached because the member it rebuilds is the one the name was
+taken from. It is written out rather than left out so that a member could never
+be dropped silently if that ever stopped being true.
 
 Most of what is left in `parser.mbt` is the fast path, and the points there that
 go unexecuted go unexecuted because reaching them would mean a bug: the two
@@ -1093,7 +1277,10 @@ and read the same values out of them.
   `{"a": {"b": 1}}` both produce `a.b`, and `{"a[0]": 1}` is indistinguishable
   from the first element of an array named `a`. Keys that use those characters
   are rare enough to be worth the readable form; quote them, or read the path
-  list alongside the document, when they turn up.
+  list alongside the document, when they turn up. The paths `--sort-by` and
+  `--unique` are given are read the same way, so a member whose name contains a
+  dot cannot be sorted or deduplicated on, while `--select` takes the top-level
+  names as they were written, dot and all.
 
 ## Dependencies and Licenses
 

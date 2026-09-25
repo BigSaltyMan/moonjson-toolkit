@@ -29,6 +29,9 @@ test "no arguments yields the documented defaults" {
   assert_eq(options.unflatten, false)
   assert_eq(options.prune_null, false)
   assert_eq(options.prune_empty, false)
+  assert_eq(options.select, None)
+  assert_eq(options.sort_by, None)
+  assert_eq(options.unique, None)
   assert_eq(options.jsonl, false)
   assert_eq(options.paths, false)
   assert_eq(options.keys_only, false)
@@ -231,6 +234,61 @@ test "--prune-null and --prune-empty are read, together or apart" {
   // Neither is a shortening of the other, and the prefix alone is not a flag.
   assert_eq(cli_err(["--prune"]), "unknown option: --prune")
   assert_eq(cli_err(["--prune-nulls"]), "unknown option: --prune-nulls")
+}
+
+///|
+test "--select takes the comma-separated field list as one value" {
+  assert_eq(cli_ok(["--select", "a,b"]).select, Some("a,b"))
+  assert_eq(cli_ok(["--select=a,b"]).select, Some("a,b"))
+  // The list is one value however many fields are in it: the splitting happens
+  // where the document is, not here.
+  assert_eq(cli_ok(["--select=a,b,c"]).select, Some("a,b,c"))
+  assert_eq(
+    cli_err(["--select="]),
+    "option --select requires a non-empty value",
+  )
+  assert_eq(cli_err(["--select"]), "option --select requires a value")
+  // The three rewrites are read one at a time and settled together later, so
+  // no parse of one of them has anything to say about the other two. Asking for
+  // two of them is a run that is refused, not a command line that is rejected.
+  let options = cli_ok(["--select", "a", "--sort-by", "b", "--unique", "c"])
+  assert_eq(options.select, Some("a"))
+  assert_eq(options.sort_by, Some("b"))
+  assert_eq(options.unique, Some("c"))
+}
+
+///|
+test "--sort-by takes the path to sort by" {
+  assert_eq(cli_ok(["--sort-by", "a.b"]).sort_by, Some("a.b"))
+  assert_eq(cli_ok(["--sort-by=a.b"]).sort_by, Some("a.b"))
+  // The path is kept as it was written, dots and all, because the document it
+  // is read against is not known yet.
+  assert_eq(cli_ok(["--sort-by=a.b.c"]).sort_by, Some("a.b.c"))
+  assert_eq(
+    cli_err(["--sort-by="]),
+    "option --sort-by requires a non-empty value",
+  )
+  assert_eq(cli_err(["--sort-by"]), "option --sort-by requires a value")
+}
+
+///|
+test "--unique takes an optional path" {
+  // With no path the whole item is the key. That is the empty path — the path
+  // that names the item itself — so the two forms are one option and the rest
+  // of the program never asks which of them was written.
+  assert_eq(cli_ok(["--unique"]).unique, Some(""))
+  assert_eq(cli_ok(["--unique="]).unique, Some(""))
+  assert_eq(cli_ok(["--unique", "id"]).unique, Some("id"))
+  assert_eq(cli_ok(["--unique=id"]).unique, Some("id"))
+  // A following argument is the path only when it is not another option, so the
+  // bare form can stand in front of a flag. Reading `--flatten` as a field name
+  // would leave the run asking for a field called `--flatten`.
+  let options = cli_ok(["--unique", "--flatten"])
+  assert_eq(options.unique, Some(""))
+  assert_true(options.flatten)
+  // Nothing else can follow it bare — files are named with --file — so the only
+  // argument that can be meant as a path is one that does not start with a dash.
+  assert_eq(cli_ok(["--unique", "meta.id"]).unique, Some("meta.id"))
 }
 
 ///|
@@ -443,10 +501,10 @@ test "the usage text documents every option" {
   for
     option in [
       "-f", "--file", "-i", "--indent", "-c", "--compact", "-S", "--sort-keys", "--trim-strings",
-      "--flatten", "--unflatten", "--prune-null", "--prune-empty", "--jsonl", "--max-depth",
-      "--paths", "--keys-only", "-v", "--validate", "-h", "--help", "-V", "--version",
-      "--ai", "--model", "--ai-base-url", "--moon-deps", "--fail-fast", "--continue-on-error",
-      "--json-out", "--stats", "--no-color",
+      "--flatten", "--unflatten", "--prune-null", "--prune-empty", "--select", "--sort-by",
+      "--unique", "--jsonl", "--max-depth", "--paths", "--keys-only", "-v", "--validate",
+      "-h", "--help", "-V", "--version", "--ai", "--model", "--ai-base-url", "--moon-deps",
+      "--fail-fast", "--continue-on-error", "--json-out", "--stats", "--no-color",
     ] {
     assert_true(text.contains(option))
   }
