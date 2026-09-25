@@ -206,10 +206,14 @@ pub fn format_compact(json : @pjson.Json) -> String {
 ///|
 /// Return `json` with the members of every object ordered by key.
 ///
-/// Keys are compared with `String::compare`, so the order is code point by code
-/// point: ASCII keys come out the way a dictionary would list them, and upper
-/// case sorts before lower case. The ordering reaches every object in the
-/// document, including the ones nested inside arrays.
+/// Keys are compared by code point — `compare_text`, the same comparison
+/// `--sort-by` orders values with — so ASCII keys come out the way a dictionary
+/// would list them, and upper case sorts before lower case. A key that is the
+/// start of another one sorts first, and nothing is decided by how long a key
+/// is: `"apple"` comes before `"pear"` because `a` is before `p`, where a
+/// comparison that looked at the lengths first would have put `"pear"` first.
+/// The ordering reaches every object in the document, including the ones nested
+/// inside arrays.
 ///
 /// The argument is not modified. Each object is rebuilt around a fresh array
 /// rather than sorted in place, so a caller that still holds the original tree
@@ -224,7 +228,7 @@ pub fn sort_keys(json : @pjson.Json) -> @pjson.Json {
       rebuilt.sort_by(fn(left, right) {
         let (left_key, _) = left
         let (right_key, _) = right
-        left_key.compare(right_key)
+        compare_text(left_key, right_key)
       })
       Object(members=rebuilt)
     }

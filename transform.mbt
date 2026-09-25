@@ -187,6 +187,11 @@ fn kind_rank(json : @pjson.Json) -> Int {
 /// comes before `"apple"` and `"b"` before `"ab"`. A shorter string that is the
 /// start of a longer one therefore sorts first here without the length being
 /// consulted at all, which is what the order of a dictionary looks like.
+///
+/// Both places that order strings use this one: `--sort-by` and `--unique`
+/// through `compare_keys` below, and `--sort-keys` through `sort_keys` in
+/// `formatter.mbt`, so the order a key is printed in and the order a value is
+/// sorted in are the same order.
 fn compare_text(first : String, second : String) -> Int {
   let left = first.to_array()
   let right = second.to_array()

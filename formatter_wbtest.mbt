@@ -110,6 +110,25 @@ test "sorting orders the members of an object" {
     format(sort_keys(json), 2),
     "{\n  \"C\": 3,\n  \"a\": 2,\n  \"b\": 1\n}",
   )
+  // And the order is decided by the characters rather than by the lengths, which
+  // is where `"pear"` would come first if it were not: `"apple"` sorts before it
+  // because `a` is before `p`, and `"ab"` before that because it runs out of
+  // characters while `"apple"` has `p` left over. Sorting by length first would
+  // have answered `b, ab, pear, apple` instead.
+  let words = parse_ok("{\"pear\":1,\"apple\":2,\"b\":3,\"ab\":4}")
+  assert_eq(
+    format_compact(sort_keys(words)),
+    "{\"ab\":4,\"apple\":2,\"b\":3,\"pear\":1}",
+  )
+  // A character outside the basic plane is compared as the character it is
+  // rather than as the code units it is written with: `😀` is one character of
+  // its own, past every character in the basic plane, where comparing the code
+  // units would have found the `😀` to start before the `�` below it.
+  let wide = parse_ok("{\"😀\":1,\"a\":2,\"é\":3,\"\u{FFFD}\":4}")
+  assert_eq(
+    format_compact(sort_keys(wide)),
+    "{\"a\":2,\"é\":3,\"\u{FFFD}\":4,\"😀\":1}",
+  )
 }
 
 ///|
