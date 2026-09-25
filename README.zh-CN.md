@@ -48,6 +48,9 @@
   行哪一列 —— 悄悄保留其中一个，等于让你拿到的值取决于解析器而不是文档本身。
   `--max-depth <n>` 对嵌套深度做同样的约束：比 `n` 更深的文档一律拒绝，并指出它在
   哪里超了。
+- **JSON Schema 校验** —— `--schema <path>` 拿输入去比对一份 JSON Schema。和 `-v` 一
+  起读，它给出的是一个判断而不是一份文档；不符合 schema 的文档会被逐一报告所有不符合
+  的地方，一行一处。见[校验 JSON Schema](#校验-json-schema)。
 - **路径与键** —— `--paths` 逐行列出文档中每个值的路径，`--keys-only` 只列出对象成
   员。两者合起来回答「这里面有什么」，而不用把文档打印出来。
 
@@ -116,6 +119,7 @@ Options:
       --paths            Print the path of every value instead of the document
       --keys-only        Print only the paths that name an object member
   -v, --validate         Only check the input and report the first error
+      --schema <path>    Check the input against the JSON Schema in <path>
   -h, --help             Show this message and exit
   -V, --version          Show the version and exit
       --ai               Ask the AI for a quality report and suggestions
@@ -183,6 +187,22 @@ optional rather than given a type the sample does not show. --json-out, --ai,
 --paths and --keys-only each answer with something else in place of the
 document, so none of them can be asked for with --emit-moonbit; --stats gives
 way to it, and -v wins over it as it wins over the name lists.
+
+--schema <path> checks the input against a JSON Schema instead of printing
+it, and is read with -v, which is the flag that asks for a verdict rather
+than a document. The dialect read is the part of the one at json-schema.org
+that a document of data is described with: type, required, properties, items,
+enum, minimum, maximum, minLength, maxLength and pattern. Every other keyword
+is passed over rather than refused, so a schema written for a full validator
+can be handed to this one and the part of it this tool does not read is
+simply not enforced.
+
+A document that does not match is reported with every place it disagrees,
+one to a line, and the run exits 1. A schema this tool cannot read is a
+mistake in the command line rather than in the document: it is named, the
+keyword to fix is quoted under it, and the run exits 2 without looking at
+any input. Under --jsonl every record is checked on its own and reported
+with the line it was written on.
 
 --flatten collapses every nested object into dotted keys, and --unflatten
 expands them again. The two are inverses of each other, so only one of them
@@ -359,14 +379,16 @@ conflicting keys: "a" and "a.b"
 结果：打印出来的文档、路径列表、AI 评审，以及 `--stats` 和 `--json-out` 背后的计数 ——
 后者描述的是这一轮**产出**的文档，而不是读进来的那份。排序和去空白分不出区别（两者都
 不移动值、也不改变类型），但修剪和重塑能看出来，而一份还在数着文档已经不再拥有的成员的
-摘要，描述的是读者看不到的东西。
+摘要，描述的是读者看不到的东西。`--schema` 是唯一一个检查读进来的文档、而不是检查这
+一轮产出的文档的选项：schema 描述的是输入，而一份被压平、筛选或修剪过的文档，已经不是
+写那份 schema 时针对的文档了。
 
 ### 退出码
 
 | 码 | 含义 |
 | ---- | ------- |
 | `0`  | 输入已格式化，或校验通过 |
-| `1`  | 输入读不出来，或者不是合法 JSON |
+| `1`  | 输入读不出来、不是合法 JSON，或者不符合 schema |
 | `2`  | 命令行本身有误 |
 | `3`  | 输入是合法的，但 AI 评审没能产出 |
 
@@ -669,6 +691,130 @@ moon run cmd/main -- --stats -f test.json
 
 这两行说的就是上面那份报告的内容，顺序也和它一致，只是文档里没有的类型直接省略，而不是
 写成 `=0`。
+
+## 校验 JSON Schema
+
+`--schema <path>` 拿输入去比对一份 JSON Schema，而不是把它打印出来。它和 `-v` 一起读 ——
+后者要的正是一个判断而不是一份文档 —— 两者合起来回答的，正是写一份 schema 时想问的那个
+问题：
+
+```sh
+cat > person.schema.json <<'EOF'
+{
+  "type": "object",
+  "required": ["id", "name"],
+  "properties": {
+    "id": { "type": "integer", "minimum": 1 },
+    "name": { "type": "string", "minLength": 1, "maxLength": 20 },
+    "email": { "type": "string", "pattern": "^[^@]+@[^@]+$" }
+  }
+}
+EOF
+printf '{"id":7,"name":"Moon","email":"moon@example.com"}' \
+  | moon run cmd/main -- -v --schema person.schema.json
+# <stdin>: valid JSON, and it matches the schema
+```
+
+这个判断把这一轮检查过的两件事都说了出来 —— 文档解析通过了，而且与 schema 相符 —— 因为
+一个两件都查了的运行只说其中一件，会让你对另一件心里没底。
+
+不符合 schema 的文档，会把两处不一致的地方逐条报告出来，顺序按 schema 询问它们的顺序，
+每条都写在它所针对的那个值的路径下。退出码是 `1`，也就是输入有误的那个码，标准输出上什
+么都不写：这时给出一个判断就是撒谎，而除此之外也没有别的东西可打。
+
+```sh
+printf '{"id":0,"name":"","extra":true}' \
+  | moon run cmd/main -- -v --schema person.schema.json
+# error: <stdin> does not match the schema
+#   id: it is less than the minimum 1
+#   name: it is 0 characters long, and the schema asks for at least 1
+```
+
+上面两处违规是按 schema 询问的顺序报告的，而不是按文档书写它们的顺序；`extra` 没有被任
+何 property 点名，所以没有任何东西会去过问它。
+
+这些路径就是 `--paths` 打印的那些，所以一个成员里的成员、或者数组某一项里的违规，在这里
+和在 `--paths` 里叫法完全一样：
+
+```sh
+cat > order.schema.json <<'EOF'
+{
+  "properties": {
+    "customer": {
+      "required": ["name"],
+      "properties": { "name": { "type": "string" } }
+    },
+    "lines": { "items": { "properties": { "qty": { "type": "integer" } } } }
+  }
+}
+EOF
+printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
+  | moon run cmd/main -- -v --schema order.schema.json
+# error: <stdin> does not match the schema
+#   customer: required member "name" is missing
+#   lines[1].qty: it is a string where the schema expects an integer
+```
+
+本工具读的方言，是 [json-schema.org](https://json-schema.org/) 那份里用来描述一份数据文档
+的那部分：`type`、`required`、`properties`、`items`、`enum`、`minimum`、`maximum`、
+`minLength`、`maxLength` 和 `pattern`。其它关键字一律跳过而不是拒绝，所以一份为完整校验
+器写的 schema —— `$schema`、`title`、`additionalProperties`、`anyOf` —— 可以直接交给它，
+而其中本工具不读的那部分只是不生效而已：
+
+```sh
+cat > loose.schema.json <<'EOF'
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "A person",
+  "type": "object",
+  "additionalProperties": false,
+  "anyOf": [{ "required": ["id"] }, { "required": ["name"] }]
+}
+EOF
+printf '{"id":1,"nickname":"Moon"}' \
+  | moon run cmd/main -- -v --schema loose.schema.json
+# <stdin>: valid JSON, and it matches the schema
+```
+
+上面这四个关键字被读出来后就跳过；`type` 是本工具真正执行的那个，而 `id` 是整数，所以文
+档通过。没有被 property 点名的成员原样保留，不管 `additionalProperties` 说了什么。
+
+一份本工具「读不懂」的 schema 是另一回事：这是运行被告知的东西有误，而不是文档有误，所以
+它在任何输入被读到之前就以退出码 `2` 拒绝，并点名需要修改的那个关键字以及原因：
+
+```sh
+printf '{"type":"object","properties":{"id":{"type":"int"}}}' > broken.schema.json
+printf '{"id":1}' | moon run cmd/main -- -v --schema broken.schema.json
+# error: the schema broken.schema.json is not one this tool can read
+#   properties.id.type: "int" is not a JSON type; the types are object, array, string, number, integer, boolean and null
+```
+
+这跟工具其余部分的划分是一样的。schema 自己的取值有问题 —— 一个读不懂的 `pattern`、一个
+不是整数的 `minLength`、一个不是名字列表的 `required` —— 是码 `2` 并点名 schema；而一份
+没通过「本工具读得懂的 schema」的文档是码 `1` 并点名文档。
+
+`--schema` 描述的是输入，而不是这一轮对输入做了什么，所以它作用于文档刚被读进来的样子，
+早于 `--flatten`、`--select` 和各种修剪发挥作用：schema 是为你手上这份文档写的，而被压平
+或修剪过的文档是另一份文档。在 `--jsonl` 下每条记录都是一份自己的文档，所以每条记录都单
+独检查，并带上它写在那一行上：
+
+```sh
+printf '{"id":1,"name":"Moon"}\n\n{"id":"two","name":"Moon"}\n' \
+  | moon run cmd/main -- --jsonl -v --schema person.schema.json
+# error: <stdin> line 3 does not match the schema
+#   id: it is a string where the schema expects an integer
+```
+
+一个所有记录都相符的文件，给出的是针对整个文件的判断，运行以 `0` 结束：
+
+```sh
+printf '{"id":1,"name":"Moon"}\n{"id":2,"name":"JSON"}\n' \
+  | moon run cmd/main -- --jsonl -v --schema person.schema.json
+# <stdin>: valid JSON, and every record matches the schema
+```
+
+有两种命令行会被直接拒绝：不带 `-v` 的 `--schema`（一个答案永远不会被打印出来的检查没有
+必要跑），以及和 `--moon-deps` 一起给的 `--schema`（后者读的是模块清单而不是文档）。
 
 ## 数据变换
 
@@ -1141,6 +1287,8 @@ moonjson-toolkit/
 ├── prune.mbt             dropping null members and empty containers
 ├── transform.mbt         selecting, sorting and deduplicating
 ├── emit.mbt              a MoonBit type read off the shape of a document
+├── schema.mbt            checking a document against a JSON Schema
+├── pattern.mbt           the regular expressions a schema pattern is read with
 ├── jsonl.mbt             splitting a JSON Lines input into records
 ├── diagnostics.mbt       offsets to line/column, rendered error snippets
 ├── color.mbt             the colour decision and the escape wrapping
@@ -1164,7 +1312,7 @@ AI 响应处理都不需要联网，所以在任何机器上 `moon test` 都是�
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 262 tests
+moon test  --target native   # 305 tests
 moon fmt                     # format
 
 cd frontend
@@ -1181,37 +1329,43 @@ moon coverage analyze -- -f summary
 
 ```
 ai.mbt: 80/90
-cli.mbt: 159/163
+cli.mbt: 160/164
 cmd/main/main.mbt: 0/14
 color.mbt: 41/43
 diagnostics.mbt: 81/98
 emit.mbt: 162/164
 flatten.mbt: 100/102
 parser.mbt: 261/276
-runner.mbt: 271/299
+pattern.mbt: 283/290
+runner.mbt: 330/358
+schema.mbt: 345/351
 transform.mbt: 141/143
-Total: 1863/1959
+Total: 2558/2667
 ```
 
-即插桩监视的 1959 个点中有 1863 个被覆盖，占 95.1%。这里的计数单位是源码中的位置而不是行：一行里放下两个表达式就是两个点，其中一个没被执行时，这一行仍会算作已覆盖，所以只要模块里有任意一个点没被执行，它就会出现在上面这段输出里；反过来说，它没有列出的六个模块——`formatter.mbt`、`jsonl.mbt`、`moondeps.mbt`、`paths.mbt`、`prune.mbt` 和 `stats.mbt`——是逐点完整覆盖的。同样的数字按覆盖率从高到低排列：
+即插桩监视的 2667 个点中有 2558 个被覆盖，占 95.9%。这里的计数单位是源码中的位置而不是行：一行里放下两个表达式就是两个点，其中一个没被执行时，这一行仍会算作已覆盖，所以只要模块里有任意一个点没被执行，它就会出现在上面这段输出里；反过来说，它没有列出的六个模块——`formatter.mbt`、`jsonl.mbt`、`moondeps.mbt`、`paths.mbt`、`prune.mbt` 和 `stats.mbt`——是逐点完整覆盖的。同样的数字按覆盖率从高到低排列：
 
 | 模块 | 覆盖率 |
 | ---- | ------ |
 | `formatter.mbt`、`jsonl.mbt`、`moondeps.mbt`、`paths.mbt`、`prune.mbt`、`stats.mbt` | 100% |
 | `emit.mbt` | 98.8% |
 | `transform.mbt` | 98.6% |
+| `schema.mbt` | 98.3% |
 | `flatten.mbt` | 98.0% |
-| `cli.mbt` | 97.5% |
+| `cli.mbt` | 97.6% |
+| `pattern.mbt` | 97.6% |
 | `color.mbt` | 95.3% |
 | `parser.mbt` | 94.6% |
-| `runner.mbt` | 90.6% |
+| `runner.mbt` | 92.2% |
 | `ai.mbt` | 88.9% |
 | `diagnostics.mbt` | 82.7% |
 | `cmd/main/main.mbt` | 0% |
 
 `cmd/main/main.mbt` 是唯一一个有意为之的零：它是进程入口，而 `moon test` 从不运行 `main`。它做的事只是把真实的命令行和两个真实的数据流交给 `run`，而 `run` 本身由测试直接覆盖。
 
-其余没覆盖到的，都是需要进程之外的东西才能触发的分支。`ai.mbt` 里的 `analyze`——唯一与服务商通信的函数——从未被调用，因为任何测试都不允许访问真实 API；`parser.mbt` 和 `runner.mbt` 的标准输入路径没有被触及，因为每个测试都指定了文件；`color.mbt` 剩下的两个点都是内核针对一个测试套件选不了的标准输出给出的回答：管道解析不出路径，所以把路径读回来的那一支不会走到；而管道是内核描述得很清楚的一种类型，所以探测失败时的那一支也不会走到；`diagnostics.mbt` 则留着测试套件无法构造出来的那些解析错误分支和限制类型；`transform.mbt` 剩下的两个点在同一行上，是逐成员重建一个装着数组的对象时走的那一支，它到不了，因为被重建的那个成员正是名字的来源。这一行写出来而不是省掉，是为了万一哪天它不再成立，也不至于悄悄丢掉一个成员；`emit.mbt` 剩下的那个点也是同一类东西：两种都被留作可选的形状的合并，它不会发生，因为只有被前面某条记录落下的成员才是可选的，而合并进去的东西是从一条有该成员的记录上读出来的。这一行同样写出来，而不是留给它下面那个兜底分支，后者会对一对说不定哪天就会相遇的形状答 `Json`。
+其余没覆盖到的，都是需要进程之外的东西才能触发的分支。`ai.mbt` 里的 `analyze`——唯一与服务商通信的函数——从未被调用，因为任何测试都不允许访问真实 API；`parser.mbt` 和 `runner.mbt` 的标准输入路径没有被触及，因为每个测试都指定了文件；`color.mbt` 剩下的两个点都是内核针对一个测试套件选不了的标准输出给出的回答：管道解析不出路径，所以把路径读回来的那一支不会走到；而管道是内核描述得很清楚的一种类型，所以探测失败时的那一支也不会走到；`diagnostics.mbt` 则留着测试套件无法构造出来的那些解析错误分支和限制类型；`transform.mbt` 剩下的两个点在同一行上，是逐成员重建一个装着数组的对象时走的那一支，它到不了，因为被重建的那个成员正是名字的来源。这一行写出来而不是省掉，是为了万一哪天它不再成立，也不至于悄悄丢掉一个成员；`emit.mbt` 剩下的那个点也是同一类东西：两种都被留作可选的形状的合并，它不会发生，因为只有被前面某条记录落下的成员才是可选的，而合并进去的东西是从一条有该成员的记录上读出来的。这一行同样写出来，而不是留给它下面那个兜底分支，后者会对一对说不定哪天就会相遇的形状答 `Json`。`schema.mbt` 剩下的六个点也是同一类东西：它们是为「本工具读不懂的 schema」准备的兜底分支，而不是为任何一份文档准备的——一份不是对象的 schema、一个不认识的类型名、一个空的名字列表被连成短语——每一个都写出来，是为了让遍历不会一路落空，而在 `schema_problems` 先行作答的前提下，它们一个都到不了。`is_whole_number` 里的那个点防的是数字字面量里出现非数字字符，而解析器写不出这样的字面量；`raw_of` 里的那个点防的是同一个东西，只是对象换成了「不是数字的值」，而它的调用方已经先读过了。
+
+`pattern.mbt` 剩下的七个点是读取器自己写出来的分支：本该从转义序列或字符类成员里读出区间、而那两处都不会产出区间的分支，两处「不可能失败的」数字解析下面的兜底，以及 `class_item_matches` 对转义读取器从不写出的集合字母回答 `false` 的那一支。每一个说的都是「如果它上面的读法变了会怎样」，而在它没变的时候，一个都不会发生。
 
 `parser.mbt` 剩下的那些点大多在快路径里，而它们之所以没被执行，是因为一旦被执行就说明有 bug：两个循环末尾的 `abort` 行（那两个循环只会通过返回离开），以及字符串末尾把转义序列截断时的兜底判断。剩下的点只有测试套件不携带的文档才够得着——一份超过 64 MiB 输入上限的文档，这正是下一节要说的。
 

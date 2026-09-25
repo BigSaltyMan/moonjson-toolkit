@@ -5,13 +5,14 @@ let document_sample : String =
   #|{"name":"moon","version":1,"tags":["json","cli"],"nested":{"a":{"b":2}}}
 
 ///|
-/// The two scratch paths one test owns.
+/// The three scratch paths one test owns.
 ///
 /// `moon test` runs tests concurrently, so every test needs its own names: a
 /// shared path would let one test delete a file another is still reading.
 struct Scratch {
   input : String
   stats : String
+  schema : String
 }
 
 ///|
@@ -19,6 +20,7 @@ fn Scratch::named(name : String) -> Scratch {
   {
     input: "runner_scratch_" + name + ".json",
     stats: "runner_scratch_" + name + "_stats.json",
+    schema: "runner_scratch_" + name + "_schema.json",
   }
 }
 
@@ -1061,6 +1063,307 @@ async test "--flatten and --unflatten together are refused" {
   inspect(result.out, content="")
   assert_true(result.err.contains("--flatten and --unflatten are inverses"))
   assert_false(result.err.contains("no such file"))
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+/// The schema the tests below check documents against: an object holding an id
+/// and a name, the id a whole number and the name a short string.
+let schema_sample : String =
+  #|{"type":"object","required":["id","name"],"properties":{"id":{"type":"integer"},"name":{"type":"string","maxLength":8}}}
+
+///|
+/// A run of a document that is checked against a schema: both scratch files are
+/// written, the tool is run over them, and both are cleaned up. `-v` is part of
+/// the run rather than an argument of the test, since a schema is read with it
+/// and the options it cannot be given without.
+async fn run_against_schema(
+  scratch : Scratch,
+  text : String,
+  schema_text : String,
+  extra : Array[String],
+  analyzer : StubAnalyzer,
+) -> RunResult {
+  @fs.write_file(scratch.schema, schema_text)
+  let result = run_on(
+    scratch,
+    text,
+    ["-v", "--schema", scratch.schema] + extra,
+    analyzer,
+  )
+  discard(scratch.schema)
+  result
+}
+
+///|
+async test "-v --schema answers with both verdicts" {
+  let scratch = Scratch::named("schema_ok")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_against_schema(
+    scratch,
+    "{\"id\":1,\"name\":\"moon\"}",
+    schema_sample,
+    [],
+    analyzer,
+  )
+  inspect(result.code, content="0")
+  // A run that checked two things names both of them: the document parsed, and
+  // it agreed with the schema.
+  inspect(
+    result.out,
+    content=scratch.input + ": valid JSON, and it matches the schema\n",
+  )
+  inspect(result.err, content="")
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "a document that does not match is reported place by place" {
+  let scratch = Scratch::named("schema_off")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_against_schema(
+    scratch,
+    "{\"id\":\"one\",\"name\":\"a very long name\",\"extra\":2}",
+    schema_sample,
+    [],
+    analyzer,
+  )
+  inspect(result.code, content="1")
+  // Nothing reaches standard output, as with a document that does not parse: the
+  // verdict would be a lie, and there is no other answer to print.
+  inspect(result.out, content="")
+  // Every place the two disagree is reported rather than the first, in the order
+  // the schema asks about them, and the member the schema does not name is not
+  // reported at all.
+  inspect(
+    result.err,
+    content="error: " +
+      scratch.input +
+      " does not match the schema\n" +
+      "  id: it is a string where the schema expects an integer\n" +
+      "  name: it is 16 characters long, and the schema asks for at most 8\n",
+  )
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+/// The schema describes the input rather than what the run makes of it: the
+/// check happens as the document was read, before anything the command line asks
+/// to have done to it. `--flatten` is the sharpest way to ask: a flattened
+/// document has no member called `a` at all, so a run that checked the document
+/// it prints would report a member missing from a document the schema matches.
+async test "the schema is checked against the input rather than the output" {
+  let scratch = Scratch::named("schema_reshape")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_against_schema(
+    scratch,
+    "{\"a\":{\"b\":1}}",
+    "{\"required\":[\"a\"]}",
+    ["--flatten"],
+    analyzer,
+  )
+  inspect(result.code, content="0")
+  inspect(
+    result.out,
+    content=scratch.input + ": valid JSON, and it matches the schema\n",
+  )
+  inspect(result.err, content="")
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "a schema this tool cannot read is a command-line error" {
+  let scratch = Scratch::named("schema_bad")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_against_schema(
+    scratch,
+    "{\"id\":1,\"name\":\"moon\"}",
+    "{\"type\":\"nope\"}",
+    [],
+    analyzer,
+  )
+  // A schema that cannot be applied is a mistake in the command line rather than
+  // in the document, so the run ends 2 and says nothing about a document it was
+  // never going to check.
+  inspect(result.code, content="2")
+  inspect(result.out, content="")
+  inspect(
+    result.err,
+    content="error: the schema " +
+      scratch.schema +
+      " is not one this tool can read\n" +
+      "  type: \"nope\" is not a JSON type; the types are object, array, string, number, integer, boolean and null\n",
+  )
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "a schema that is not valid JSON is a command-line error" {
+  let scratch = Scratch::named("schema_json")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_against_schema(
+    scratch,
+    "{\"id\":1,\"name\":\"moon\"}",
+    "{\"type\":}",
+    [],
+    analyzer,
+  )
+  inspect(result.code, content="2")
+  inspect(result.out, content="")
+  assert_true(
+    result.err.contains("the schema " + scratch.schema + " is not valid JSON"),
+  )
+  // The diagnostic is the one the parser writes for any document, so the schema
+  // is quoted with the mistake marked in it.
+  assert_true(result.err.contains("line 1, column"))
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "a schema that cannot be read is a command-line error too" {
+  let scratch = Scratch::named("schema_missing")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_on(
+    scratch,
+    "{\"id\":1,\"name\":\"moon\"}",
+    ["-v", "--schema", "runner_scratch_no_such_schema.json"],
+    analyzer,
+  )
+  inspect(result.code, content="2")
+  inspect(result.out, content="")
+  assert_true(
+    result.err.contains(
+      "cannot read the schema runner_scratch_no_such_schema.json",
+    ),
+  )
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "--schema is refused without -v" {
+  let scratch = Scratch::named("schema_no_validate")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  // The schema file is never written, which is the point: the command line is
+  // refused before anything is opened.
+  let result = run_on(
+    scratch,
+    "{\"id\":1}",
+    ["--schema", scratch.schema],
+    analyzer,
+  )
+  inspect(result.code, content="2")
+  inspect(result.out, content="")
+  assert_true(result.err.contains("--schema is read with -v"))
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "--schema and --moon-deps cannot be combined" {
+  let scratch = Scratch::named("schema_deps")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_on(
+    scratch,
+    "{\"id\":1}",
+    ["-v", "--schema", scratch.schema, "--moon-deps"],
+    analyzer,
+  )
+  inspect(result.code, content="2")
+  inspect(result.out, content="")
+  assert_true(result.err.contains("--moon-deps reads a module manifest"))
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "--jsonl with a schema checks every record on its own" {
+  let scratch = Scratch::named("schema_jsonl")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_against_schema(
+    scratch,
+    "{\"id\":1,\"name\":\"moon\"}\n\n{\"id\":\"two\",\"name\":\"moon\"}\n{\"id\":3}\n",
+    schema_sample,
+    ["--jsonl"],
+    analyzer,
+  )
+  inspect(result.code, content="1")
+  // A record is not a document of the file, so the report names the line it was
+  // written on: the blank line between the first two records is still a line,
+  // and the record after it is the third line of the file.
+  inspect(
+    result.err,
+    content="error: " +
+      scratch.input +
+      " line 3 does not match the schema\n" +
+      "  id: it is a string where the schema expects an integer\n" +
+      "error: " +
+      scratch.input +
+      " line 4 does not match the schema\n" +
+      "  (root): required member \"name\" is missing\n",
+  )
+  // A file with a record that did not match has no verdict to give.
+  inspect(result.out, content="")
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "--jsonl with a schema answers for the whole file" {
+  let scratch = Scratch::named("schema_jsonl_ok")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_against_schema(
+    scratch,
+    "{\"id\":1,\"name\":\"moon\"}\n{\"id\":2,\"name\":\"json\"}\n",
+    schema_sample,
+    ["--jsonl"],
+    analyzer,
+  )
+  inspect(result.code, content="0")
+  inspect(
+    result.out,
+    content=scratch.input +
+      ": valid JSON, and every record matches the schema\n",
+  )
+  inspect(result.err, content="")
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "--jsonl with a schema keeps going past a record that fails" {
+  let scratch = Scratch::named("schema_jsonl_on")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_against_schema(
+    scratch,
+    "{\"id\":\"one\",\"name\":\"moon\"}\n{\"id\":2,\"name\":\"json\"}\n",
+    schema_sample,
+    ["--jsonl"],
+    analyzer,
+  )
+  // The record that does not match is reported and the ones after it are still
+  // read, exactly as for a record that does not parse; the run ends 1 because
+  // one of them failed.
+  inspect(result.code, content="1")
+  assert_true(
+    result.err.contains(scratch.input + " line 1 does not match the schema"),
+  )
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "--jsonl --fail-fast stops at the record that does not match" {
+  let scratch = Scratch::named("schema_jsonl_fast")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_against_schema(
+    scratch,
+    "{\"id\":\"one\",\"name\":\"moon\"}\n{\"id\":\"two\",\"name\":\"moon\"}\n",
+    schema_sample,
+    ["--jsonl", "--fail-fast"],
+    analyzer,
+  )
+  inspect(result.code, content="1")
+  // Stopping at the first failure means the second record is not read at all, so
+  // only the first line is named.
+  assert_true(
+    result.err.contains(scratch.input + " line 1 does not match the schema"),
+  )
+  assert_false(result.err.contains("line 2 does not match the schema"))
   assert_eq(analyzer.calls, 0)
 }
 

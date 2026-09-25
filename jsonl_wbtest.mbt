@@ -71,6 +71,24 @@ test "a last record with no trailing newline is still a record" {
 }
 
 ///|
+test "every record is reported against the line it was written on" {
+  // The lines a record starts on are the lines the parser skips blank ones
+  // around, so the two lists line up: a record reported by number has to be
+  // numbered the way a reader of the file would.
+  let input = "\n{\"a\":1}\n   \n\t\n{\"b\":}\n{\"c\":3}\n"
+  let lines = jsonl_record_lines(input)
+  assert_eq(lines.length(), parse_jsonl(input).length())
+  assert_eq(lines, [2, 5, 6])
+  // Four blank lines in a row move the count as much as one does per line, and
+  // an input with no records has no lines to report.
+  assert_eq(jsonl_record_lines("\n\n\n\n{\"a\":1}"), [5])
+  assert_eq(jsonl_record_lines("").length(), 0)
+  assert_eq(jsonl_record_lines("\n\n").length(), 0)
+  assert_eq(jsonl_record_lines("{\"a\":1}"), [1])
+  assert_eq(jsonl_record_lines("{\"a\":1}\n{\"b\":2}"), [1, 2])
+}
+
+///|
 test "an astral character does not move the lines that follow it" {
   // An emoji is one character but two UTF-16 code units, and the two ways of
   // measuring a string disagree about it. A diagnostic counts characters, so an

@@ -63,6 +63,11 @@ charts the statistics the tool writes.
   the parser rather than on the document. `--max-depth <n>` puts the same kind of
   bound on nesting: any document deeper than `n` is refused, with the position
   where it went too far.
+- **JSON Schema checking** — `--schema <path>` checks the input against a JSON
+  Schema. Read with `-v`, it answers with a verdict rather than a document, and
+  a document that does not match is reported with every place it disagrees, one
+  to a line. See
+  [validating against a JSON Schema](#validating-against-a-json-schema).
 - **Paths and keys** — `--paths` lists the route to every value in the document,
   one per line, and `--keys-only` lists just the object members. Between them
   they answer "what is in here" without printing the document.
@@ -135,6 +140,7 @@ Options:
       --paths            Print the path of every value instead of the document
       --keys-only        Print only the paths that name an object member
   -v, --validate         Only check the input and report the first error
+      --schema <path>    Check the input against the JSON Schema in <path>
   -h, --help             Show this message and exit
   -V, --version          Show the version and exit
       --ai               Ask the AI for a quality report and suggestions
@@ -202,6 +208,22 @@ optional rather than given a type the sample does not show. --json-out, --ai,
 --paths and --keys-only each answer with something else in place of the
 document, so none of them can be asked for with --emit-moonbit; --stats gives
 way to it, and -v wins over it as it wins over the name lists.
+
+--schema <path> checks the input against a JSON Schema instead of printing
+it, and is read with -v, which is the flag that asks for a verdict rather
+than a document. The dialect read is the part of the one at json-schema.org
+that a document of data is described with: type, required, properties, items,
+enum, minimum, maximum, minLength, maxLength and pattern. Every other keyword
+is passed over rather than refused, so a schema written for a full validator
+can be handed to this one and the part of it this tool does not read is
+simply not enforced.
+
+A document that does not match is reported with every place it disagrees,
+one to a line, and the run exits 1. A schema this tool cannot read is a
+mistake in the command line rather than in the document: it is named, the
+keyword to fix is quoted under it, and the run exits 2 without looking at
+any input. Under --jsonl every record is checked on its own and reported
+with the line it was written on.
 
 --flatten collapses every nested object into dotted keys, and --unflatten
 expands them again. The two are inverses of each other, so only one of them
@@ -403,14 +425,17 @@ and the counts behind `--stats` and `--json-out`, which describe what the run
 produced rather than what came in. Sorting and trimming cannot tell the
 difference — neither moves a value or changes its type — but pruning and
 reshaping can, and a summary still counting members the document no longer has
-would be describing something the reader cannot see.
+would be describing something the reader cannot see. `--schema` is the one check
+that reads the document as it came in rather than as the run makes it: a schema
+describes the input, and a document that has been flattened, selected or pruned
+has stopped being the document the schema was written about.
 
 ### Exit codes
 
 | Code | Meaning |
 | ---- | ------- |
 | `0`  | the input was formatted, or validated successfully |
-| `1`  | the input could not be read, or is not valid JSON |
+| `1`  | the input could not be read, is not valid JSON, or does not match the schema |
 | `2`  | the command line itself was invalid |
 | `3`  | the input was valid, but the AI review could not be produced |
 
@@ -734,6 +759,145 @@ moon run cmd/main -- --stats -f test.json
 
 The two lines say what the report above says, in the order it says it, with the
 types the document does not contain left out rather than shown as `=0`.
+
+## Validating against a JSON Schema
+
+`--schema <path>` checks the input against a JSON Schema rather than printing
+it. It is read with `-v`, the flag that asks for a verdict rather than a
+document, so the two together answer the question a schema is written to ask:
+
+```sh
+cat > person.schema.json <<'EOF'
+{
+  "type": "object",
+  "required": ["id", "name"],
+  "properties": {
+    "id": { "type": "integer", "minimum": 1 },
+    "name": { "type": "string", "minLength": 1, "maxLength": 20 },
+    "email": { "type": "string", "pattern": "^[^@]+@[^@]+$" }
+  }
+}
+EOF
+printf '{"id":7,"name":"Moon","email":"moon@example.com"}' \
+  | moon run cmd/main -- -v --schema person.schema.json
+# <stdin>: valid JSON, and it matches the schema
+```
+
+The verdict says both things the run checked — the document parsed, and it
+agreed with the schema — since a run that checked both and named one of them
+would leave you guessing about the other.
+
+A document that does not match is reported with every place the two disagree, in
+the order the schema asks about them, each under the path of the value it is
+about. The exit code is `1`, the code for a mistake in the input, and nothing
+reaches standard output: a verdict would be a lie, and there is no other answer
+to print.
+
+```sh
+printf '{"id":0,"name":"","extra":true}' \
+  | moon run cmd/main -- -v --schema person.schema.json
+# error: <stdin> does not match the schema
+#   id: it is less than the minimum 1
+#   name: it is 0 characters long, and the schema asks for at least 1
+```
+
+The two violations above are reported in the order the schema asks about them,
+which is not the order the document wrote them in; `extra` is not named by any
+property, so nothing is asked of it.
+
+The paths are the ones `--paths` prints, so a violation inside a member of a
+member, or inside an item of an array, is named the same way here as it is
+there:
+
+```sh
+cat > order.schema.json <<'EOF'
+{
+  "properties": {
+    "customer": {
+      "required": ["name"],
+      "properties": { "name": { "type": "string" } }
+    },
+    "lines": { "items": { "properties": { "qty": { "type": "integer" } } } }
+  }
+}
+EOF
+printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
+  | moon run cmd/main -- -v --schema order.schema.json
+# error: <stdin> does not match the schema
+#   customer: required member "name" is missing
+#   lines[1].qty: it is a string where the schema expects an integer
+```
+
+The dialect read is the part of the one at
+[json-schema.org](https://json-schema.org/) that a document of data is
+described with: `type`, `required`, `properties`, `items`, `enum`, `minimum`,
+`maximum`, `minLength`, `maxLength` and `pattern`. Every other keyword is passed
+over rather than refused, so a schema written for a full validator —
+`$schema`, `title`, `additionalProperties`, `anyOf` — can be handed to this one,
+and the part of it this tool does not read is simply not enforced:
+
+```sh
+cat > loose.schema.json <<'EOF'
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "A person",
+  "type": "object",
+  "additionalProperties": false,
+  "anyOf": [{ "required": ["id"] }, { "required": ["name"] }]
+}
+EOF
+printf '{"id":1,"nickname":"Moon"}' \
+  | moon run cmd/main -- -v --schema loose.schema.json
+# <stdin>: valid JSON, and it matches the schema
+```
+
+The four keywords above are read and skipped; the `type` is the one this tool
+enforces, and `id` is an integer, so the document passes. A member no property
+names is left as it is, whatever `additionalProperties` says about it.
+
+A schema this tool cannot *read* is another matter: it is a mistake in what the
+run was told rather than in the document, so it is refused with exit code `2`
+before any input is looked at, and the keyword to fix is named with the reason:
+
+```sh
+printf '{"type":"object","properties":{"id":{"type":"int"}}}' > broken.schema.json
+printf '{"id":1}' | moon run cmd/main -- -v --schema broken.schema.json
+# error: the schema broken.schema.json is not one this tool can read
+#   properties.id.type: "int" is not a JSON type; the types are object, array, string, number, integer, boolean and null
+```
+
+That is the same split the rest of the tool makes. A schema taking its values
+from the command line — a `pattern` this tool cannot read, a `minLength` that is
+not a whole number, a `required` that is not a list of names — is code `2` with
+the schema named; a document that fails a schema this tool can read is code `1`
+with the document named.
+
+`--schema` describes the input rather than what the run makes of it, so it is
+applied as the document was read, before `--flatten`, `--select` and the
+prunings have had their say: a schema was written about the document you have,
+and a flattened or pruned document is a different one. Under `--jsonl` every
+record is a document of its own, so every record is checked on its own and
+reported with the line it was written on:
+
+```sh
+printf '{"id":1,"name":"Moon"}\n\n{"id":"two","name":"Moon"}\n' \
+  | moon run cmd/main -- --jsonl -v --schema person.schema.json
+# error: <stdin> line 3 does not match the schema
+#   id: it is a string where the schema expects an integer
+```
+
+A file whose records all match is answered with the verdict for the file, and
+the run ends `0`:
+
+```sh
+printf '{"id":1,"name":"Moon"}\n{"id":2,"name":"JSON"}\n' \
+  | moon run cmd/main -- --jsonl -v --schema person.schema.json
+# <stdin>: valid JSON, and every record matches the schema
+```
+
+Two command lines are refused outright: `--schema` without `-v`, since a check
+whose answer is never printed is not worth running, and `--schema` with
+`--moon-deps`, which reads a module manifest rather than a document.
 
 ## Transforming data
 
@@ -1252,6 +1416,8 @@ moonjson-toolkit/
 ├── prune.mbt             dropping null members and empty containers
 ├── transform.mbt         selecting, sorting and deduplicating
 ├── emit.mbt              a MoonBit type read off the shape of a document
+├── schema.mbt            checking a document against a JSON Schema
+├── pattern.mbt           the regular expressions a schema pattern is read with
 ├── jsonl.mbt             splitting a JSON Lines input into records
 ├── diagnostics.mbt       offsets to line/column, rendered error snippets
 ├── color.mbt             the colour decision and the escape wrapping
@@ -1277,7 +1443,7 @@ so `moon test` is the same command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 262 tests
+moon test  --target native   # 305 tests
 moon fmt                     # format
 
 cd frontend
@@ -1295,19 +1461,21 @@ moon coverage analyze -- -f summary
 
 ```
 ai.mbt: 80/90
-cli.mbt: 159/163
+cli.mbt: 160/164
 cmd/main/main.mbt: 0/14
 color.mbt: 41/43
 diagnostics.mbt: 81/98
 emit.mbt: 162/164
 flatten.mbt: 100/102
 parser.mbt: 261/276
-runner.mbt: 271/299
+pattern.mbt: 283/290
+runner.mbt: 330/358
+schema.mbt: 345/351
 transform.mbt: 141/143
-Total: 1863/1959
+Total: 2558/2667
 ```
 
-That is 1863 of the 1959 points the instrumentation watches, or 95.1%. The count
+That is 2558 of the 2667 points the instrumentation watches, or 95.9%. The count
 is of positions in the source rather than lines — a line carrying two expressions
 is two points, and one of them can go unexecuted while the line itself is read as
 covered — so a module is listed whenever any of its points went unexecuted, and
@@ -1320,11 +1488,13 @@ numbers, ordered by how much of each module is reached:
 | `formatter.mbt`, `jsonl.mbt`, `moondeps.mbt`, `paths.mbt`, `prune.mbt`, `stats.mbt` | 100% |
 | `emit.mbt` | 98.8% |
 | `transform.mbt` | 98.6% |
+| `schema.mbt` | 98.3% |
 | `flatten.mbt` | 98.0% |
-| `cli.mbt` | 97.5% |
+| `cli.mbt` | 97.6% |
+| `pattern.mbt` | 97.6% |
 | `color.mbt` | 95.3% |
 | `parser.mbt` | 94.6% |
-| `runner.mbt` | 90.6% |
+| `runner.mbt` | 92.2% |
 | `ai.mbt` | 88.9% |
 | `diagnostics.mbt` | 82.7% |
 | `cmd/main/main.mbt` | 0% |
@@ -1351,7 +1521,22 @@ be dropped silently if that ever stopped being true. The one point left in
 optional, which cannot happen because only a member an earlier record left out is
 optional, and what is merged into it is read off a record that has the member. It
 is written out rather than left to the catch-all below it, which would answer
-`Json` for a pair that may some day meet.
+`Json` for a pair that may some day meet. The six points left in `schema.mbt` are
+the same shape: fallbacks for a schema this tool refuses to read rather than for
+any document — a schema that is not an object, a type name it does not know, an
+empty list of names being joined into a phrase — each written out so that a walk
+can never fall through to nothing, and none of them reachable while
+`schema_problems` answers first. The point inside `is_whole_number` guards
+against a numeral holding something that is not a digit, which the parser does
+not write, and the one in `raw_of` is that same guard for a value that is not a
+number, which its caller has read already.
+
+The seven points left in `pattern.mbt` are the reader's own written-out arms: the
+ones that would read a range back out of an escape or a class item when neither
+can produce one, the catch under two parses of digits that cannot fail, and
+`class_item_matches` answering `false` for a set letter the escape reader never
+writes. Each says what happens if the reading above it changes, and none of them
+happens while it does not.
 
 Most of what is left in `parser.mbt` is the fast path, and the points there that
 go unexecuted go unexecuted because reaching them would mean a bug: the two

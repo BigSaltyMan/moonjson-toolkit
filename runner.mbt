@@ -74,6 +74,72 @@ async fn read_input(input : String?) -> Result[String, String] {
 }
 
 ///|
+/// Read the schema the command line named.
+///
+/// Read once per run rather than once per input: the same schema is applied to
+/// every document, and reading it again for each of them would say nothing new
+/// about it. The three ways it can fail are all mistakes in the run rather than
+/// in a document — a path that cannot be read, a file that is not JSON, and a
+/// schema holding a keyword this tool cannot apply — so each of them is answered
+/// with exit 2 before any input is looked at.
+///
+/// The depth limit is not applied to the schema: `--max-depth` says how deep a
+/// document this run reads, and the schema is what the documents are read
+/// against rather than one of them.
+async fn read_schema(path : String) -> Result[@pjson.Json, RunResult] {
+  let text = match read_file(path) {
+    Ok(text) => text
+    Err(message) =>
+      return Err(
+        failure(
+          error_prefix() + "cannot read the schema " + path + ": " + message,
+          exit_usage_error,
+        ),
+      )
+  }
+  let schema = match parse_with_diagnostic(text, None) {
+    Ok(schema) => schema
+    Err(diagnostic) =>
+      return Err(
+        failure(
+          error_prefix() +
+          "the schema " +
+          path +
+          " is not valid JSON\n" +
+          diagnostic.render(),
+          exit_usage_error,
+        ),
+      )
+  }
+  let problems = schema_problems(schema)
+  if problems.length() > 0 {
+    return Err(
+      failure(
+        error_prefix() +
+        "the schema " +
+        path +
+        " is not one this tool can read\n" +
+        schema_report(problems),
+        exit_usage_error,
+      ),
+    )
+  }
+  Ok(schema)
+}
+
+///|
+/// A list of schema errors as the lines of a report: each on a line of its own,
+/// indented under the line that says what they are all about.
+///
+/// The message under that line names the path and what is wrong there rather
+/// than repeating the document or the schema, so a report over a document with a
+/// hundred mistakes is a hundred short lines to read rather than a wall of text
+/// to pick through.
+fn schema_report(errors : Array[SchemaError]) -> String {
+  errors.map(fn(error) { "  " + render_schema_error(error) }).join("\n")
+}
+
+///|
 /// Reject the command lines that do not describe a run, before any input is
 /// read.
 ///
@@ -170,6 +236,20 @@ fn validate_options(options : CliOptions) -> Result[Unit, String] {
   if options.moon_deps && options.jsonl {
     return Err(
       "--moon-deps reads one module manifest, and --jsonl reads many documents: the two cannot be combined",
+    )
+  }
+  if options.moon_deps && options.schema != None {
+    return Err(
+      "--moon-deps reads a module manifest, and --schema reads a JSON document: the two cannot be combined",
+    )
+  }
+  // A schema check answers with a verdict rather than a document, and `-v` is
+  // the flag that asks for one. Without it the run would check the document and
+  // then print it as though nothing had been asked about it, which is a check
+  // whose answer the user never sees.
+  if options.schema != None && !options.validate {
+    return Err(
+      "--schema is read with -v: the answer to a schema check is a verdict rather than a document",
     )
   }
   if options.files.length() > 1 && options.json_out != None {
@@ -438,6 +518,18 @@ pub async fn run(
         exit_usage_error,
       )
   }
+  // The schema is read before any input is, so that a run with a schema it
+  // cannot read costs nothing to answer and says nothing about the documents it
+  // was never going to check. It is one schema for the whole run, which is why
+  // it is read here rather than per input.
+  let schema = match options.schema {
+    Some(path) =>
+      match read_schema(path) {
+        Ok(schema) => Some(schema)
+        Err(result) => return result
+      }
+    None => None
+  }
   let inputs : Array[String?] = if options.files.length() == 0 {
     // No file named is not no input: standard input is the document.
     [None]
@@ -447,7 +539,7 @@ pub async fn run(
   // Every input is read and handled before any of it is printed, so the
   // printing below is only ever a walk over the answers in the order they were
   // asked for.
-  let outcomes = run_batch(options, inputs, analyze)
+  let outcomes = run_batch(options, schema, inputs, analyze)
   // A heading is only worth printing when there is more than one document to
   // tell apart, which is why a single file reads exactly as it always has.
   let many = inputs.length() > 1
@@ -517,6 +609,7 @@ let max_parallel_inputs : Int = 4
 /// `all`, down to the deferred release.
 async fn run_batch(
   options : CliOptions,
+  schema : @pjson.Json?,
   inputs : Array[String?],
   analyze : async (String, String, String, String) -> Result[String, String],
 ) -> Array[InputOutcome] {
@@ -545,7 +638,7 @@ async fn run_batch(
         // Released however this task ends, cancellation included: the permit
         // was taken for the task, not for the work it managed to do.
         defer permits.release()
-        let outcome = handle_input(options, input, analyze)
+        let outcome = handle_input(options, schema, input, analyze)
         slots[index] = Some(outcome)
         if options.fail_fast && outcome.code != exit_success {
           stopped.val = true
@@ -594,6 +687,7 @@ priv struct InputOutcome {
 /// neither of them is a special case here.
 async fn handle_input(
   options : CliOptions,
+  schema : @pjson.Json?,
   input : String?,
   analyze : async (String, String, String, String) -> Result[String, String],
 ) -> InputOutcome {
@@ -609,9 +703,9 @@ async fn handle_input(
       }
   }
   let result = if options.jsonl {
-    run_jsonl(options, source, text)
+    run_jsonl(options, schema, source, text)
   } else {
-    run_document(options, source, text, analyze)
+    run_document(options, schema, source, text, analyze)
   }
   { source, out: result.out, err: result.err, code: result.code, }
 }
@@ -660,6 +754,7 @@ fn append_summary(
 /// run.
 async fn run_document(
   options : CliOptions,
+  schema : @pjson.Json?,
   source : String,
   text : String,
   analyze : async (String, String, String, String) -> Result[String, String],
@@ -678,6 +773,28 @@ async fn run_document(
         error_prefix() + source + " is not valid JSON\n" + diagnostic.render(),
         exit_input_error,
       )
+  }
+  // The schema is applied to the document as it was read rather than to the one
+  // the run goes on to print: a schema describes the input, and --select,
+  // --prune-null and --flatten all change what the document holds, so checking
+  // after them would be checking something the schema was never written about.
+  // The report names every place the two disagree, and the run ends 1 — a
+  // document that does not match the schema it was checked against is a mistake
+  // in the input, which is what code 1 means here.
+  match schema {
+    Some(schema) => {
+      let violations = validate_schema(json, schema)
+      if violations.length() > 0 {
+        return failure(
+          error_prefix() +
+          source +
+          " does not match the schema\n" +
+          schema_report(violations),
+          exit_input_error,
+        )
+      }
+    }
+    None => ()
   }
   render_document(options, source, json, analyze)
 }
@@ -750,8 +867,17 @@ async fn render_document(
   // Nothing below can fail, so this is where standard output starts.
   let out = StringBuilder()
   if options.validate {
-    // `-v` replaces the document with a one-line verdict, nothing else.
-    out.write_string(source + ": valid JSON\n")
+    // `-v` replaces the document with a one-line verdict, nothing else. With a
+    // schema the verdict says both things the run checked — the document parsed,
+    // and it agreed with the schema — since a run that checked both and named
+    // one of them would leave the reader to guess about the other. Reaching this
+    // line at all means the schema check passed: one that does not match is
+    // answered before this point, and never gets a verdict.
+    if options.schema != None {
+      out.write_string(source + ": valid JSON, and it matches the schema\n")
+    } else {
+      out.write_string(source + ": valid JSON\n")
+    }
   } else if options.paths || options.keys_only {
     // The two name lists are alternatives to the document rather than additions
     // to it, and `--paths` is the longer of the pair, so it is the one that
@@ -817,32 +943,25 @@ async fn render_document(
 /// `-v` asks for no document output at all, so a run where every record parsed
 /// is answered with the one verdict line it prints for a single document, and a
 /// run where one did not is answered by that record's report alone.
-fn run_jsonl(options : CliOptions, source : String, text : String) -> RunResult {
+fn run_jsonl(
+  options : CliOptions,
+  schema : @pjson.Json?,
+  source : String,
+  text : String,
+) -> RunResult {
   let out = StringBuilder()
   let err = StringBuilder()
   let mut code = exit_success
+  // The line each record was written on, in the order the records come: the two
+  // lists skip blank lines the same way, so the nth record is the nth line here.
+  // A report about a record names the line it is on rather than the record's
+  // number, since the line is what a reader of the file can go to.
+  let lines = jsonl_record_lines(text)
+  let mut index = 0
   for record in parse_jsonl_with_depth(text, options.max_depth) {
+    let line = lines[index]
+    index = index + 1
     match record {
-      Ok(json) =>
-        match prepare_document(options, json) {
-          Ok(prepared) =>
-            if !options.validate {
-              out.write_string(format_document(options, prepared))
-              out.write_string("\n")
-            }
-          Err(message) => {
-            // As with a record that does not parse, one that cannot be reshaped
-            // is reported and the rest are still printed, and the run ends 1.
-            let report = shape_failure(options, source, message)
-            err.write_string(report.err)
-            if code == exit_success {
-              code = report.code
-            }
-            if options.fail_fast {
-              break
-            }
-          }
-        }
       Err(diagnostic) => {
         err.write_string(
           error_prefix() +
@@ -858,10 +977,67 @@ fn run_jsonl(options : CliOptions, source : String, text : String) -> RunResult 
           break
         }
       }
+      Ok(json) => {
+        // Each record is a document of its own, so it is checked on its own: the
+        // schema is applied to the record rather than to the file, and a record
+        // that does not match is reported with its line and skipped, the rest of
+        // the file still being read.
+        let violations = match schema {
+          Some(schema) => validate_schema(json, schema)
+          None => []
+        }
+        if violations.length() > 0 {
+          err.write_string(
+            error_prefix() +
+            source +
+            " line " +
+            line.to_string() +
+            " does not match the schema\n" +
+            schema_report(violations) +
+            "\n",
+          )
+          if code == exit_success {
+            code = exit_input_error
+          }
+          if options.fail_fast {
+            break
+          }
+        } else {
+          match prepare_document(options, json) {
+            Ok(prepared) =>
+              if !options.validate {
+                out.write_string(format_document(options, prepared))
+                out.write_string("\n")
+              }
+            Err(message) => {
+              // As with a record that does not parse, one that cannot be
+              // reshaped is reported and the rest are still printed, and the run
+              // ends 1.
+              let report = shape_failure(options, source, message)
+              err.write_string(report.err)
+              if code == exit_success {
+                code = report.code
+              }
+              if options.fail_fast {
+                break
+              }
+            }
+          }
+        }
+      }
     }
   }
   if options.validate && code == exit_success {
-    out.write_string(source + ": valid JSON\n")
+    // The verdict names the whole file: every record parsed, and with a schema
+    // every one of them matched it. A file with a record that did not match
+    // never reaches this line, and is answered by that record's report alone.
+    if options.schema != None {
+      out.write_string(
+        source + ": valid JSON, and every record matches the schema\n",
+      )
+    } else {
+      out.write_string(source + ": valid JSON\n")
+    }
   }
   { out: out.to_string(), err: err.to_string(), code, }
 }

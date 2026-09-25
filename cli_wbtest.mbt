@@ -46,6 +46,7 @@ test "no arguments yields the documented defaults" {
   assert_eq(options.continue_on_error, false)
   assert_eq(options.json_out, None)
   assert_eq(options.no_color, false)
+  assert_eq(options.schema, None)
 }
 
 ///|
@@ -380,6 +381,23 @@ test "--no-color switches colour off" {
 test "--json-out takes a path" {
   assert_eq(cli_ok(["--json-out", "s.json"]).json_out, Some("s.json"))
   assert_eq(cli_ok(["--json-out=s.json"]).json_out, Some("s.json"))
+}
+
+///|
+test "--schema takes the path of the schema" {
+  assert_eq(cli_ok(["-v", "--schema", "s.json"]).schema, Some("s.json"))
+  assert_eq(cli_ok(["-v", "--schema=s.json"]).schema, Some("s.json"))
+  // The option is read without `-v` here: whether the two belong together is a
+  // question about the run rather than about the command line, so it is asked
+  // where the run is put together, and this layer only reads what was written.
+  assert_eq(cli_ok(["--schema", "s.json"]).validate, false)
+  // A value is not optional: `--schema` on its own takes the next argument, and
+  // there is no bare form for it to fall back on.
+  assert_eq(cli_err(["--schema"]), "option --schema requires a value")
+  assert_eq(
+    cli_err(["--schema="]),
+    "option --schema requires a non-empty value",
+  )
 }
 
 ///|

@@ -44,6 +44,26 @@ pub fn parse_jsonl_with_depth(
 }
 
 ///|
+/// The line each record of a JSON Lines input starts on, in the order
+/// `parse_jsonl` answers with them.
+///
+/// A record is reported against the line it was written on rather than against
+/// the file, and the blank lines between records are counted even though they
+/// are not records: a line number counted in records would have been wrong from
+/// the first empty line on.
+pub fn jsonl_record_lines(input : String) -> Array[Int] {
+  let lines = []
+  let mut line = 1
+  for piece in input.split("\n") {
+    if !piece.trim().is_empty() {
+      lines.push(line)
+    }
+    line = line + 1
+  }
+  lines
+}
+
+///|
 /// The number of Unicode characters in `text`.
 ///
 /// `String::length()` counts UTF-16 code units, which is not the unit an offset

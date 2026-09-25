@@ -41,6 +41,7 @@ pub(all) struct CliOptions {
   mut stats : Bool
   mut emit_moonbit : String?
   mut validate : Bool
+  mut schema : String?
   mut help : Bool
   mut version : Bool
   mut ai : Bool
@@ -76,6 +77,7 @@ pub fn CliOptions::default() -> CliOptions {
     stats: false,
     emit_moonbit: None,
     validate: false,
+    schema: None,
     help: false,
     version: false,
     ai: false,
@@ -118,6 +120,7 @@ pub fn usage() -> String {
     "      --paths            Print the path of every value instead of the document",
     "      --keys-only        Print only the paths that name an object member",
     "  -v, --validate         Only check the input and report the first error",
+    "      --schema <path>    Check the input against the JSON Schema in <path>",
     "  -h, --help             Show this message and exit",
     "  -V, --version          Show the version and exit",
     "      --ai               Ask the AI for a quality report and suggestions",
@@ -185,6 +188,22 @@ pub fn usage() -> String {
     "--paths and --keys-only each answer with something else in place of the",
     "document, so none of them can be asked for with --emit-moonbit; --stats gives",
     "way to it, and -v wins over it as it wins over the name lists.",
+    "",
+    "--schema <path> checks the input against a JSON Schema instead of printing",
+    "it, and is read with -v, which is the flag that asks for a verdict rather",
+    "than a document. The dialect read is the part of the one at json-schema.org",
+    "that a document of data is described with: type, required, properties, items,",
+    "enum, minimum, maximum, minLength, maxLength and pattern. Every other keyword",
+    "is passed over rather than refused, so a schema written for a full validator",
+    "can be handed to this one and the part of it this tool does not read is",
+    "simply not enforced.",
+    "",
+    "A document that does not match is reported with every place it disagrees,",
+    "one to a line, and the run exits 1. A schema this tool cannot read is a",
+    "mistake in the command line rather than in the document: it is named, the",
+    "keyword to fix is quoted under it, and the run exits 2 without looking at",
+    "any input. Under --jsonl every record is checked on its own and reported",
+    "with the line it was written on.",
     "",
     "--flatten collapses every nested object into dotted keys, and --unflatten",
     "expands them again. The two are inverses of each other, so only one of them",
@@ -403,6 +422,10 @@ fn apply_value_option(
       options.select = Some(value)
       Ok(())
     }
+    "schema" => {
+      options.schema = Some(value)
+      Ok(())
+    }
     "sort-by" => {
       options.sort_by = Some(value)
       Ok(())
@@ -523,6 +546,7 @@ pub fn CliOptions::parse(args : Array[String]) -> Result[CliOptions, String] {
           }
         "file"
         | "json-out"
+        | "schema"
         | "select"
         | "sort-by"
         | "indent"
