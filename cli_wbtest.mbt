@@ -36,6 +36,7 @@ test "no arguments yields the documented defaults" {
   assert_eq(options.paths, false)
   assert_eq(options.keys_only, false)
   assert_eq(options.stats, false)
+  assert_eq(options.emit_moonbit, None)
   assert_eq(options.validate, false)
   assert_eq(options.help, false)
   assert_eq(options.version, false)
@@ -292,6 +293,29 @@ test "--unique takes an optional path" {
 }
 
 ///|
+test "--emit-moonbit takes an optional name" {
+  // With no name the root type is called `Root`, which is the name the run asks
+  // for by naming none, so the bare flag is read as that name rather than as a
+  // second form of the option.
+  assert_eq(cli_ok(["--emit-moonbit"]).emit_moonbit, Some("Root"))
+  assert_eq(cli_ok(["--emit-moonbit", "Payload"]).emit_moonbit, Some("Payload"))
+  assert_eq(cli_ok(["--emit-moonbit=Payload"]).emit_moonbit, Some("Payload"))
+  // A following argument is the name only when it is not another option, the
+  // same reading `--unique` gives a following path.
+  let options = cli_ok(["--emit-moonbit", "--compact"])
+  assert_eq(options.emit_moonbit, Some("Root"))
+  assert_true(options.compact)
+  assert_eq(
+    cli_ok(["--emit-moonbit", "Payload", "-c"]).emit_moonbit,
+    Some("Payload"),
+  )
+  // An explicit empty value is left as the empty name it is, for the run to
+  // refuse where names are read: there is no path here that the empty string is
+  // the spelling of, so it can only be a mistake.
+  assert_eq(cli_ok(["--emit-moonbit="]).emit_moonbit, Some(""))
+}
+
+///|
 test "--jsonl asks for the input to be read as JSON Lines" {
   assert_true(cli_ok(["--jsonl"]).jsonl)
   // It says how the input is written, not what to do with the document, so it
@@ -504,7 +528,8 @@ test "the usage text documents every option" {
       "--flatten", "--unflatten", "--prune-null", "--prune-empty", "--select", "--sort-by",
       "--unique", "--jsonl", "--max-depth", "--paths", "--keys-only", "-v", "--validate",
       "-h", "--help", "-V", "--version", "--ai", "--model", "--ai-base-url", "--moon-deps",
-      "--fail-fast", "--continue-on-error", "--json-out", "--stats", "--no-color",
+      "--fail-fast", "--continue-on-error", "--json-out", "--stats", "--emit-moonbit",
+      "--no-color",
     ] {
     assert_true(text.contains(option))
   }

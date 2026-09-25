@@ -39,6 +39,7 @@ pub(all) struct CliOptions {
   mut paths : Bool
   mut keys_only : Bool
   mut stats : Bool
+  mut emit_moonbit : String?
   mut validate : Bool
   mut help : Bool
   mut version : Bool
@@ -73,6 +74,7 @@ pub fn CliOptions::default() -> CliOptions {
     paths: false,
     keys_only: false,
     stats: false,
+    emit_moonbit: None,
     validate: false,
     help: false,
     version: false,
@@ -129,6 +131,8 @@ pub fn usage() -> String {
     "                         Process every input, then summarise the failures",
     "      --json-out <path>  Write a statistics report as JSON to <path>",
     "      --stats            Print a statistics summary instead of the document",
+    "      --emit-moonbit [name]",
+    "                         Print the MoonBit type of the document's shape",
     "      --no-color         Never colour the output, even on a terminal",
     "",
     "Short options may be combined, so -vh means -v -h. The value of --indent",
@@ -157,6 +161,30 @@ pub fn usage() -> String {
     "takes precedence over it, so asking for both writes the file and prints the",
     "document as usual. --json-out describes one document, so it is refused when",
     "several files are named.",
+    "",
+    "--emit-moonbit replaces the document with a MoonBit type for it: a struct for",
+    "every object the sample holds, holding the members it showed with the types",
+    "they showed, each struct deriving FromJson and ToJson. The name after it is",
+    "the name of the root type, and it is Root when no name is given. A name has",
+    "to start with an upper case letter and go on with letters, digits and",
+    "underscores, and the names the generated code is itself written with (Int,",
+    "Double, String, Bool, Json and Array) are refused as well: a type named after",
+    "one of them would be a type made of itself.",
+    "",
+    "The document the type is read off is the one the run prepared, so --sort-keys",
+    "decides the order the fields come out in, --select and the prunings decide",
+    "what there is to read, and --trim-strings decides what the strings look like.",
+    "A JSON key that is not a name MoonBit can spell is written as close to one as",
+    "the language allows, with the key in a comment beside the field: the derived",
+    "decoder reads the field name, so the mangled name is what the pasted type",
+    "will look for, and the comment is what says which key it stands for.",
+    "",
+    "What a sample cannot say is not guessed at. A member the document holds as",
+    "null, or holds in one record and not in the next, is left as a Json or made",
+    "optional rather than given a type the sample does not show. --json-out, --ai,",
+    "--paths and --keys-only each answer with something else in place of the",
+    "document, so none of them can be asked for with --emit-moonbit; --stats gives",
+    "way to it, and -v wins over it as it wins over the name lists.",
     "",
     "--flatten collapses every nested object into dotted keys, and --unflatten",
     "expands them again. The two are inverses of each other, so only one of them",
@@ -451,10 +479,10 @@ pub fn CliOptions::parse(args : Array[String]) -> Result[CliOptions, String] {
         "moon-deps" => options.moon_deps = true
         "fail-fast" => options.fail_fast = true
         "continue-on-error" => options.continue_on_error = true
-        // The one option whose value is optional. Without one it compares whole
-        // items, which is the empty path — a path that names the item itself —
-        // and that is all the difference between the two forms, so the rest of
-        // the program reads one option rather than two.
+        // One of the two options whose value is optional. Without one it
+        // compares whole items, which is the empty path — a path that names the
+        // item itself — and that is all the difference between the two forms, so
+        // the rest of the program reads one option rather than two.
         "unique" =>
           match inline {
             Some(value) => options.unique = Some(value)
@@ -470,6 +498,27 @@ pub fn CliOptions::parse(args : Array[String]) -> Result[CliOptions, String] {
                 index = index + 1
               } else {
                 options.unique = Some("")
+              }
+          }
+        // The other one. Without a value the root type is called `Root`, which
+        // is the name a run that names none is asking for, so a bare flag is
+        // read as that name rather than as a second form of the option. A value
+        // written as empty, `--emit-moonbit=`, is left as the empty name it is
+        // and refused where names are read: a name that was written down and
+        // came out empty is a mistake to report, not a default to fall back on.
+        "emit-moonbit" =>
+          match inline {
+            Some(value) => options.emit_moonbit = Some(value)
+            None =>
+              // A following argument is the name only if it is not another
+              // option, for the reason `--unique` gives: `--emit-moonbit
+              // --compact` asks for the type under the default name and a
+              // compact document, not for a type called `--compact`.
+              if index < total && !args[index].has_prefix("-") {
+                options.emit_moonbit = Some(args[index])
+                index = index + 1
+              } else {
+                options.emit_moonbit = Some(default_root_name)
               }
           }
         "file"

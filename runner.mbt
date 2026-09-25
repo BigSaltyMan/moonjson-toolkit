@@ -117,6 +117,48 @@ fn validate_options(options : CliOptions) -> Result[Unit, String] {
       " each rewrite the document, so at most one of them can be given",
     )
   }
+  // The root name of a generated type is written into the type, so it has to be
+  // a name MoonBit declares types under. Whether a name is one is a question
+  // about the language rather than about the document, which is why the answer
+  // comes from `emit.mbt` and not from here; what is decided here is that a name
+  // that cannot be written into a type is a mistake in the command line rather
+  // than a document that cannot be emitted.
+  match options.emit_moonbit {
+    Some(name) =>
+      match type_name_problem(name) {
+        Some(reason) =>
+          return Err(
+            "--emit-moonbit takes the name of the root type, and " + reason,
+          )
+        None => ()
+      }
+    None => ()
+  }
+  // Each of these replaces the document with an answer of its own, and no run
+  // asks for two of them: a generated type is not a list of paths, and neither
+  // is a review of the document. `--keys-only` is among them because it is the
+  // other form of `--paths` everywhere else the pair is read.
+  if options.emit_moonbit != None {
+    let replaced : String? = if options.ai {
+      Some("--ai")
+    } else if options.json_out != None {
+      Some("--json-out")
+    } else if options.paths {
+      Some("--paths")
+    } else if options.keys_only {
+      Some("--keys-only")
+    } else {
+      None
+    }
+    match replaced {
+      Some(other) =>
+        return Err(
+          other +
+          " and --emit-moonbit each replace the document with an answer of their own, so only one of them can be given",
+        )
+      None => ()
+    }
+  }
   // The dependency tree is a reading of a module manifest, and a statistics
   // file is a reading of a JSON document; the two questions have nothing to do
   // with each other, and a run that asks both is answered by neither.
@@ -153,6 +195,8 @@ fn validate_options(options : CliOptions) -> Result[Unit, String] {
       Some("--paths")
     } else if options.keys_only {
       Some("--keys-only")
+    } else if options.emit_moonbit != None {
+      Some("--emit-moonbit")
     } else {
       None
     }
@@ -720,6 +764,17 @@ async fn render_document(
     for name in names {
       out.write_string(name)
       out.write_string("\n")
+    }
+  } else if options.emit_moonbit != None {
+    // The type is read off the prepared document rather than off the parsed one,
+    // so that the run has one answer to what this document holds: the fields are
+    // the members the reader would have seen, in the order they would have been
+    // printed in. The generated text carries the newline that ends it, so none
+    // is added here.
+    match options.emit_moonbit {
+      Some(name) => out.write_string(emit_moonbit(prepared, name))
+      // Unreachable: the branch above is the same test.
+      None => ()
     }
   } else if show_stats {
     // Counted over the prepared document, which is the one the run has been

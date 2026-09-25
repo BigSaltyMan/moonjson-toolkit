@@ -443,6 +443,163 @@ async test "two of the three rewrites are refused" {
 }
 
 ///|
+async test "--emit-moonbit prints a type instead of the document" {
+  let scratch = Scratch::named("emit_moonbit")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_on(
+    scratch,
+    "{\"name\":\"moon\",\"rows\":[{\"id\":1},{\"n\":2.5}]}",
+    ["--emit-moonbit"],
+    analyzer,
+  )
+  inspect(result.code, content="0")
+  inspect(result.err, content="")
+  // The type is the whole of what is printed: the document it was read off is
+  // not printed beside it.
+  assert_true(result.out.contains("pub struct Root {"))
+  assert_true(result.out.contains("  name : String\n"))
+  assert_true(result.out.contains("  rows : Array[RootRows]\n"))
+  // Records are merged into one type, and a member only some of them have is
+  // optional.
+  assert_true(result.out.contains("pub struct RootRows {"))
+  assert_true(result.out.contains("  id : Int?\n"))
+  assert_true(result.out.contains("  n : Double?\n"))
+  assert_false(result.out.contains("\"name\""))
+  assert_eq(analyzer.calls, 0)
+  // The document is read off what the run prepared, so the options that reshape
+  // the document reshape the type with it.
+  let sorted = run_on(
+    scratch,
+    "{\"b\":1,\"a\":1}",
+    ["--sort-keys", "--emit-moonbit"],
+    analyzer,
+  )
+  assert_true(sorted.out.contains("pub struct Root {\n  a : Int\n  b : Int\n}"))
+  let selected = run_on(
+    scratch,
+    "{\"a\":1,\"b\":{\"c\":2}}",
+    ["--select", "b", "--emit-moonbit", "Payload"],
+    analyzer,
+  )
+  assert_true(selected.out.contains("pub struct Payload {"))
+  assert_true(selected.out.contains("  b : PayloadB\n"))
+  assert_false(selected.out.contains("a : Int"))
+  let pruned = run_on(
+    scratch,
+    "{\"a\":null,\"b\":1}",
+    ["--prune-null", "--emit-moonbit"],
+    analyzer,
+  )
+  assert_true(pruned.out.contains("pub struct Root {\n  b : Int\n}"))
+  // `-v` asks for no document output at all, so it answers instead of the type,
+  // as it answers instead of the name lists.
+  let validated = run_on(
+    scratch,
+    "{\"a\":1}",
+    ["--emit-moonbit", "-v"],
+    analyzer,
+  )
+  inspect(validated.out, content=scratch.input + ": valid JSON\n")
+  // `--stats` and `--emit-moonbit` are both replacements for the document, and
+  // the type is the one that can be kept, so it is the one that answers.
+  let with_stats = run_on(
+    scratch,
+    "{\"a\":1}",
+    ["--emit-moonbit", "--stats"],
+    analyzer,
+  )
+  assert_true(with_stats.out.contains("pub struct Root {"))
+  assert_false(with_stats.out.contains("keys:"))
+}
+
+///|
+async test "--emit-moonbit refuses a name the type cannot be declared under" {
+  let scratch = Scratch::named("emit_name")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let bad_name = run_on(
+    scratch,
+    "{\"a\":1}",
+    ["--emit-moonbit", "payload"],
+    analyzer,
+  )
+  // The name goes into the type, so a name that cannot be written into one is a
+  // mistake in the command line: exit 2, nothing on standard output.
+  inspect(bad_name.code, content="2")
+  inspect(bad_name.out, content="")
+  assert_true(
+    bad_name.err.contains("--emit-moonbit takes the name of the root type"),
+  )
+  assert_true(bad_name.err.contains("lower case letter"))
+  // The types the generated code is itself written with are refused as well: a
+  // type named after one of them would be a type made of itself.
+  let builtin = run_on(
+    scratch,
+    "{\"a\":1}",
+    ["--emit-moonbit", "Json"],
+    analyzer,
+  )
+  inspect(builtin.code, content="2")
+  assert_true(
+    builtin.err.contains("one of the types the generated code is written with"),
+  )
+  // A name is letters, digits and underscores and nothing else, since everything
+  // else is either a parse error or a name that cannot be relied on to survive a
+  // shell unmangled.
+  let dashed = run_on(
+    scratch,
+    "{\"a\":1}",
+    ["--emit-moonbit", "My-Root"],
+    analyzer,
+  )
+  inspect(dashed.code, content="2")
+  assert_true(dashed.err.contains("not a letter, a digit or an underscore"))
+  // An empty name is refused rather than defaulted, since it is a name that was
+  // written down and came out empty.
+  let empty = run_on(scratch, "{\"a\":1}", ["--emit-moonbit="], analyzer)
+  inspect(empty.code, content="2")
+  assert_true(empty.err.contains("and it is empty"))
+  // The refusal happens before any input is read, so a document that does not
+  // parse is not what the run reports.
+  let broken = run_on(
+    scratch,
+    "{not json",
+    ["--emit-moonbit", "payload"],
+    analyzer,
+  )
+  inspect(broken.code, content="2")
+  assert_false(broken.err.contains("not valid JSON"))
+}
+
+///|
+async test "--emit-moonbit is refused beside the options it would replace" {
+  let scratch = Scratch::named("emit_pair")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  for
+    other in [
+      ["--paths"],
+      ["--keys-only"],
+      ["--ai"],
+      ["--jsonl"],
+      ["--json-out", scratch.stats],
+    ] {
+    let result = run_on(
+      scratch,
+      "{\"a\":1}",
+      ["--emit-moonbit"] + other,
+      analyzer,
+    )
+    inspect(result.code, content="2")
+    inspect(result.out, content="")
+    assert_true(result.err.contains("--emit-moonbit"))
+    assert_true(
+      result.err.contains("cannot be combined") ||
+      result.err.contains("only one of them"),
+    )
+  }
+  discard(scratch.stats)
+}
+
+///|
 async test "--stats counts the document the run produced" {
   let scratch = Scratch::named("prune_stats")
   let analyzer = StubAnalyzer::new(Ok("unused"))
