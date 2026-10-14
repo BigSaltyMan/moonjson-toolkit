@@ -105,3 +105,70 @@ test "bounded counts validate before converting to Int" {
     assert_eq(schema_number_count(raw), Err(UnsupportedFeature))
   }
 }
+
+///|
+test "exact decimal multiples use reduced integer ratios" {
+  for
+    (value, divisor, expected) in [
+      ("0.3", "0.1", true),
+      ("0.30000000000000004", "0.1", false),
+      ("0.3", "0.2", false),
+      ("0.21", "0.03", true),
+      ("-0.3", "0.1", true),
+      ("-0.0", "2", true),
+      ("9007199254740993", "2", false),
+      ("1e-400", "1e-401", true),
+      ("1e-400", "3e-400", false),
+      ("0.3", "0.10", true),
+      ("0.3", "1e-1", true),
+      ("1", "0.125", true),
+      ("1", "0.8", false),
+      ("1", "0.04", true),
+      ("0.2", "0.125", false),
+      ("12.0", "1e1", false),
+      ("1.2e1", "0.12", true),
+      ("12.34", "0.01", true),
+      ("12.345", "0.01", false),
+    ] {
+    assert_eq(schema_number_multiple_of(value, divisor), expected)
+  }
+  for value in -50..<51 {
+    for divisor in 1..<26 {
+      assert_eq(
+        schema_number_multiple_of(
+          value.to_string() + "e-2",
+          divisor.to_string() + "e-2",
+        ),
+        value % divisor == 0,
+      )
+    }
+  }
+}
+
+///|
+test "multipleOf factor counts depend on coefficients rather than exponents" {
+  let twos = 2N.pow(200N).to_string()
+  let fives = 5N.pow(200N).to_string()
+  for divisor in [twos, fives] {
+    assert_true(schema_number_multiple_of("1e200", divisor))
+    assert_false(schema_number_multiple_of("1e199", divisor))
+  }
+  assert_false(
+    schema_number_multiple_of("1e200", (2N.pow(200N) * 7N).to_string()),
+  )
+}
+
+///|
+test "multipleOf handles huge positive and negative exponent differences without expansion" {
+  let exponent = "100000000000000000000"
+  assert_true(schema_number_multiple_of("1e" + exponent, "2"))
+  assert_false(schema_number_multiple_of("1e" + exponent, "3"))
+  assert_true(schema_number_multiple_of("1", "1e-" + exponent))
+  assert_false(schema_number_multiple_of("1e-" + exponent, "1"))
+  let huge = String::make(512, '9')
+  assert_true(schema_number_multiple_of("-1e" + huge, "0.125"))
+  assert_false(schema_number_multiple_of("1e" + huge, "7"))
+  assert_true(schema_number_multiple_of("1e-" + huge, "1e-" + huge))
+  assert_false(schema_number_multiple_of("1e-" + huge, "2e-" + huge))
+  assert_true(schema_number_multiple_of("-0e-" + huge, "1e" + huge))
+}

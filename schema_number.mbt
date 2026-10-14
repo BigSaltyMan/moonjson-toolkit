@@ -110,6 +110,54 @@ fn schema_number_equal(left : String, right : String) -> Bool {
 }
 
 ///|
+fn schema_number_gcd(
+  first : @bigint.BigInt,
+  second : @bigint.BigInt,
+) -> @bigint.BigInt {
+  let mut a = first
+  let mut b = second
+  while b != 0N {
+    let remainder = a % b
+    a = b
+    b = remainder
+  }
+  a
+}
+
+///|
+/// The divisor has been prechecked as strictly positive. Reduce A/B, then
+/// cancel the denominator using the factors of 10 provided by the exponent.
+/// Loops depend on coefficient sizes, never on the exponent's numeric value.
+fn schema_number_multiple_of(value_raw : String, divisor_raw : String) -> Bool {
+  let value = schema_number(value_raw)
+  if value.digits == "0" {
+    return true
+  }
+  let divisor = schema_number(divisor_raw)
+  let delta = value.exponent - divisor.exponent
+  if delta < 0N {
+    // Normalization removed every trailing zero from A. Its reduced numerator
+    // A/g divides A and therefore cannot contain a factor of 10 either. A
+    // negative delta would require one or more such factors, so it cannot match.
+    return false
+  }
+  let a = @bigint.BigInt::from_string(value.digits)
+  let b = @bigint.BigInt::from_string(divisor.digits)
+  let mut denominator = b / schema_number_gcd(a, b)
+  for factor in [2N, 5N] {
+    let mut count = 0N
+    while denominator % factor == 0N {
+      denominator = denominator / factor
+      count = count + 1N
+      if count > delta {
+        return false
+      }
+    }
+  }
+  denominator == 1N
+}
+
+///|
 /// Convert only after exact integer and range checks. The implementation cap
 /// guarantees at most ten digits and an exponent from zero through nine.
 fn schema_number_count(raw : String) -> Result[Int, SchemaProblemKind] {

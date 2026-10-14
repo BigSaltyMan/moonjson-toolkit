@@ -212,8 +212,11 @@ way to it, and -v wins over it as it wins over the name lists.
 --schema <path> checks the input against a JSON Schema instead of printing
 it, and is read with -v, which is the flag that asks for a verdict rather
 than a document. The supported JSON Schema Draft 2020-12 subset is: type,
-required, properties, items, enum, const, minimum, maximum, minLength,
-maxLength, pattern, allOf, anyOf, oneOf, not and additionalProperties.
+required, properties, items, enum, const, minimum, maximum, exclusiveMinimum,
+exclusiveMaximum, multipleOf, minLength, maxLength, pattern, allOf, anyOf,
+oneOf, not and additionalProperties.
+Exclusive bounds exclude equality. multipleOf uses exact decimal divisibility
+with a strictly positive divisor.
 Boolean schemas are supported: true accepts every value; false rejects it.
 oneOf requires exactly one matching branch. Unsupported keywords, versions
 and mechanisms are rejected
@@ -222,6 +225,8 @@ $comment, default, examples and format. format is annotation only and does
 not assert formats such as email.
 Examples: {"properties":{"id":true},"additionalProperties":false}
 allows only id; {"oneOf":[{"const":"a"},{"const":"b"}]} accepts a or b.
+Money: {"type":"number","exclusiveMinimum":0,"multipleOf":0.01}
+accepts 12.34 and rejects 12.345 and 0.
 
 A document that does not match is reported with every place it disagrees,
 one to a line, and the run exits 1. A schema this tool cannot read is a
@@ -838,8 +843,9 @@ Unsupported keywords, versions or mechanisms are rejected before validation
 with exit code `2`; this is not a full Draft 2020-12 implementation.
 
 The supported keywords are `type`, `required`, `properties`, `items`, `enum`,
-`const`, `minimum`, `maximum`, `minLength`, `maxLength`, `pattern`, `allOf`,
-`anyOf`, `oneOf`, `not` and `additionalProperties`. Boolean schemas are also
+`const`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`,
+`multipleOf`, `minLength`, `maxLength`, `pattern`, `allOf`, `anyOf`, `oneOf`,
+`not` and `additionalProperties`. Boolean schemas are also
 supported: `true` accepts every JSON value, and `false` rejects every value.
 `const` accepts only the specified value using the exact equality of `enum`;
 its contents are ordinary data rather than subschemas.
@@ -853,8 +859,8 @@ its contents are ordinary data rather than subschemas.
 
 Branches act independently on the same instance. The three combination arrays
 must be nonempty arrays of schemas. Every branch is prechecked, even when
-another branch is `true`; `{"anyOf":[true,{"multipleOf":2}]}` is refused at
-`anyOf[1].multipleOf` with exit `2`. Subschemas in `properties`, `items`, `not`
+another branch is `true`; `{"anyOf":[true,{"$ref":"#/missing"}]}` is refused at
+`anyOf[1].$ref` with exit `2`. Subschemas in `properties`, `items`, `not`
 and `additionalProperties` are also prechecked, including absent properties.
 
 `additionalProperties` allows extra members when omitted or `true`, rejects
@@ -895,6 +901,39 @@ positive or negative exponents beyond floating-point range. The comparisons
 also apply to numbers nested inside enum arrays and objects; `0` and `-0` are
 equal. Comparison does not expand numbers into exponent-sized strings.
 
+`exclusiveMinimum` and `exclusiveMaximum` take numeric bounds and exclude
+equal values. All declared boundaries apply independently. `multipleOf` takes
+a strictly positive number and uses exact decimal divisibility through integer
+reduction, without floating-point division or tolerance. Signs do not affect
+divisibility, and zero is a multiple of every positive divisor. These keywords
+only constrain numbers; add `type: "number"` to require a numeric instance.
+Tiny positive divisors such as `1e-400` are valid. Zero, negative or nonnumeric
+divisors are `InvalidSchema`, including inside otherwise successful branches:
+`{"anyOf":[true,{"multipleOf":0}]}` fails at `anyOf[1].multipleOf` with exit `2`.
+
+For positive money amounts in steps of one cent:
+
+```sh
+cat > amount.schema.json <<'EOF'
+{
+  "type": "number",
+  "exclusiveMinimum": 0,
+  "multipleOf": 0.01
+}
+EOF
+printf '12.34' | moon run cmd/main -- -v --schema amount.schema.json
+# <stdin>: valid JSON, and it matches the schema
+# exit code: 0
+printf '12.345' | moon run cmd/main -- -v --schema amount.schema.json
+# error: <stdin> does not match the schema
+#   (root): it is not a multiple of 0.01
+# exit code: 1
+printf '0' | moon run cmd/main -- -v --schema amount.schema.json
+# error: <stdin> does not match the schema
+#   (root): it is not greater than the exclusive minimum 0
+# exit code: 1
+```
+
 Length parameters must be nonnegative integers. The current implementation
 supports counts up to `1_000_000_000`: negative or fractional values are
 `InvalidSchema`, and larger nonnegative integers are `UnsupportedFeature`.
@@ -917,8 +956,8 @@ subset applies. Other versions are rejected. Mechanisms such as `$ref`,
 `$defs`, `$id`, `$anchor`, `$dynamicRef` and `$vocabulary` are not supported yet.
 Object members inside `const`, `enum`, `default` and `examples`
 are data, and property names under `properties` are names rather than keywords.
-`multipleOf` and `exclusiveMinimum` also remain unsupported and are explicitly
-rejected by schema compilation.
+`unevaluatedProperties` also remains unsupported and is explicitly rejected
+by schema compilation.
 
 A schema with an unsupported constraint fails before any business input is
 read. Its diagnostics go to standard error, standard output is empty, and
@@ -1561,7 +1600,7 @@ so `moon test` is the same command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 342 tests
+moon test  --target native   # 356 tests
 moon fmt                     # format
 
 cd frontend

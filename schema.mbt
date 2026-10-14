@@ -95,8 +95,15 @@ fn check_value(
             }
           "additionalProperties" =>
             check_additional_properties(value, wanted, members, path, errors)
-          "minimum" => check_bound(value, wanted, path, errors, true)
-          "maximum" => check_bound(value, wanted, path, errors, false)
+          "minimum" =>
+            check_bound(value, wanted, path, errors, InclusiveMinimum)
+          "maximum" =>
+            check_bound(value, wanted, path, errors, InclusiveMaximum)
+          "exclusiveMinimum" =>
+            check_bound(value, wanted, path, errors, ExclusiveMinimum)
+          "exclusiveMaximum" =>
+            check_bound(value, wanted, path, errors, ExclusiveMaximum)
+          "multipleOf" => check_multiple_of(value, wanted, path, errors)
           "minLength" => check_length(value, wanted, path, errors, true)
           "maxLength" => check_length(value, wanted, path, errors, false)
           "pattern" => check_pattern(value, wanted, path, errors)
@@ -488,16 +495,21 @@ fn listed(count : Int) -> String {
 }
 
 ///|
-/// `minimum` and `maximum`: the number has to be inside the bound, which is
-/// included in it.
-///
+priv enum SchemaBound {
+  InclusiveMinimum
+  InclusiveMaximum
+  ExclusiveMinimum
+  ExclusiveMaximum
+}
+
+///|
 /// Bounds use exact decimal comparison, without rounding, overflow or underflow.
 fn check_bound(
   value : @pjson.Json,
   wanted : @pjson.Json,
   path : String,
   errors : Array[SchemaError],
-  least : Bool,
+  mode : SchemaBound,
 ) -> Unit {
   let bound = match wanted {
     Number(raw~) => Some(raw)
@@ -507,19 +519,34 @@ fn check_bound(
   match (value, bound) {
     (Number(raw~), Some(bound)) => {
       let order = schema_number_compare(raw, bound)
-      if least && order < 0 {
-        errors.push({
-          path,
-          message: "it is less than the minimum " + raw_of(wanted),
-        })
+      let (violated, prefix) = match mode {
+        InclusiveMinimum => (order < 0, "it is less than the minimum ")
+        InclusiveMaximum => (order > 0, "it is more than the maximum ")
+        ExclusiveMinimum =>
+          (order <= 0, "it is not greater than the exclusive minimum ")
+        ExclusiveMaximum =>
+          (order >= 0, "it is not less than the exclusive maximum ")
       }
-      if !least && order > 0 {
-        errors.push({
-          path,
-          message: "it is more than the maximum " + raw_of(wanted),
-        })
+      if violated {
+        errors.push({ path, message: prefix + raw_of(wanted), })
       }
     }
+    _ => ()
+  }
+}
+
+///|
+fn check_multiple_of(
+  value : @pjson.Json,
+  wanted : @pjson.Json,
+  path : String,
+  errors : Array[SchemaError],
+) -> Unit {
+  match (value, wanted) {
+    (Number(raw~), Number(raw=divisor)) =>
+      if !schema_number_multiple_of(raw, divisor) {
+        errors.push({ path, message: "it is not a multiple of " + divisor, })
+      }
     _ => ()
   }
 }
@@ -696,7 +723,7 @@ fn check_schema(
                   kind_name(wanted),
                 })
             }
-          "minimum" | "maximum" =>
+          "minimum" | "maximum" | "exclusiveMinimum" | "exclusiveMaximum" =>
             match wanted {
               Number(_) => ()
               _ =>
@@ -704,6 +731,25 @@ fn check_schema(
                   kind: InvalidSchema,
                   path: here,
                   message: "expected a number, but this is " + kind_name(wanted),
+                })
+            }
+          "multipleOf" =>
+            match wanted {
+              Number(raw~) =>
+                if schema_number_compare(raw, "0") <= 0 {
+                  errors.push({
+                    path: here,
+                    message: "expected a strictly positive number, but this is " +
+                    raw,
+                    kind: InvalidSchema,
+                  })
+                }
+              _ =>
+                errors.push({
+                  path: here,
+                  message: "expected a strictly positive number, but this is " +
+                  kind_name(wanted),
+                  kind: InvalidSchema,
                 })
             }
           "minLength" | "maxLength" =>

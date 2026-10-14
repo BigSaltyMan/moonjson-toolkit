@@ -363,14 +363,14 @@ test "unsupported keywords refuse the entire schema" {
     #|  "$ref": "#/$defs/person",
     #|  "anyOf": [3, "nonsense"],
     #|  "properties": {
-    #|    "id": { "type": "integer", "exclusiveMinimum": 0, "format": 7 }
+    #|    "id": { "type": "integer", "unevaluatedProperties": false, "format": 7 }
     #|  }
     #|}
   assert_true(compile_schema(parse_ok(schema)) is Err(_))
   assert_true(problems(schema).contains("$ref: keyword is not supported"))
   assert_true(
     problems(schema).contains(
-      "properties.id.exclusiveMinimum: keyword is not supported",
+      "properties.id.unevaluatedProperties: keyword is not supported",
     ),
   )
   assert_true(
@@ -802,10 +802,16 @@ test "composition parameters require nonempty arrays of valid schemas" {
 test "all branches are compiled even when their outcome is already decided" {
   for
     (schema, path) in [
-      ("{\"anyOf\":[true,{\"multipleOf\":2}]}", "anyOf[1].multipleOf"),
+      (
+        "{\"anyOf\":[true,{\"unevaluatedProperties\":false}]}", "anyOf[1].unevaluatedProperties",
+      ),
       ("{\"allOf\":[false,{\"$ref\":\"#/x\"}]}", "allOf[1].$ref"),
-      ("{\"oneOf\":[true,true,{\"multipleOf\":2}]}", "oneOf[2].multipleOf"),
-      ("{\"not\":{\"multipleOf\":2}}", "not.multipleOf"),
+      (
+        "{\"oneOf\":[true,true,{\"unevaluatedProperties\":false}]}", "oneOf[2].unevaluatedProperties",
+      ),
+      (
+        "{\"not\":{\"unevaluatedProperties\":false}}", "not.unevaluatedProperties",
+      ),
       (
         "{\"additionalProperties\":{\"patternProperties\":{}}}", "additionalProperties.patternProperties",
       ),
@@ -878,5 +884,170 @@ test "extra property declarations are local and independent of keyword order" {
       "{\"x\":1}", "{\"properties\":{\"x\":false},\"additionalProperties\":false}",
     ),
     "x: it is rejected by the false schema",
+  )
+}
+
+///|
+test "exclusive bounds reject equality and compare both sides exactly" {
+  for
+    (schema, value, message) in [
+      (
+        "{\"exclusiveMinimum\":1}", "1.0", "it is not greater than the exclusive minimum 1",
+      ),
+      (
+        "{\"exclusiveMaximum\":1}", "1e0", "it is not less than the exclusive maximum 1",
+      ),
+      (
+        "{\"exclusiveMaximum\":1e400}", "1e400", "it is not less than the exclusive maximum 1e400",
+      ),
+      (
+        "{\"exclusiveMinimum\":-2}", "-3", "it is not greater than the exclusive minimum -2",
+      ),
+      (
+        "{\"exclusiveMinimum\":-2}", "-2", "it is not greater than the exclusive minimum -2",
+      ),
+      (
+        "{\"exclusiveMaximum\":-2}", "-1", "it is not less than the exclusive maximum -2",
+      ),
+      (
+        "{\"exclusiveMaximum\":-2}", "-2", "it is not less than the exclusive maximum -2",
+      ),
+      (
+        "{\"exclusiveMinimum\":0}", "-0", "it is not greater than the exclusive minimum 0",
+      ),
+      (
+        "{\"exclusiveMaximum\":0}", "0e1000000", "it is not less than the exclusive maximum 0",
+      ),
+    ] {
+    assert_eq(report(value, schema), "(root): " + message)
+  }
+  for
+    (schema, value) in [
+      ("{\"exclusiveMinimum\":9007199254740992}", "9007199254740993"),
+      ("{\"exclusiveMinimum\":-2}", "-1"),
+      ("{\"exclusiveMaximum\":-2}", "-3"),
+      ("{\"exclusiveMinimum\":0}", "1e-400"),
+      ("{\"exclusiveMaximum\":0}", "-1e-400"),
+      ("{\"exclusiveMinimum\":1}", "1.1"),
+      ("{\"exclusiveMaximum\":1}", "0.9"),
+      (
+        "{\"exclusiveMinimum\":0,\"exclusiveMaximum\":1,\"multipleOf\":2}", "\"hello\"",
+      ),
+      ("{\"minimum\":0,\"exclusiveMinimum\":1}", "1.1"),
+    ] {
+    assert_eq(report(value, schema), "")
+  }
+  assert_eq(
+    report("1", "{\"minimum\":0,\"exclusiveMinimum\":1}"),
+    "(root): it is not greater than the exclusive minimum 1",
+  )
+  let contradictory = "{\"exclusiveMinimum\":2,\"exclusiveMaximum\":1}"
+  assert_eq(problems(contradictory), "")
+  assert_eq(
+    report("1.5", contradictory),
+    "(root): it is not greater than the exclusive minimum 2\n(root): it is not less than the exclusive maximum 1",
+  )
+}
+
+///|
+test "multipleOf applies exact decimal divisibility only to numeric instances" {
+  for
+    (value, divisor) in [
+      ("0.3", "0.1"),
+      ("0.21", "0.03"),
+      ("-0.3", "0.1"),
+      ("-0.0", "2"),
+      ("1e-400", "1e-401"),
+      ("0.3", "0.10"),
+      ("0.3", "1e-1"),
+      ("\"hello\"", "2"),
+      ("1e100000000000000000000", "2"),
+      ("1", "1e-100000000000000000000"),
+    ] {
+    assert_eq(report(value, "{\"multipleOf\":" + divisor + "}"), "")
+  }
+  for
+    (value, divisor) in [
+      ("0.30000000000000004", "0.1"),
+      ("0.3", "0.2"),
+      ("9007199254740993", "2"),
+      ("1e-400", "3e-400"),
+      ("1e100000000000000000000", "3"),
+      ("1e-100000000000000000000", "1"),
+    ] {
+    assert_eq(
+      report(value, "{\"multipleOf\":" + divisor + "}"),
+      "(root): it is not a multiple of " + divisor,
+    )
+  }
+  assert_eq(
+    report(
+      "{\"price\":12.345}", "{\"properties\":{\"price\":{\"multipleOf\":0.01}}}",
+    ),
+    "price: it is not a multiple of 0.01",
+  )
+}
+
+///|
+test "numeric keyword parameters are fully prechecked with category and location" {
+  for
+    (schema, path) in [
+      ("{\"exclusiveMinimum\":true}", "exclusiveMinimum"),
+      ("{\"exclusiveMaximum\":\"1\"}", "exclusiveMaximum"),
+      ("{\"multipleOf\":0}", "multipleOf"),
+      ("{\"multipleOf\":-0.0}", "multipleOf"),
+      ("{\"multipleOf\":-2}", "multipleOf"),
+      ("{\"multipleOf\":\"2\"}", "multipleOf"),
+      ("{\"multipleOf\":0e1000000}", "multipleOf"),
+      (
+        "{\"properties\":{\"price\":{\"multipleOf\":0}}}", "properties.price.multipleOf",
+      ),
+      ("{\"anyOf\":[true,{\"multipleOf\":0}]}", "anyOf[1].multipleOf"),
+    ] {
+    let issues = schema_problems(parse_ok(schema))
+    assert_eq(issues.length(), 1)
+    assert_eq(issues[0].kind, InvalidSchema)
+    assert_eq(issues[0].path, path)
+    assert_true(validate_schema(parse_ok("{}"), parse_ok(schema)) is Err(_))
+  }
+  for
+    schema in [
+      "{\"exclusiveMinimum\":0}", "{\"multipleOf\":0.1}", "{\"multipleOf\":1e-400}",
+      "{\"anyOf\":[true,{\"multipleOf\":2}]}",
+    ] {
+    assert_eq(problems(schema), "")
+  }
+}
+
+///|
+test "numeric assertions compose using independent exact results" {
+  assert_eq(report("3", "{\"not\":{\"multipleOf\":2}}"), "")
+  assert_eq(
+    report("4", "{\"not\":{\"multipleOf\":2}}"),
+    "(root): it matches the schema forbidden by not",
+  )
+  assert_eq(
+    report("6", "{\"allOf\":[{\"multipleOf\":2},{\"multipleOf\":3}]}"),
+    "",
+  )
+  assert_eq(
+    report("4", "{\"allOf\":[{\"multipleOf\":2},{\"multipleOf\":3}]}"),
+    "(root): allOf[1]: it is not a multiple of 3",
+  )
+  assert_eq(
+    report("3", "{\"anyOf\":[{\"multipleOf\":2},{\"multipleOf\":3}]}"),
+    "",
+  )
+  assert_eq(
+    report("5", "{\"anyOf\":[{\"multipleOf\":2},{\"multipleOf\":3}]}"),
+    "(root): it does not match any anyOf branch",
+  )
+  assert_eq(
+    report("3", "{\"oneOf\":[{\"multipleOf\":2},{\"multipleOf\":3}]}"),
+    "",
+  )
+  assert_eq(
+    report("6", "{\"oneOf\":[{\"multipleOf\":2},{\"multipleOf\":3}]}"),
+    "(root): it matches 2 oneOf branches; exactly one is required",
   )
 }

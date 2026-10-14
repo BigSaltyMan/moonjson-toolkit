@@ -191,8 +191,11 @@ way to it, and -v wins over it as it wins over the name lists.
 --schema <path> checks the input against a JSON Schema instead of printing
 it, and is read with -v, which is the flag that asks for a verdict rather
 than a document. The supported JSON Schema Draft 2020-12 subset is: type,
-required, properties, items, enum, const, minimum, maximum, minLength,
-maxLength, pattern, allOf, anyOf, oneOf, not and additionalProperties.
+required, properties, items, enum, const, minimum, maximum, exclusiveMinimum,
+exclusiveMaximum, multipleOf, minLength, maxLength, pattern, allOf, anyOf,
+oneOf, not and additionalProperties.
+Exclusive bounds exclude equality. multipleOf uses exact decimal divisibility
+with a strictly positive divisor.
 Boolean schemas are supported: true accepts every value; false rejects it.
 oneOf requires exactly one matching branch. Unsupported keywords, versions
 and mechanisms are rejected
@@ -201,6 +204,8 @@ $comment, default, examples and format. format is annotation only and does
 not assert formats such as email.
 Examples: {"properties":{"id":true},"additionalProperties":false}
 allows only id; {"oneOf":[{"const":"a"},{"const":"b"}]} accepts a or b.
+Money: {"type":"number","exclusiveMinimum":0,"multipleOf":0.01}
+accepts 12.34 and rejects 12.345 and 0.
 
 A document that does not match is reported with every place it disagrees,
 one to a line, and the run exits 1. A schema this tool cannot read is a
@@ -764,7 +769,8 @@ printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
 校验前报错，退出码为 `2`。本工具尚未完整实现 Draft 2020-12。
 
 当前支持 `type`、`required`、`properties`、`items`、`enum`、`const`、`minimum`、
-`maximum`、`minLength`、`maxLength`、`pattern`、`allOf`、`anyOf`、`oneOf`、`not` 和
+`maximum`、`exclusiveMinimum`、`exclusiveMaximum`、`multipleOf`、`minLength`、
+`maxLength`、`pattern`、`allOf`、`anyOf`、`oneOf`、`not` 和
 `additionalProperties`。也支持布尔 Schema：`true` 接受所有 JSON 值，`false` 拒绝所有值。
 `const` 只接受指定的常量，复用 `enum` 的精确相等逻辑；其内容作为普通数据处理。
 
@@ -776,8 +782,8 @@ printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
 | `not` | 子 Schema 不匹配 |
 
 组合分支作用于同一个实例，分别计算校验结果。前三种组合的参数必须是非空 Schema 数组。
-每个分支都会预检查，即使已有分支为 `true`。例如 `{"anyOf":[true,{"multipleOf":2}]}`
-仍会在 `anyOf[1].multipleOf` 报错，退出 `2`。`properties`、`items`、`not`、
+每个分支都会预检查，即使已有分支为 `true`。例如 `{"anyOf":[true,{"$ref":"#/missing"}]}`
+仍会在 `anyOf[1].$ref` 报错，退出 `2`。`properties`、`items`、`not`、
 `additionalProperties` 下的子 Schema 也会预检查，包括输入中没有出现的属性。
 
 `additionalProperties` 省略或为 `true` 时允许额外属性；为 `false` 时逐个拒绝；为 Schema
@@ -813,6 +819,37 @@ printf '1.5' | moon run cmd/main -- -v --schema choice.schema.json
 正负指数都不会因舍入、溢出或下溢而误判。`enum` 内数组、对象中的数字也沿用同一比较逻辑，
 `0` 与 `-0` 相等。比较时不会按指数展开字符串。
 
+`exclusiveMinimum`、`exclusiveMaximum` 直接填写数字边界，不包含相等值；同级的所有边界
+分别执行。`multipleOf` 必须是严格大于零的数字，通过整数约分精确判断倍数关系，不使用
+浮点除法或误差容忍。输入的正负号不影响倍数关系，零是任意正数的倍数。这些关键字只约束
+数字；要限制输入类型，需同时给出 `type: "number"`。
+`1e-400` 这样的微小正数也是合法除数。零、负数、非数字除数属于 `InvalidSchema`，即使藏在
+已有成功分支的组合里也会报错：`{"anyOf":[true,{"multipleOf":0}]}` 会在
+`anyOf[1].multipleOf` 失败，退出 `2`。
+
+例如，金额必须为正数，并以一分钱为步长：
+
+```sh
+cat > amount.schema.json <<'EOF'
+{
+  "type": "number",
+  "exclusiveMinimum": 0,
+  "multipleOf": 0.01
+}
+EOF
+printf '12.34' | moon run cmd/main -- -v --schema amount.schema.json
+# <stdin>: valid JSON, and it matches the schema
+# exit code: 0
+printf '12.345' | moon run cmd/main -- -v --schema amount.schema.json
+# error: <stdin> does not match the schema
+#   (root): it is not a multiple of 0.01
+# exit code: 1
+printf '0' | moon run cmd/main -- -v --schema amount.schema.json
+# error: <stdin> does not match the schema
+#   (root): it is not greater than the exclusive minimum 0
+# exit code: 1
+```
+
 长度参数必须是非负整数，当前支持上限为 `1_000_000_000`。负数、非整数属于
 `InvalidSchema`；数学上合法但超过上限的非负整数属于 `UnsupportedFeature`。两种情况
 都会在校验输入前报错，包含关键字在 schema 中的位置，CLI 退出码为 `2`。
@@ -830,8 +867,8 @@ printf '1.5' | moon run cmd/main -- -v --schema choice.schema.json
 `$schema` 若存在，只接受字符串 `https://json-schema.org/draft/2020-12/schema`；缺省时
 使用项目的同一子集，其它版本会被拒绝。`$ref`、`$defs`、`$id`、`$anchor`、`$dynamicRef`、
 `$vocabulary` 等机制暂不支持。`const`、`enum`、`default`、`examples`
-中的对象是数据；`properties` 下的字段名也不会被当作关键字检查。`multipleOf`、
-`exclusiveMinimum` 等关键字仍未实现，出现时由预检查明确拒绝。
+中的对象是数据；`properties` 下的字段名也不会被当作关键字检查。
+`unevaluatedProperties` 等关键字仍未实现，出现时由预检查明确拒绝。
 
 含未支持约束的 schema 会在读取业务输入前失败，原因写入标准错误，标准输出为空，退出码为 `2`：
 
@@ -1414,7 +1451,7 @@ AI 响应处理都不需要联网，所以在任何机器上 `moon test` 都是�
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 342 tests
+moon test  --target native   # 356 tests
 moon fmt                     # format
 
 cd frontend

@@ -19,13 +19,17 @@ test "public validation refuses unsupported features with locations" {
   for
     (schema, path) in [
       ("{\"patternProperties\":{}}", "patternProperties"),
-      ("{\"anyOf\":[true,{\"multipleOf\":2}]}", "anyOf[1].multipleOf"),
+      (
+        "{\"anyOf\":[true,{\"unevaluatedProperties\":false}]}", "anyOf[1].unevaluatedProperties",
+      ),
       ("{\"$ref\":\"#/$defs/person\"}", "$ref"),
       (
-        "{\"properties\":{\"id\":{\"minimum\":0,\"multipleOf\":2}}}", "properties.id.multipleOf",
+        "{\"properties\":{\"id\":{\"minimum\":0,\"unevaluatedProperties\":false}}}",
+        "properties.id.unevaluatedProperties",
       ),
       (
-        "{\"items\":{\"additionalProperties\":{\"multipleOf\":2}}}", "items.additionalProperties.multipleOf",
+        "{\"items\":{\"additionalProperties\":{\"unevaluatedProperties\":false}}}",
+        "items.additionalProperties.unevaluatedProperties",
       ),
     ] {
     let problems = rejected(schema)
@@ -150,7 +154,7 @@ test "compilation snapshots arrays in nested schemas and enum values" {
     _ => abort("expected object")
   }
   choices.push(json("{\"id\":3}"))
-  keywords.push(("multipleOf", json("2")))
+  keywords.push(("unevaluatedProperties", json("false")))
   properties.clear()
   assert_eq(
     @moonjson-toolkit.validate_compiled_schema(
@@ -335,13 +339,13 @@ test "public compilation rejects invalid applicators and unsupported hidden bran
         @moonjson-toolkit.InvalidSchema,
       ),
       (
-        "{\"anyOf\":[true,{\"multipleOf\":2}]}",
-        "anyOf[1].multipleOf",
+        "{\"anyOf\":[true,{\"unevaluatedProperties\":false}]}",
+        "anyOf[1].unevaluatedProperties",
         @moonjson-toolkit.UnsupportedFeature,
       ),
       (
-        "{\"not\":{\"multipleOf\":2}}",
-        "not.multipleOf",
+        "{\"not\":{\"unevaluatedProperties\":false}}",
+        "not.unevaluatedProperties",
         @moonjson-toolkit.UnsupportedFeature,
       ),
     ] {
@@ -427,4 +431,121 @@ test "compiled combinations const objects and extra schemas own snapshots" {
   )
   assert_eq(violations.length(), 1)
   assert_eq(violations[0].path, "x")
+}
+
+///|
+test "public numeric keyword validators agree before and after compilation" {
+  for
+    (schema_text, value_text, count) in [
+      ("{\"exclusiveMinimum\":1}", "1.0", 1),
+      ("{\"exclusiveMaximum\":1}", "1e0", 1),
+      ("{\"exclusiveMinimum\":9007199254740992}", "9007199254740993", 0),
+      ("{\"exclusiveMaximum\":1e400}", "1e400", 1),
+      ("{\"multipleOf\":0.1}", "0.3", 0),
+      ("{\"multipleOf\":0.1}", "0.30000000000000004", 1),
+      ("{\"multipleOf\":0.2}", "0.3", 1),
+      ("{\"multipleOf\":0.03}", "0.21", 0),
+      ("{\"multipleOf\":0.1}", "-0.3", 0),
+      ("{\"multipleOf\":2}", "-0.0", 0),
+      ("{\"multipleOf\":2}", "9007199254740993", 1),
+      ("{\"multipleOf\":1e-401}", "1e-400", 0),
+      ("{\"multipleOf\":3e-400}", "1e-400", 1),
+      ("{\"multipleOf\":2}", "\"hello\"", 0),
+      ("{\"multipleOf\":2}", "1e100000000000000000000", 0),
+      ("{\"multipleOf\":3}", "1e100000000000000000000", 1),
+      ("{\"multipleOf\":1e-100000000000000000000}", "1", 0),
+      ("{\"multipleOf\":1}", "1e-100000000000000000000", 1),
+      ("{\"anyOf\":[true,{\"multipleOf\":2}]}", "3", 0),
+      ("{\"not\":{\"multipleOf\":2}}", "3", 0),
+      ("{\"not\":{\"multipleOf\":2}}", "4", 1),
+    ] {
+    let schema = json(schema_text)
+    let value = json(value_text)
+    let compiled = match @moonjson-toolkit.compile_schema(schema) {
+      Ok(compiled) => compiled
+      Err(_) => abort("valid numeric schema rejected")
+    }
+    let direct = match @moonjson-toolkit.validate_schema(value, schema) {
+      Ok(violations) => violations
+      Err(_) => abort("valid numeric schema rejected")
+    }
+    assert_eq(direct.length(), count)
+    assert_eq(
+      direct.map(@moonjson-toolkit.render_schema_error),
+      @moonjson-toolkit.validate_compiled_schema(value, compiled).map(
+        @moonjson-toolkit.render_schema_error,
+      ),
+    )
+  }
+}
+
+///|
+test "public numeric preflight rejects invalid divisors even in hidden branches" {
+  for
+    (schema_text, path) in [
+      ("{\"multipleOf\":0}", "multipleOf"),
+      ("{\"multipleOf\":-0.0}", "multipleOf"),
+      ("{\"multipleOf\":-2}", "multipleOf"),
+      ("{\"multipleOf\":\"2\"}", "multipleOf"),
+      ("{\"multipleOf\":0e1000000}", "multipleOf"),
+      ("{\"anyOf\":[true,{\"multipleOf\":0}]}", "anyOf[1].multipleOf"),
+      ("{\"not\":{\"multipleOf\":0}}", "not.multipleOf"),
+      (
+        "{\"properties\":{\"price\":{\"exclusiveMinimum\":true}}}", "properties.price.exclusiveMinimum",
+      ),
+    ] {
+    let issues = rejected(schema_text)
+    assert_eq(issues.length(), 1)
+    assert_eq(issues[0].kind, @moonjson-toolkit.InvalidSchema)
+    assert_eq(issues[0].path, path)
+    match @moonjson-toolkit.validate_schema(json("{}"), json(schema_text)) {
+      Err(problems) => assert_eq(problems, issues)
+      Ok(_) => abort("invalid numeric schema was accepted")
+    }
+  }
+}
+
+///|
+test "compiled numeric assertions retain their private snapshot" {
+  let members = [
+    ("exclusiveMinimum", json("0")),
+    ("multipleOf", json("0.01")),
+    ("exclusiveMaximum", json("100")),
+  ]
+  let compiled = match
+    @moonjson-toolkit.compile_schema(
+      @pjson.Object(members=[
+        (
+          "properties",
+          @pjson.Object(members=[("price", @pjson.Object(members~))]),
+        ),
+      ]),
+    ) {
+    Ok(compiled) => compiled
+    Err(_) => abort("valid schema rejected")
+  }
+  members[0] = ("exclusiveMinimum", json("1000"))
+  members[1] = ("multipleOf", json("2"))
+  members[2] = ("exclusiveMaximum", json("0"))
+  assert_eq(
+    @moonjson-toolkit.validate_compiled_schema(
+      json("{\"price\":12.34}"),
+      compiled,
+    ).length(),
+    0,
+  )
+  for
+    (value, reason) in [
+      ("12.345", "it is not a multiple of 0.01"),
+      ("0", "it is not greater than the exclusive minimum 0"),
+      ("100", "it is not less than the exclusive maximum 100"),
+    ] {
+    let violations = @moonjson-toolkit.validate_compiled_schema(
+      json("{\"price\":" + value + "}"),
+      compiled,
+    )
+    assert_eq(violations.length(), 1)
+    assert_eq(violations[0].path, "price")
+    assert_eq(violations[0].message, reason)
+  }
 }

@@ -1102,7 +1102,8 @@ async test "unsupported schema features exit 2 without a success verdict" {
       ("reference", "{\"$ref\":\"#/person\"}", "$ref"),
       ("mixed", "{\"type\":\"object\",\"$ref\":\"#/person\"}", "$ref"),
       (
-        "nested", "{\"properties\":{\"id\":{\"minimum\":0,\"multipleOf\":2}}}", "properties.id.multipleOf",
+        "nested", "{\"properties\":{\"id\":{\"minimum\":0,\"unevaluatedProperties\":false}}}",
+        "properties.id.unevaluatedProperties",
       ),
     ] {
     let result = run_against_schema(
@@ -1133,7 +1134,10 @@ async test "schema compilation precedes missing input for single batch and JSONL
     ] {
     let scratch = Scratch::named("schema_preflight_" + name)
     discard(scratch.input)
-    @fs.write_file(scratch.schema, "{\"anyOf\":[true,{\"multipleOf\":2}]}")
+    @fs.write_file(
+      scratch.schema,
+      "{\"anyOf\":[true,{\"$ref\":\"#/missing\"}]}",
+    )
     let result = run(
       ["-v", "--no-color", "--schema", scratch.schema, "-f", scratch.input] +
       extra,
@@ -1142,9 +1146,7 @@ async test "schema compilation precedes missing input for single batch and JSONL
     discard(scratch.schema)
     assert_eq(result.code, 2)
     assert_eq(result.out, "")
-    assert_true(
-      result.err.contains("anyOf[1].multipleOf: keyword is not supported"),
-    )
+    assert_true(result.err.contains("anyOf[1].$ref: keyword is not supported"))
     assert_false(result.err.contains("cannot read " + scratch.input))
     assert_false(result.err.contains("matches the schema"))
   }
@@ -1718,8 +1720,10 @@ async test "CLI refuses invalid combinations and unsupported hidden constraints"
       ("{\"allOf\":[]}", "allOf"),
       ("{\"anyOf\":[]}", "anyOf"),
       ("{\"oneOf\":[null]}", "oneOf[0]"),
-      ("{\"anyOf\":[true,{\"multipleOf\":2}]}", "anyOf[1].multipleOf"),
-      ("{\"not\":{\"multipleOf\":2}}", "not.multipleOf"),
+      ("{\"anyOf\":[true,{\"$ref\":\"#/missing\"}]}", "anyOf[1].$ref"),
+      (
+        "{\"not\":{\"unevaluatedProperties\":false}}", "not.unevaluatedProperties",
+      ),
     ] {
     let result = run_against_schema(
       Scratch::named("applicator_preflight_" + index.to_string()),
@@ -1766,4 +1770,119 @@ async test "JSONL and batch report composition failures without an all matched v
   assert_true(batch.err.contains(scratch.stats + " does not match the schema"))
   assert_false(batch.out.contains("matches the schema"))
   assert_true(batch.out.contains("Summary: 0 passed, 2 failed"))
+}
+
+///|
+async test "CLI numeric steps and exclusive bounds retain verdict exit codes" {
+  for
+    index, (schema, value, code) in [
+      ("{\"exclusiveMinimum\":1}", "1.1", 0),
+      ("{\"exclusiveMinimum\":1}", "1.0", 1),
+      ("{\"exclusiveMaximum\":1}", "0.9", 0),
+      ("{\"exclusiveMaximum\":1}", "1e0", 1),
+      ("{\"multipleOf\":0.1}", "0.3", 0),
+      ("{\"multipleOf\":0.1}", "0.30000000000000004", 1),
+      (
+        "{\"type\":\"number\",\"exclusiveMinimum\":0,\"multipleOf\":0.01}", "12.34",
+        0,
+      ),
+      (
+        "{\"type\":\"number\",\"exclusiveMinimum\":0,\"multipleOf\":0.01}", "12.345",
+        1,
+      ),
+      (
+        "{\"type\":\"number\",\"exclusiveMinimum\":0,\"multipleOf\":0.01}", "0",
+        1,
+      ),
+    ] {
+    let result = run_against_schema(
+      Scratch::named("numeric_step_verdict_" + index.to_string()),
+      value,
+      schema,
+      ["--no-color"],
+      StubAnalyzer::new(Ok("unused")),
+    )
+    assert_eq(result.code, code)
+    if code == 0 {
+      assert_eq(result.err, "")
+      assert_true(result.out.contains("matches the schema"))
+    } else {
+      assert_eq(result.out, "")
+      assert_true(result.err.contains("does not match the schema"))
+      assert_false(result.err.contains("matches the schema"))
+    }
+  }
+}
+
+///|
+async test "CLI invalid divisors report schema problems with exit 2" {
+  for
+    index, schema in [
+      "{\"multipleOf\":0}", "{\"multipleOf\":-2}", "{\"multipleOf\":\"2\"}", "{\"anyOf\":[true,{\"multipleOf\":0}]}",
+    ] {
+    let result = run_against_schema(
+      Scratch::named("numeric_step_bad_" + index.to_string()),
+      "0.3",
+      schema,
+      ["--no-color"],
+      StubAnalyzer::new(Ok("unused")),
+    )
+    assert_eq(result.code, 2)
+    assert_eq(result.out, "")
+    assert_true(
+      result.err.contains("multipleOf: expected a strictly positive number"),
+    )
+    assert_false(result.err.contains("matches the schema"))
+  }
+}
+
+///|
+async test "invalid hidden divisor is reported before a missing input" {
+  let scratch = Scratch::named("numeric_step_missing")
+  discard(scratch.input)
+  @fs.write_file(scratch.schema, "{\"anyOf\":[true,{\"multipleOf\":0}]}")
+  let result = run(
+    ["-v", "--no-color", "--schema", scratch.schema, "-f", scratch.input],
+    analyze=StubAnalyzer::new(Ok("unused")).analyzer(),
+  )
+  discard(scratch.schema)
+  assert_eq(result.code, 2)
+  assert_eq(result.out, "")
+  assert_true(
+    result.err.contains(
+      "anyOf[1].multipleOf: expected a strictly positive number",
+    ),
+  )
+  assert_false(result.err.contains("cannot read " + scratch.input))
+}
+
+///|
+async test "JSONL and mixed batch inputs preserve exact multipleOf failures" {
+  let schema = "{\"multipleOf\":0.1}"
+  let jsonl = run_against_schema(
+    Scratch::named("numeric_step_jsonl"),
+    "0.3\n0.30000000000000004\n",
+    schema,
+    ["--jsonl", "--continue-on-error", "--no-color"],
+    StubAnalyzer::new(Ok("unused")),
+  )
+  assert_eq(jsonl.code, 1)
+  assert_true(jsonl.err.contains("line 2 does not match the schema"))
+  assert_true(jsonl.err.contains("it is not a multiple of 0.1"))
+  assert_false(jsonl.out.contains("every record matches the schema"))
+  let scratch = Scratch::named("numeric_step_batch")
+  @fs.write_file(scratch.stats, "0.30000000000000004")
+  let batch = run_against_schema(
+    scratch,
+    "0.3",
+    schema,
+    ["-f", scratch.stats, "--continue-on-error", "--no-color"],
+    StubAnalyzer::new(Ok("unused")),
+  )
+  discard(scratch.stats)
+  assert_eq(batch.code, 1)
+  assert_true(batch.err.contains(scratch.stats + " does not match the schema"))
+  assert_true(batch.err.contains("it is not a multiple of 0.1"))
+  assert_false(batch.err.contains("matches the schema"))
+  assert_true(batch.out.contains("Summary: 1 passed, 1 failed"))
 }
