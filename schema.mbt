@@ -83,6 +83,18 @@ fn check_value(
           "properties" => check_properties(value, wanted, path, errors)
           "items" => check_items(value, wanted, path, errors)
           "enum" => check_enum(value, wanted, path, errors)
+          "const" => check_const(value, wanted, path, errors)
+          "allOf" | "anyOf" | "oneOf" =>
+            check_combination(value, wanted, keyword, path, errors)
+          "not" =>
+            if branch_errors(value, wanted, path).is_empty() {
+              errors.push({
+                path,
+                message: "it matches the schema forbidden by not",
+              })
+            }
+          "additionalProperties" =>
+            check_additional_properties(value, wanted, members, path, errors)
           "minimum" => check_bound(value, wanted, path, errors, true)
           "maximum" => check_bound(value, wanted, path, errors, false)
           "minLength" => check_length(value, wanted, path, errors, true)
@@ -91,7 +103,111 @@ fn check_value(
           _ => ()
         }
       }
-    // Unreachable: `schema_problems` refuses a schema that is not an object.
+    Bool(value=true) => ()
+    Bool(value=false) =>
+      errors.push({ path, message: "it is rejected by the false schema", })
+    // Compilation accepts only objects and booleans.
+    _ => ()
+  }
+}
+
+///|
+/// Branch errors belong to that branch until the applicator decides what to
+/// retain. The path always refers to the instance being checked.
+fn branch_errors(
+  value : @pjson.Json,
+  schema : @pjson.Json,
+  path : String,
+) -> Array[SchemaError] {
+  let errors = []
+  check_value(value, schema, path, errors)
+  errors
+}
+
+///|
+fn check_const(
+  value : @pjson.Json,
+  wanted : @pjson.Json,
+  path : String,
+  errors : Array[SchemaError],
+) -> Unit {
+  if !same_value(value, wanted) {
+    errors.push({
+      path,
+      message: "it is not the constant value the schema specifies",
+    })
+  }
+}
+
+///|
+fn check_combination(
+  value : @pjson.Json,
+  wanted : @pjson.Json,
+  keyword : String,
+  path : String,
+  errors : Array[SchemaError],
+) -> Unit {
+  let branches = match wanted {
+    Array(items~) => items
+    // Compilation rejects nonarrays and empty arrays.
+    _ => return
+  }
+  let mut matches = 0
+  for index, schema in branches {
+    let violations = branch_errors(value, schema, path)
+    if violations.is_empty() {
+      matches = matches + 1
+    } else if keyword == "allOf" {
+      for violation in violations {
+        errors.push({
+          path: violation.path,
+          message: "allOf[" + index.to_string() + "]: " + violation.message,
+        })
+      }
+    }
+  }
+  if keyword == "anyOf" && matches == 0 {
+    errors.push({ path, message: "it does not match any anyOf branch", })
+  }
+  if keyword == "oneOf" && matches != 1 {
+    errors.push({
+      path,
+      message: "it matches " +
+      matches.to_string() +
+      " oneOf branches; exactly one is required",
+    })
+  }
+}
+
+///|
+/// Only properties declared in this schema object count as declared. The
+/// keyword order, required names and declarations in other branches do not.
+fn check_additional_properties(
+  value : @pjson.Json,
+  wanted : @pjson.Json,
+  schema_members : Array[(String, @pjson.Json)],
+  path : String,
+  errors : Array[SchemaError],
+) -> Unit {
+  let declared = match find_member(schema_members, "properties") {
+    Some(Object(members~)) => members
+    _ => []
+  }
+  match value {
+    Object(members~) =>
+      for (name, held) in members {
+        if !declared.any(fn(entry) { entry.0 == name }) {
+          let here = child_path(path, name)
+          match wanted {
+            Bool(value=false) =>
+              errors.push({
+                path: here,
+                message: "additional property is not allowed",
+              })
+            _ => check_value(held, wanted, here, errors)
+          }
+        }
+      }
     _ => ()
   }
 }
@@ -499,9 +615,9 @@ fn check_pattern(
 /// keyword it is under.
 ///
 /// A schema is read the same way at every level, so this walks into the schemas
-/// inside it: `properties` for the members it names and `items` for the elements
-/// of an array. Only supported assertions and explicit annotations are accepted.
-/// Values inside enum, default and examples are data, not schemas.
+/// inside properties, items, combinations, not and additionalProperties.
+/// Only supported assertions and explicit annotations are accepted.
+/// Values inside const, enum, default and examples are data, not schemas.
 fn check_schema(
   schema : @pjson.Json,
   path : String,
@@ -515,6 +631,34 @@ fn check_schema(
         match keyword {
           "type" => check_type_argument(wanted, here, errors)
           "required" => check_name_list(wanted, here, errors)
+          "const" => ()
+          "allOf" | "anyOf" | "oneOf" =>
+            match wanted {
+              Array(items~) => {
+                if items.is_empty() {
+                  errors.push({
+                    path: here,
+                    message: "expected a nonempty array of schemas",
+                    kind: InvalidSchema,
+                  })
+                }
+                for index, subschema in items {
+                  check_schema(
+                    subschema,
+                    here + "[" + index.to_string() + "]",
+                    errors,
+                  )
+                }
+              }
+              _ =>
+                errors.push({
+                  path: here,
+                  message: "expected a nonempty array of schemas, but this is " +
+                  kind_name(wanted),
+                  kind: InvalidSchema,
+                })
+            }
+          "not" | "additionalProperties" => check_schema(wanted, here, errors)
           "properties" =>
             match wanted {
               Object(members=subschemas) =>
@@ -632,17 +776,12 @@ fn check_schema(
             })
         }
       }
-    Bool(_) =>
-      errors.push({
-        path,
-        message: "boolean schemas are not supported yet",
-        kind: UnsupportedFeature,
-      })
+    Bool(_) => ()
     _ =>
       errors.push({
         kind: InvalidSchema,
         path,
-        message: "a schema is an object of keywords, but this is " +
+        message: "a schema must be an object or a boolean, but this is " +
         kind_name(schema),
       })
   }

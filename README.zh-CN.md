@@ -191,11 +191,16 @@ way to it, and -v wins over it as it wins over the name lists.
 --schema <path> checks the input against a JSON Schema instead of printing
 it, and is read with -v, which is the flag that asks for a verdict rather
 than a document. The supported JSON Schema Draft 2020-12 subset is: type,
-required, properties, items, enum, minimum, maximum, minLength, maxLength
-and pattern. Unsupported keywords, versions and mechanisms are rejected
+required, properties, items, enum, const, minimum, maximum, minLength,
+maxLength, pattern, allOf, anyOf, oneOf, not and additionalProperties.
+Boolean schemas are supported: true accepts every value; false rejects it.
+oneOf requires exactly one matching branch. Unsupported keywords, versions
+and mechanisms are rejected
 before validation with exit 2. Allowed annotations are title, description,
 $comment, default, examples and format. format is annotation only and does
-not assert formats such as email. Boolean schemas are not supported yet.
+not assert formats such as email.
+Examples: {"properties":{"id":true},"additionalProperties":false}
+allows only id; {"oneOf":[{"const":"a"},{"const":"b"}]} accepts a or b.
 
 A document that does not match is reported with every place it disagrees,
 one to a line, and the run exits 1. A schema this tool cannot read is a
@@ -758,9 +763,50 @@ printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
 本工具支持明确列出的 JSON Schema Draft 2020-12 子集。未支持的关键字、版本或机制会在
 校验前报错，退出码为 `2`。本工具尚未完整实现 Draft 2020-12。
 
-当前支持的十个约束关键字是 `type`、`required`、`properties`、`items`、`enum`、
-`minimum`、`maximum`、`minLength`、`maxLength` 和 `pattern`。`properties` 和 `items`
-中的子 schema 会递归预检查，包括业务输入中没有出现的字段。
+当前支持 `type`、`required`、`properties`、`items`、`enum`、`const`、`minimum`、
+`maximum`、`minLength`、`maxLength`、`pattern`、`allOf`、`anyOf`、`oneOf`、`not` 和
+`additionalProperties`。也支持布尔 Schema：`true` 接受所有 JSON 值，`false` 拒绝所有值。
+`const` 只接受指定的常量，复用 `enum` 的精确相等逻辑；其内容作为普通数据处理。
+
+| 关键字 | 通过条件 |
+| ------ | -------- |
+| `allOf` | 所有分支匹配 |
+| `anyOf` | 至少一个分支匹配 |
+| `oneOf` | 恰好一个分支匹配 |
+| `not` | 子 Schema 不匹配 |
+
+组合分支作用于同一个实例，分别计算校验结果。前三种组合的参数必须是非空 Schema 数组。
+每个分支都会预检查，即使已有分支为 `true`。例如 `{"anyOf":[true,{"multipleOf":2}]}`
+仍会在 `anyOf[1].multipleOf` 报错，退出 `2`。`properties`、`items`、`not`、
+`additionalProperties` 下的子 Schema 也会预检查，包括输入中没有出现的属性。
+
+`additionalProperties` 省略或为 `true` 时允许额外属性；为 `false` 时逐个拒绝；为 Schema
+时校验每个额外属性的值。已声明属性只按同一个 Schema 对象中 `properties` 的名称判断，
+与关键字顺序无关；`required` 中的名称、其他 `allOf` 分支中的声明都不算已声明属性。
+`patternProperties` 尚未支持，出现时仍提前拒绝。
+
+例如，以下 Schema 禁止未声明的字段：
+
+```sh
+printf '{"properties":{"id":{"type":"integer"}},"additionalProperties":false}' > closed.schema.json
+printf '{"id":1,"nickname":"Moon"}' | moon run cmd/main -- -v --schema closed.schema.json
+# error: <stdin> does not match the schema
+#   nickname: additional property is not allowed
+# exit code: 1
+```
+
+整数会同时匹配 number 和 integer 两个分支，所以以下 `oneOf` 拒绝 `1`，接受 `1.5`：
+
+```sh
+printf '{"oneOf":[{"type":"number"},{"type":"integer"}]}' > choice.schema.json
+printf '1' | moon run cmd/main -- -v --schema choice.schema.json
+# error: <stdin> does not match the schema
+#   (root): it matches 2 oneOf branches; exactly one is required
+# exit code: 1
+printf '1.5' | moon run cmd/main -- -v --schema choice.schema.json
+# <stdin>: valid JSON, and it matches the schema
+# exit code: 0
+```
 
 `integer` 按数学值判断：`1.2e1`、`100e-2`、`0.001e3` 是整数，`1e-1` 不是。
 `minimum`、`maximum` 和 `enum` 中的数字相等采用精确十进制语义，大数以及超出浮点范围的
@@ -782,8 +828,8 @@ printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
 | `format` | 字符串，仅作为注解，不校验邮箱等格式 |
 
 `$schema` 若存在，只接受字符串 `https://json-schema.org/draft/2020-12/schema`；缺省时
-使用项目的同一子集，其它版本会被拒绝。布尔 schema，以及 `$ref`、`$defs`、`$id`、
-`$anchor`、`$dynamicRef`、`$vocabulary` 等机制暂不支持。`enum`、`default`、`examples`
+使用项目的同一子集，其它版本会被拒绝。`$ref`、`$defs`、`$id`、`$anchor`、`$dynamicRef`、
+`$vocabulary` 等机制暂不支持。`const`、`enum`、`default`、`examples`
 中的对象是数据；`properties` 下的字段名也不会被当作关键字检查。`multipleOf`、
 `exclusiveMinimum` 等关键字仍未实现，出现时由预检查明确拒绝。
 
@@ -795,13 +841,13 @@ cat > unsupported.schema.json <<'EOF'
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "A person",
   "type": "object",
-  "additionalProperties": false
+  "patternProperties": {}
 }
 EOF
 printf '{"id":1,"nickname":"Moon"}' \
   | moon run cmd/main -- -v --schema unsupported.schema.json
 # error: the schema unsupported.schema.json contains unsupported features
-#   additionalProperties: keyword is not supported
+#   patternProperties: keyword is not supported
 # exit code: 2
 ```
 
@@ -1368,7 +1414,7 @@ AI 响应处理都不需要联网，所以在任何机器上 `moon test` 都是�
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 328 tests
+moon test  --target native   # 342 tests
 moon fmt                     # format
 
 cd frontend
@@ -1419,7 +1465,7 @@ Total: 2558/2667
 
 `cmd/main/main.mbt` 是唯一一个有意为之的零：它是进程入口，而 `moon test` 从不运行 `main`。它做的事只是把真实的命令行和两个真实的数据流交给 `run`，而 `run` 本身由测试直接覆盖。
 
-其余没覆盖到的，都是需要进程之外的东西才能触发的分支。`ai.mbt` 里的 `analyze`——唯一与服务商通信的函数——从未被调用，因为任何测试都不允许访问真实 API；`parser.mbt` 和 `runner.mbt` 的标准输入路径没有被触及，因为每个测试都指定了文件；`color.mbt` 剩下的两个点都是内核针对一个测试套件选不了的标准输出给出的回答：管道解析不出路径，所以把路径读回来的那一支不会走到；而管道是内核描述得很清楚的一种类型，所以探测失败时的那一支也不会走到；`diagnostics.mbt` 则留着测试套件无法构造出来的那些解析错误分支和限制类型；`transform.mbt` 剩下的两个点在同一行上，是逐成员重建一个装着数组的对象时走的那一支，它到不了，因为被重建的那个成员正是名字的来源。这一行写出来而不是省掉，是为了万一哪天它不再成立，也不至于悄悄丢掉一个成员；`emit.mbt` 剩下的那个点也是同一类东西：两种都被留作可选的形状的合并，它不会发生，因为只有被前面某条记录落下的成员才是可选的，而合并进去的东西是从一条有该成员的记录上读出来的。这一行同样写出来，而不是留给它下面那个兜底分支，后者会对一对说不定哪天就会相遇的形状答 `Json`。`schema.mbt` 剩下的六个点也是同一类东西：它们是为「本工具读不懂的 schema」准备的兜底分支，而不是为任何一份文档准备的——一份不是对象的 schema、一个不认识的类型名、一个空的名字列表被连成短语——每一个都写出来，是为了让遍历不会一路落空，而在 schema 编译通过的前提下，它们一个都到不了。`raw_of` 的兜底处理的是「不是数字的值」，其调用方已经先检查过。整数判断和精确比较现在共用 `schema_number.mbt` 中的十进制表示。
+其余没覆盖到的，都是需要进程之外的东西才能触发的分支。`ai.mbt` 里的 `analyze`——唯一与服务商通信的函数——从未被调用，因为任何测试都不允许访问真实 API；`parser.mbt` 和 `runner.mbt` 的标准输入路径没有被触及，因为每个测试都指定了文件；`color.mbt` 剩下的两个点都是内核针对一个测试套件选不了的标准输出给出的回答：管道解析不出路径，所以把路径读回来的那一支不会走到；而管道是内核描述得很清楚的一种类型，所以探测失败时的那一支也不会走到；`diagnostics.mbt` 则留着测试套件无法构造出来的那些解析错误分支和限制类型；`transform.mbt` 剩下的两个点在同一行上，是逐成员重建一个装着数组的对象时走的那一支，它到不了，因为被重建的那个成员正是名字的来源。这一行写出来而不是省掉，是为了万一哪天它不再成立，也不至于悄悄丢掉一个成员；`emit.mbt` 剩下的那个点也是同一类东西：两种都被留作可选的形状的合并，它不会发生，因为只有被前面某条记录落下的成员才是可选的，而合并进去的东西是从一条有该成员的记录上读出来的。这一行同样写出来，而不是留给它下面那个兜底分支，后者会对一对说不定哪天就会相遇的形状答 `Json`。`schema.mbt` 剩下的六个点也是同一类东西：它们是为「本工具读不懂的 schema」准备的兜底分支，而不是为任何一份文档准备的——一份既不是对象也不是布尔值的 schema、一个不认识的类型名、一个空的名字列表被连成短语——每一个都写出来，是为了让遍历不会一路落空，而在 schema 编译通过的前提下，它们一个都到不了。`raw_of` 的兜底处理的是「不是数字的值」，其调用方已经先检查过。整数判断和精确比较现在共用 `schema_number.mbt` 中的十进制表示。
 
 `pattern.mbt` 剩下的七个点是读取器自己写出来的分支：本该从转义序列或字符类成员里读出区间、而那两处都不会产出区间的分支，两处「不可能失败的」数字解析下面的兜底，以及 `class_item_matches` 对转义读取器从不写出的集合字母回答 `false` 的那一支。每一个说的都是「如果它上面的读法变了会怎样」，而在它没变的时候，一个都不会发生。
 

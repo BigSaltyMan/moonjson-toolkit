@@ -360,15 +360,14 @@ test "unsupported keywords refuse the entire schema" {
     #|  "description": 3,
     #|  "type": "object",
     #|  "additionalProperties": false,
+    #|  "$ref": "#/$defs/person",
     #|  "anyOf": [3, "nonsense"],
     #|  "properties": {
     #|    "id": { "type": "integer", "exclusiveMinimum": 0, "format": 7 }
     #|  }
     #|}
   assert_true(compile_schema(parse_ok(schema)) is Err(_))
-  assert_true(
-    problems(schema).contains("additionalProperties: keyword is not supported"),
-  )
+  assert_true(problems(schema).contains("$ref: keyword is not supported"))
   assert_true(
     problems(schema).contains(
       "properties.id.exclusiveMinimum: keyword is not supported",
@@ -383,11 +382,11 @@ test "unsupported keywords refuse the entire schema" {
 test "a schema this tool cannot read says where" {
   assert_eq(
     problems("[]"),
-    "(root): a schema is an object of keywords, but this is an array",
+    "(root): a schema must be an object or a boolean, but this is an array",
   )
   assert_eq(
     problems("\"x\""),
-    "(root): a schema is an object of keywords, but this is a string",
+    "(root): a schema must be an object or a boolean, but this is a string",
   )
   assert_eq(
     problems("{\"type\":3}"),
@@ -639,5 +638,245 @@ test "length arguments are exact integers with an explicit implementation cap" {
   assert_eq(
     problems("{\"maxLength\":1000000001}"),
     "maxLength: 1000000001 exceeds the supported character count limit of 1000000000",
+  )
+}
+
+///|
+test "boolean schemas behave consistently at every instance location" {
+  for value in ["null", "true", "false", "1", "\"x\"", "[]", "{}"] {
+    assert_eq(report(value, "true"), "")
+    assert_eq(
+      report(value, "false"),
+      "(root): it is rejected by the false schema",
+    )
+  }
+  assert_eq(report("{}", "{\"properties\":{\"x\":false}}"), "")
+  assert_eq(
+    report("{\"x\":1}", "{\"properties\":{\"x\":false}}"),
+    "x: it is rejected by the false schema",
+  )
+  assert_eq(report("[]", "{\"items\":false}"), "")
+  assert_eq(
+    report("[1]", "{\"items\":false}"),
+    "[0]: it is rejected by the false schema",
+  )
+  assert_eq(report("[1]", "{\"items\":true}"), "")
+}
+
+///|
+test "const compares arbitrary data with exact nested numeric equality" {
+  for
+    (schema, value) in [
+      ("{\"const\":false}", "false"),
+      ("{\"const\":null}", "null"),
+      ("{\"const\":1}", "1.0"),
+      ("{\"const\":{\"b\":[1,1e400],\"a\":0}}", "{\"a\":-0,\"b\":[1e0,10e399]}"),
+      ("{\"const\":{\"multipleOf\":2}}", "{\"multipleOf\":2}"),
+    ] {
+    assert_eq(problems(schema), "")
+    assert_eq(report(value, schema), "")
+  }
+  for
+    (schema, value) in [
+      ("{\"const\":false}", "null"),
+      ("{\"const\":9007199254740992}", "9007199254740993"),
+      ("{\"const\":[1,2]}", "[2,1]"),
+      ("{\"const\":{\"id\":[9007199254740992]}}", "{\"id\":[9007199254740993]}"),
+      ("{\"const\":[1e400,0]}", "[1e401,0]"),
+      ("{\"const\":[0]}", "[1e-400]"),
+    ] {
+    assert_eq(
+      report(value, schema),
+      "(root): it is not the constant value the schema specifies",
+    )
+  }
+}
+
+///|
+test "combinations use independent branch results and count all matches" {
+  assert_eq(
+    report("11", "{\"allOf\":[{\"minimum\":0},{\"maximum\":10}]}"),
+    "(root): allOf[1]: it is more than the maximum 10",
+  )
+  assert_eq(report("5", "{\"allOf\":[{\"minimum\":0},{\"maximum\":10}]}"), "")
+  let any = "{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"number\"}]}"
+  assert_eq(report("1", any), "")
+  assert_eq(report("\"x\"", any), "")
+  assert_eq(report("true", any), "(root): it does not match any anyOf branch")
+  let one = "{\"oneOf\":[{\"type\":\"number\"},{\"type\":\"integer\"}]}"
+  assert_eq(
+    report("1", one),
+    "(root): it matches 2 oneOf branches; exactly one is required",
+  )
+  assert_eq(report("1.5", one), "")
+  assert_eq(
+    report("true", one),
+    "(root): it matches 0 oneOf branches; exactly one is required",
+  )
+  assert_eq(
+    report("null", "{\"oneOf\":[true,true,true]}"),
+    "(root): it matches 3 oneOf branches; exactly one is required",
+  )
+  assert_eq(
+    report("null", "{\"allOf\":[true,false]}"),
+    "(root): allOf[1]: it is rejected by the false schema",
+  )
+  assert_eq(report("null", "{\"anyOf\":[false,true]}"), "")
+}
+
+///|
+test "not and nested combinations retain instance paths and sibling constraints" {
+  assert_eq(report("1.5", "{\"not\":{\"type\":\"integer\"}}"), "")
+  assert_eq(
+    report("1", "{\"not\":{\"type\":\"integer\"}}"),
+    "(root): it matches the schema forbidden by not",
+  )
+  assert_eq(
+    report("null", "{\"not\":true}"),
+    "(root): it matches the schema forbidden by not",
+  )
+  assert_eq(report("null", "{\"not\":false}"), "")
+  assert_eq(report("2", "{\"not\":{\"not\":{\"const\":2}}}"), "")
+  assert_eq(
+    report(
+      "2", "{\"allOf\":[{\"anyOf\":[{\"const\":2},false]},{\"not\":{\"const\":3}}]}",
+    ),
+    "",
+  )
+  assert_eq(
+    report("1", "{\"type\":\"string\",\"anyOf\":[true,false]}"),
+    "(root): it is a number where the schema expects a string",
+  )
+  assert_eq(
+    report(
+      "1", "{\"type\":\"integer\",\"anyOf\":[{\"const\":2},{\"const\":3}]}",
+    ),
+    "(root): it does not match any anyOf branch",
+  )
+  assert_eq(
+    report(
+      "{\"x\":11}", "{\"properties\":{\"x\":{\"allOf\":[{\"maximum\":10},false]}}}",
+    ),
+    "x: allOf[0]: it is more than the maximum 10\nx: allOf[1]: it is rejected by the false schema",
+  )
+  assert_eq(
+    report(
+      "[true]", "{\"items\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"number\"}]}}",
+    ),
+    "[0]: it does not match any anyOf branch",
+  )
+}
+
+///|
+test "composition parameters require nonempty arrays of valid schemas" {
+  for keyword in ["allOf", "anyOf", "oneOf"] {
+    for argument in ["[]", "false", "{}", "null", "[null]", "[1]", "[[]]"] {
+      let issues = schema_problems(
+        parse_ok("{\"" + keyword + "\":" + argument + "}"),
+      )
+      assert_eq(issues.length(), 1)
+      assert_eq(issues[0].kind, InvalidSchema)
+      assert_eq(
+        issues[0].path,
+        if argument == "[null]" || argument == "[1]" || argument == "[[]]" {
+          keyword + "[0]"
+        } else {
+          keyword
+        },
+      )
+    }
+  }
+  for
+    (schema, path) in [
+      ("{\"not\":null}", "not"),
+      ("{\"additionalProperties\":123}", "additionalProperties"),
+    ] {
+    let issues = schema_problems(parse_ok(schema))
+    assert_eq(issues.length(), 1)
+    assert_eq(issues[0].kind, InvalidSchema)
+    assert_eq(issues[0].path, path)
+  }
+}
+
+///|
+test "all branches are compiled even when their outcome is already decided" {
+  for
+    (schema, path) in [
+      ("{\"anyOf\":[true,{\"multipleOf\":2}]}", "anyOf[1].multipleOf"),
+      ("{\"allOf\":[false,{\"$ref\":\"#/x\"}]}", "allOf[1].$ref"),
+      ("{\"oneOf\":[true,true,{\"multipleOf\":2}]}", "oneOf[2].multipleOf"),
+      ("{\"not\":{\"multipleOf\":2}}", "not.multipleOf"),
+      (
+        "{\"additionalProperties\":{\"patternProperties\":{}}}", "additionalProperties.patternProperties",
+      ),
+      (
+        "{\"properties\":{\"missing\":{\"not\":{\"$ref\":\"#/x\"}}}}", "properties.missing.not.$ref",
+      ),
+    ] {
+    let issues = schema_problems(parse_ok(schema))
+    assert_eq(issues.length(), 1)
+    assert_eq(issues[0].kind, UnsupportedFeature)
+    assert_eq(issues[0].path, path)
+    assert_true(validate_schema(parse_ok("{}"), parse_ok(schema)) is Err(_))
+  }
+}
+
+///|
+test "additionalProperties allows refuses and validates only extra values" {
+  assert_eq(report("{\"x\":1}", "{}"), "")
+  assert_eq(report("{\"x\":1}", "{\"additionalProperties\":true}"), "")
+  assert_eq(
+    report("{\"x\":1,\"y\":2}", "{\"additionalProperties\":false}"),
+    "x: additional property is not allowed\ny: additional property is not allowed",
+  )
+  assert_eq(
+    report(
+      "{\"x\":\"bad\"}", "{\"additionalProperties\":{\"type\":\"integer\"}}",
+    ),
+    "x: it is a string where the schema expects an integer",
+  )
+  assert_eq(
+    report("{\"x\":1}", "{\"additionalProperties\":{\"type\":\"integer\"}}"),
+    "",
+  )
+  assert_eq(
+    report("{\"x\":[1]}", "{\"additionalProperties\":{\"items\":false}}"),
+    "x[0]: it is rejected by the false schema",
+  )
+  for value in ["null", "1", "true", "\"x\"", "[]"] {
+    assert_eq(report(value, "{\"additionalProperties\":false}"), "")
+  }
+}
+
+///|
+test "extra property declarations are local and independent of keyword order" {
+  let first = "{\"additionalProperties\":false,\"properties\":{\"x\":{\"type\":\"integer\"}}}"
+  let last = "{\"properties\":{\"x\":{\"type\":\"integer\"}},\"additionalProperties\":false}"
+  for schema in [first, last] {
+    assert_eq(report("{\"x\":1}", schema), "")
+    assert_eq(
+      report("{\"x\":\"bad\"}", schema),
+      "x: it is a string where the schema expects an integer",
+    )
+    assert_eq(
+      report("{\"x\":1,\"y\":2}", schema),
+      "y: additional property is not allowed",
+    )
+  }
+  assert_eq(
+    report("{\"x\":1}", "{\"required\":[\"x\"],\"additionalProperties\":false}"),
+    "x: additional property is not allowed",
+  )
+  assert_eq(
+    report(
+      "{\"id\":1}", "{\"allOf\":[{\"properties\":{\"id\":{\"type\":\"integer\"}}},{\"additionalProperties\":false}]}",
+    ),
+    "id: allOf[1]: additional property is not allowed",
+  )
+  assert_eq(
+    report(
+      "{\"x\":1}", "{\"properties\":{\"x\":false},\"additionalProperties\":false}",
+    ),
+    "x: it is rejected by the false schema",
   )
 }

@@ -1099,10 +1099,8 @@ async fn run_against_schema(
 async test "unsupported schema features exit 2 without a success verdict" {
   for
     (name, schema, path) in [
-      ("additional", "{\"additionalProperties\":false}", "additionalProperties"),
-      (
-        "mixed", "{\"type\":\"object\",\"additionalProperties\":false}", "additionalProperties",
-      ),
+      ("reference", "{\"$ref\":\"#/person\"}", "$ref"),
+      ("mixed", "{\"type\":\"object\",\"$ref\":\"#/person\"}", "$ref"),
       (
         "nested", "{\"properties\":{\"id\":{\"minimum\":0,\"multipleOf\":2}}}", "properties.id.multipleOf",
       ),
@@ -1135,10 +1133,7 @@ async test "schema compilation precedes missing input for single batch and JSONL
     ] {
     let scratch = Scratch::named("schema_preflight_" + name)
     discard(scratch.input)
-    @fs.write_file(
-      scratch.schema,
-      "{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"number\"}]}",
-    )
+    @fs.write_file(scratch.schema, "{\"anyOf\":[true,{\"multipleOf\":2}]}")
     let result = run(
       ["-v", "--no-color", "--schema", scratch.schema, "-f", scratch.input] +
       extra,
@@ -1147,7 +1142,9 @@ async test "schema compilation precedes missing input for single batch and JSONL
     discard(scratch.schema)
     assert_eq(result.code, 2)
     assert_eq(result.out, "")
-    assert_true(result.err.contains("anyOf: keyword is not supported"))
+    assert_true(
+      result.err.contains("anyOf[1].multipleOf: keyword is not supported"),
+    )
     assert_false(result.err.contains("cannot read " + scratch.input))
     assert_false(result.err.contains("matches the schema"))
   }
@@ -1675,4 +1672,98 @@ async test "JSONL and batch use the same exact numeric comparison" {
   assert_true(batch.err.contains(scratch.input + " does not match the schema"))
   assert_true(batch.err.contains(scratch.stats + " does not match the schema"))
   assert_false(batch.err.contains("matches the schema"))
+}
+
+///|
+async test "CLI boolean and applicator verdicts retain exit codes 0 and 1" {
+  for
+    index, (schema, value, code, reason) in [
+      ("true", "null", 0, ""),
+      ("false", "null", 1, "false schema"),
+      (
+        "{\"oneOf\":[{\"type\":\"number\"},{\"type\":\"integer\"}]}", "1", 1, "it matches 2 oneOf branches",
+      ),
+      (
+        "{\"oneOf\":[{\"type\":\"number\"},{\"type\":\"integer\"}]}", "1.5", 0, "",
+      ),
+      (
+        "{\"additionalProperties\":false}", "{\"x\":1}", 1, "x: additional property is not allowed",
+      ),
+      ("{\"anyOf\":[{\"const\":1},false]}", "1.0", 0, ""),
+    ] {
+    let result = run_against_schema(
+      Scratch::named("applicator_verdict_" + index.to_string()),
+      value,
+      schema,
+      ["--no-color"],
+      StubAnalyzer::new(Ok("unused")),
+    )
+    assert_eq(result.code, code)
+    if code == 0 {
+      assert_eq(result.err, "")
+      assert_true(result.out.contains("matches the schema"))
+    } else {
+      assert_eq(result.out, "")
+      assert_true(result.err.contains(reason))
+      assert_false(result.err.contains("matches the schema"))
+      assert_false(result.err.contains("is not one this tool can read"))
+    }
+  }
+}
+
+///|
+async test "CLI refuses invalid combinations and unsupported hidden constraints" {
+  for
+    index, (schema, path) in [
+      ("{\"allOf\":[]}", "allOf"),
+      ("{\"anyOf\":[]}", "anyOf"),
+      ("{\"oneOf\":[null]}", "oneOf[0]"),
+      ("{\"anyOf\":[true,{\"multipleOf\":2}]}", "anyOf[1].multipleOf"),
+      ("{\"not\":{\"multipleOf\":2}}", "not.multipleOf"),
+    ] {
+    let result = run_against_schema(
+      Scratch::named("applicator_preflight_" + index.to_string()),
+      "null",
+      schema,
+      ["--no-color"],
+      StubAnalyzer::new(Ok("unused")),
+    )
+    assert_eq(result.code, 2)
+    assert_eq(result.out, "")
+    assert_true(result.err.contains("  " + path + ": "))
+    assert_false(result.err.contains("matches the schema"))
+  }
+}
+
+///|
+async test "JSONL and batch report composition failures without an all matched verdict" {
+  let schema = "{\"oneOf\":[{\"type\":\"number\"},{\"type\":\"integer\"}]}"
+  let jsonl = run_against_schema(
+    Scratch::named("applicator_jsonl"),
+    "1\n2\n",
+    schema,
+    ["--jsonl", "--continue-on-error", "--no-color"],
+    StubAnalyzer::new(Ok("unused")),
+  )
+  assert_eq(jsonl.code, 1)
+  assert_true(jsonl.err.contains("line 1 does not match the schema"))
+  assert_true(jsonl.err.contains("line 2 does not match the schema"))
+  assert_true(jsonl.err.contains("it matches 2 oneOf branches"))
+  assert_false(jsonl.out.contains("matches the schema"))
+  assert_false(jsonl.out.contains("every record matches"))
+  let scratch = Scratch::named("applicator_batch")
+  @fs.write_file(scratch.stats, "2")
+  let batch = run_against_schema(
+    scratch,
+    "1",
+    schema,
+    ["-f", scratch.stats, "--continue-on-error", "--no-color"],
+    StubAnalyzer::new(Ok("unused")),
+  )
+  discard(scratch.stats)
+  assert_eq(batch.code, 1)
+  assert_true(batch.err.contains(scratch.input + " does not match the schema"))
+  assert_true(batch.err.contains(scratch.stats + " does not match the schema"))
+  assert_false(batch.out.contains("matches the schema"))
+  assert_true(batch.out.contains("Summary: 0 passed, 2 failed"))
 }

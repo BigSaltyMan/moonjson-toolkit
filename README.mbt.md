@@ -212,11 +212,16 @@ way to it, and -v wins over it as it wins over the name lists.
 --schema <path> checks the input against a JSON Schema instead of printing
 it, and is read with -v, which is the flag that asks for a verdict rather
 than a document. The supported JSON Schema Draft 2020-12 subset is: type,
-required, properties, items, enum, minimum, maximum, minLength, maxLength
-and pattern. Unsupported keywords, versions and mechanisms are rejected
+required, properties, items, enum, const, minimum, maximum, minLength,
+maxLength, pattern, allOf, anyOf, oneOf, not and additionalProperties.
+Boolean schemas are supported: true accepts every value; false rejects it.
+oneOf requires exactly one matching branch. Unsupported keywords, versions
+and mechanisms are rejected
 before validation with exit 2. Allowed annotations are title, description,
 $comment, default, examples and format. format is annotation only and does
-not assert formats such as email. Boolean schemas are not supported yet.
+not assert formats such as email.
+Examples: {"properties":{"id":true},"additionalProperties":false}
+allows only id; {"oneOf":[{"const":"a"},{"const":"b"}]} accepts a or b.
 
 A document that does not match is reported with every place it disagrees,
 one to a line, and the run exits 1. A schema this tool cannot read is a
@@ -832,10 +837,56 @@ This tool supports an explicitly listed JSON Schema Draft 2020-12 subset.
 Unsupported keywords, versions or mechanisms are rejected before validation
 with exit code `2`; this is not a full Draft 2020-12 implementation.
 
-The ten supported constraint keywords are `type`, `required`, `properties`,
-`items`, `enum`, `minimum`, `maximum`, `minLength`, `maxLength` and `pattern`.
-Subschemas in `properties` and `items` are checked recursively, including
-properties that are absent from the input.
+The supported keywords are `type`, `required`, `properties`, `items`, `enum`,
+`const`, `minimum`, `maximum`, `minLength`, `maxLength`, `pattern`, `allOf`,
+`anyOf`, `oneOf`, `not` and `additionalProperties`. Boolean schemas are also
+supported: `true` accepts every JSON value, and `false` rejects every value.
+`const` accepts only the specified value using the exact equality of `enum`;
+its contents are ordinary data rather than subschemas.
+
+| Keyword | Condition for success |
+| ------- | --------------------- |
+| `allOf` | every branch matches |
+| `anyOf` | at least one branch matches |
+| `oneOf` | exactly one branch matches |
+| `not` | its subschema does not match |
+
+Branches act independently on the same instance. The three combination arrays
+must be nonempty arrays of schemas. Every branch is prechecked, even when
+another branch is `true`; `{"anyOf":[true,{"multipleOf":2}]}` is refused at
+`anyOf[1].multipleOf` with exit `2`. Subschemas in `properties`, `items`, `not`
+and `additionalProperties` are also prechecked, including absent properties.
+
+`additionalProperties` allows extra members when omitted or `true`, rejects
+each extra member when `false`, and validates extra values when given a schema.
+Only names in `properties` in the same schema object count as declared;
+`required` names and declarations in another `allOf` branch do not count.
+Keyword order does not affect that decision. `patternProperties` remains
+unsupported and is rejected before validation.
+
+For example, this schema refuses an undeclared field:
+
+```sh
+printf '{"properties":{"id":{"type":"integer"}},"additionalProperties":false}' > closed.schema.json
+printf '{"id":1,"nickname":"Moon"}' | moon run cmd/main -- -v --schema closed.schema.json
+# error: <stdin> does not match the schema
+#   nickname: additional property is not allowed
+# exit code: 1
+```
+
+An integer matches both number and integer, so this `oneOf` rejects `1` and
+accepts `1.5`:
+
+```sh
+printf '{"oneOf":[{"type":"number"},{"type":"integer"}]}' > choice.schema.json
+printf '1' | moon run cmd/main -- -v --schema choice.schema.json
+# error: <stdin> does not match the schema
+#   (root): it matches 2 oneOf branches; exactly one is required
+# exit code: 1
+printf '1.5' | moon run cmd/main -- -v --schema choice.schema.json
+# <stdin>: valid JSON, and it matches the schema
+# exit code: 0
+```
 
 `integer` is determined by the mathematical value: `1.2e1`, `100e-2` and
 `0.001e3` are integers, while `1e-1` is not. `minimum`, `maximum` and numeric
@@ -862,9 +913,9 @@ The allowed annotations are:
 
 `$schema`, when present, must be the string
 `https://json-schema.org/draft/2020-12/schema`. Without it, the same project
-subset applies. Other versions are rejected. Boolean schemas and mechanisms
-such as `$ref`, `$defs`, `$id`, `$anchor`, `$dynamicRef` and `$vocabulary` are
-not supported yet. Object members inside `enum`, `default` and `examples`
+subset applies. Other versions are rejected. Mechanisms such as `$ref`,
+`$defs`, `$id`, `$anchor`, `$dynamicRef` and `$vocabulary` are not supported yet.
+Object members inside `const`, `enum`, `default` and `examples`
 are data, and property names under `properties` are names rather than keywords.
 `multipleOf` and `exclusiveMinimum` also remain unsupported and are explicitly
 rejected by schema compilation.
@@ -879,13 +930,13 @@ cat > unsupported.schema.json <<'EOF'
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "A person",
   "type": "object",
-  "additionalProperties": false
+  "patternProperties": {}
 }
 EOF
 printf '{"id":1,"nickname":"Moon"}' \
   | moon run cmd/main -- -v --schema unsupported.schema.json
 # error: the schema unsupported.schema.json contains unsupported features
-#   additionalProperties: keyword is not supported
+#   patternProperties: keyword is not supported
 # exit code: 2
 ```
 
@@ -1510,7 +1561,7 @@ so `moon test` is the same command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 328 tests
+moon test  --target native   # 342 tests
 moon fmt                     # format
 
 cd frontend
@@ -1590,7 +1641,7 @@ optional, and what is merged into it is read off a record that has the member. I
 is written out rather than left to the catch-all below it, which would answer
 `Json` for a pair that may some day meet. The six points left in `schema.mbt` are
 the same shape: fallbacks for a schema this tool refuses to read rather than for
-any document — a schema that is not an object, a type name it does not know, an
+any document — a schema that is neither an object nor a boolean, a type name it does not know, an
 empty list of names being joined into a phrase — each written out so that a walk
 can never fall through to nothing, and none of them reachable while
 schema compilation succeeds first. The guard in `raw_of` handles a value that
