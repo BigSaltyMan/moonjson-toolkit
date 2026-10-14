@@ -142,9 +142,9 @@ pub fn unflatten(@json.Json) -> Result[@json.Json, String]
 
 pub fn usage() -> String
 
-pub fn validate_compiled_schema(@json.Json, CompiledSchema) -> Array[SchemaError]
+pub fn validate_compiled_schema(@json.Json, CompiledSchema) -> Result[Array[SchemaError], SchemaEvaluationError]
 
-pub fn validate_schema(@json.Json, @json.Json) -> Result[Array[SchemaError], Array[SchemaProblem]]
+pub fn validate_schema(@json.Json, @json.Json) -> Result[Array[SchemaError], SchemaValidationFailure]
 
 pub let version : String
 
@@ -257,6 +257,18 @@ pub(all) struct SchemaError {
   message : String
 }
 
+pub(all) struct SchemaEvaluationError {
+  kind : SchemaEvaluationErrorKind
+  message : String
+  instance_path : String
+  schema_path : String
+} derive(Eq, @debug.Debug)
+
+pub(all) enum SchemaEvaluationErrorKind {
+  ReferenceCycle
+  ResourceLimit
+} derive(Eq, @debug.Debug)
+
 pub(all) struct SchemaProblem {
   path : String
   message : String
@@ -268,6 +280,11 @@ pub(all) enum SchemaProblemKind {
   UnsupportedFeature
   UnsupportedVersion
 } derive(Eq, @debug.Debug)
+
+pub(all) enum SchemaValidationFailure {
+  SchemaProblems(Array[SchemaProblem])
+  EvaluationFailed(SchemaEvaluationError)
+} derive(@debug.Debug)
 
 pub(all) struct TypeCount {
   kind : String

@@ -19,10 +19,14 @@ pub(all) struct SchemaError {
 pub fn validate_schema(
   json : @pjson.Json,
   schema : @pjson.Json,
-) -> Result[Array[SchemaError], Array[SchemaProblem]] {
+) -> Result[Array[SchemaError], SchemaValidationFailure] {
   match compile_schema(schema) {
-    Ok(compiled) => Ok(validate_compiled_schema(json, compiled))
-    Err(problems) => Err(problems)
+    Ok(compiled) =>
+      match validate_compiled_schema(json, compiled) {
+        Ok(errors) => Ok(errors)
+        Err(error) => Err(EvaluationFailed(error))
+      }
+    Err(problems) => Err(SchemaProblems(problems))
   }
 }
 
@@ -31,10 +35,10 @@ pub fn validate_schema(
 pub fn validate_compiled_schema(
   json : @pjson.Json,
   compiled : CompiledSchema,
-) -> Array[SchemaError] {
-  let errors = []
-  check_value(json, compiled.schema, "", errors, compiled.patterns)
-  errors
+) -> Result[Array[SchemaError], SchemaEvaluationError] {
+  evaluate_schema_with_limits(
+    json, compiled, schema_evaluation_depth_limit, schema_evaluation_visit_limit,
+  )
 }
 
 ///|
@@ -70,43 +74,62 @@ fn check_value(
   schema : @pjson.Json,
   path : String,
   errors : Array[SchemaError],
-  patterns : Map[String, Pattern],
+  ctx : SchemaEvaluationContext,
 ) -> Unit {
   match schema {
     Object(members~) =>
       for entry in members {
+        if ctx.failure != None {
+          break
+        }
         let (keyword, wanted) = entry
         match keyword {
+          "$ref" => {
+            let id = ctx.compiled.references[pointer_child(
+                ctx.schema_pointer,
+                "$ref",
+              )]
+            evaluate_schema_node(
+              value,
+              ctx.compiled.nodes[id].pointer,
+              ctx.instance_pointer,
+              path,
+              errors,
+              ctx,
+            )
+          }
           "type" => check_type(value, wanted, path, errors)
           "required" => check_required(value, wanted, path, errors)
-          "properties" =>
-            check_properties(value, wanted, path, errors, patterns)
+          "properties" => check_properties(value, wanted, path, errors, ctx)
           "patternProperties" =>
-            check_pattern_properties(value, wanted, path, errors, patterns)
+            check_pattern_properties(value, wanted, path, errors, ctx)
           "minProperties" =>
             check_property_count(value, wanted, path, errors, true)
           "maxProperties" =>
             check_property_count(value, wanted, path, errors, false)
-          "items" => check_items(value, wanted, members, path, errors, patterns)
-          "prefixItems" =>
-            check_prefix_items(value, wanted, path, errors, patterns)
+          "items" => check_items(value, wanted, members, path, errors, ctx)
+          "prefixItems" => check_prefix_items(value, wanted, path, errors, ctx)
           "minItems" => check_array_length(value, wanted, path, errors, true)
           "maxItems" => check_array_length(value, wanted, path, errors, false)
           "uniqueItems" => check_unique_items(value, wanted, path, errors)
           "enum" => check_enum(value, wanted, path, errors)
           "const" => check_const(value, wanted, path, errors)
           "allOf" | "anyOf" | "oneOf" =>
-            check_combination(value, wanted, keyword, path, errors, patterns)
+            check_combination(value, wanted, keyword, path, errors, ctx)
           "not" =>
-            if branch_errors(value, wanted, path, patterns).is_empty() {
-              errors.push({
-                path,
-                message: "it matches the schema forbidden by not",
-              })
+            match branch_errors(value, ["not"], path, ctx) {
+              Ok(violations) =>
+                if violations.is_empty() {
+                  errors.push({
+                    path,
+                    message: "it matches the schema forbidden by not",
+                  })
+                }
+              Err(_) => () // The shared context propagates this execution failure.
             }
           "additionalProperties" =>
             check_additional_properties(
-              value, wanted, members, path, errors, patterns,
+              value, wanted, members, path, errors, ctx,
             )
           "minimum" =>
             check_bound(value, wanted, path, errors, InclusiveMinimum)
@@ -119,7 +142,7 @@ fn check_value(
           "multipleOf" => check_multiple_of(value, wanted, path, errors)
           "minLength" => check_length(value, wanted, path, errors, true)
           "maxLength" => check_length(value, wanted, path, errors, false)
-          "pattern" => check_pattern(value, wanted, path, errors, patterns)
+          "pattern" => check_pattern(value, wanted, path, errors, ctx)
           _ => ()
         }
       }
@@ -136,13 +159,16 @@ fn check_value(
 /// retain. The path always refers to the instance being checked.
 fn branch_errors(
   value : @pjson.Json,
-  schema : @pjson.Json,
+  schema_tokens : Array[String],
   path : String,
-  patterns : Map[String, Pattern],
-) -> Array[SchemaError] {
+  ctx : SchemaEvaluationContext,
+) -> Result[Array[SchemaError], SchemaEvaluationError] {
   let errors = []
-  check_value(value, schema, path, errors, patterns)
-  errors
+  evaluate_schema_child(value, schema_tokens, None, path, errors, ctx)
+  match ctx.failure {
+    Some(error) => Err(error)
+    None => Ok(errors)
+  }
 }
 
 ///|
@@ -167,7 +193,7 @@ fn check_combination(
   keyword : String,
   path : String,
   errors : Array[SchemaError],
-  patterns : Map[String, Pattern],
+  ctx : SchemaEvaluationContext,
 ) -> Unit {
   let branches = match wanted {
     Array(items~) => items
@@ -175,8 +201,12 @@ fn check_combination(
     _ => return
   }
   let mut matches = 0
-  for index, schema in branches {
-    let violations = branch_errors(value, schema, path, patterns)
+  for index, _schema in branches {
+    let violations = match
+      branch_errors(value, [keyword, index.to_string()], path, ctx) {
+      Ok(violations) => violations
+      Err(_) => return
+    }
     if violations.is_empty() {
       matches = matches + 1
     } else if keyword == "allOf" {
@@ -210,7 +240,7 @@ fn check_additional_properties(
   schema_members : Array[(String, @pjson.Json)],
   path : String,
   errors : Array[SchemaError],
-  patterns : Map[String, Pattern],
+  ctx : SchemaEvaluationContext,
 ) -> Unit {
   let declared = match find_member(schema_members, "properties") {
     Some(Object(members~)) => members
@@ -223,21 +253,45 @@ fn check_additional_properties(
   match value {
     Object(members~) =>
       for (name, held) in members {
+        if ctx.failure != None {
+          break
+        }
         if !declared.any(fn(entry) { entry.0 == name }) &&
           !patterned.any(fn(entry) {
             match_compiled_pattern(
-              compiled_schema_pattern(patterns, entry.0),
+              compiled_schema_pattern(ctx.compiled.patterns, entry.0),
               name,
             )
           }) {
           let here = child_path(path, name)
           match wanted {
-            Bool(value=false) =>
-              errors.push({
-                path: here,
-                message: "additional property is not allowed",
-              })
-            _ => check_value(held, wanted, here, errors, patterns)
+            Bool(value=false) => {
+              // Count the boolean child as a node visit while preserving the
+              // established additional-property diagnostic.
+              evaluate_schema_child(
+                held,
+                ["additionalProperties"],
+                Some(name),
+                here,
+                [],
+                ctx,
+              )
+              if ctx.failure == None {
+                errors.push({
+                  path: here,
+                  message: "additional property is not allowed",
+                })
+              }
+            }
+            _ =>
+              evaluate_schema_child(
+                held,
+                ["additionalProperties"],
+                Some(name),
+                here,
+                errors,
+                ctx,
+              )
           }
         }
       }
@@ -251,15 +305,28 @@ fn check_pattern_properties(
   wanted : @pjson.Json,
   path : String,
   errors : Array[SchemaError],
-  patterns : Map[String, Pattern],
+  ctx : SchemaEvaluationContext,
 ) -> Unit {
   match (value, wanted) {
     (Object(members~), Object(members=rules)) =>
-      for (text, schema) in rules {
-        let pattern = compiled_schema_pattern(patterns, text)
+      for (text, _schema) in rules {
+        if ctx.failure != None {
+          break
+        }
+        let pattern = compiled_schema_pattern(ctx.compiled.patterns, text)
         for (name, held) in members {
+          if ctx.failure != None {
+            break
+          }
           if match_compiled_pattern(pattern, name) {
-            check_value(held, schema, child_path(path, name), errors, patterns)
+            evaluate_schema_child(
+              held,
+              ["patternProperties", text],
+              Some(name),
+              child_path(path, name),
+              errors,
+              ctx,
+            )
           }
         }
       }
@@ -492,7 +559,7 @@ fn check_properties(
   wanted : @pjson.Json,
   path : String,
   errors : Array[SchemaError],
-  patterns : Map[String, Pattern],
+  ctx : SchemaEvaluationContext,
 ) -> Unit {
   let subschemas = match wanted {
     Object(members~) => members
@@ -507,9 +574,19 @@ fn check_properties(
     _ => []
   }
   for entry in subschemas {
+    if ctx.failure != None {
+      break
+    }
     match find_member(members, entry.0) {
       Some(held) =>
-        check_value(held, entry.1, child_path(path, entry.0), errors, patterns)
+        evaluate_schema_child(
+          held,
+          ["properties", entry.0],
+          Some(entry.0),
+          child_path(path, entry.0),
+          errors,
+          ctx,
+        )
       None => ()
     }
   }
@@ -520,11 +597,11 @@ fn check_properties(
 /// Declarations in other objects and prefix validation outcomes do not affect it.
 fn check_items(
   value : @pjson.Json,
-  wanted : @pjson.Json,
+  _wanted : @pjson.Json,
   schema_members : Array[(String, @pjson.Json)],
   path : String,
   errors : Array[SchemaError],
-  patterns : Map[String, Pattern],
+  ctx : SchemaEvaluationContext,
 ) -> Unit {
   let start = match find_member(schema_members, "prefixItems") {
     Some(Array(items~)) => items.length()
@@ -533,13 +610,17 @@ fn check_items(
   match value {
     Array(items~) =>
       for index, item in items {
+        if ctx.failure != None {
+          break
+        }
         if index >= start {
-          check_value(
+          evaluate_schema_child(
             item,
-            wanted,
+            ["items"],
+            Some(index.to_string()),
             path + "[" + index.to_string() + "]",
             errors,
-            patterns,
+            ctx,
           )
         }
       }
@@ -553,17 +634,21 @@ fn check_prefix_items(
   wanted : @pjson.Json,
   path : String,
   errors : Array[SchemaError],
-  patterns : Map[String, Pattern],
+  ctx : SchemaEvaluationContext,
 ) -> Unit {
   match (value, wanted) {
     (Array(items~), Array(items=schemas)) =>
       for index in 0..<Int::min(items.length(), schemas.length()) {
-        check_value(
+        if ctx.failure != None {
+          break
+        }
+        evaluate_schema_child(
           items[index],
-          schemas[index],
+          ["prefixItems", index.to_string()],
+          Some(index.to_string()),
           path + "[" + index.to_string() + "]",
           errors,
-          patterns,
+          ctx,
         )
       }
     _ => ()
@@ -802,7 +887,7 @@ fn check_pattern(
   wanted : @pjson.Json,
   path : String,
   errors : Array[SchemaError],
-  patterns : Map[String, Pattern],
+  ctx : SchemaEvaluationContext,
 ) -> Unit {
   let pattern = match text_of(wanted) {
     Some(pattern) => pattern
@@ -812,7 +897,7 @@ fn check_pattern(
   match text_of(value) {
     Some(text) =>
       if !match_compiled_pattern(
-          compiled_schema_pattern(patterns, pattern),
+          compiled_schema_pattern(ctx.compiled.patterns, pattern),
           text,
         ) {
         errors.push({
@@ -828,15 +913,16 @@ fn check_pattern(
 /// Every keyword in the schema that this tool cannot read, with the path of the
 /// keyword it is under.
 ///
-/// A schema is read the same way at every level, so this walks into the schemas
-/// inside properties, patternProperties, prefixItems, items and applicators.
+/// Check one queued node and enqueue its supported subschemas, definitions and
+/// resolved reference targets. The shared node table prevents cyclic compilation.
 /// Only supported assertions and explicit annotations are accepted.
-/// Values inside const, enum, default and examples are data, not schemas.
+/// Values inside const, enum, default and examples stay data unless explicitly referenced.
 fn check_schema(
   schema : @pjson.Json,
   path : String,
   errors : Array[SchemaProblem],
   cache : Map[String, Result[Pattern, PatternProblem]],
+  ctx : SchemaCompileContext,
 ) -> Unit {
   match schema {
     Object(members~) =>
@@ -847,6 +933,24 @@ fn check_schema(
           "type" => check_type_argument(wanted, here, errors)
           "required" => check_name_list(wanted, here, errors)
           "const" => ()
+          "$ref" =>
+            match wanted {
+              Text(value=raw) =>
+                match resolve_schema_ref(ctx.root, raw) {
+                  Ok((pointer, target)) => {
+                    let id = enqueue_schema(ctx, target, pointer, pointer)
+                    ctx.references[pointer_child(ctx.pointer, "$ref")] = id
+                  }
+                  Err((kind, message)) =>
+                    errors.push({ path: here, kind, message, })
+                }
+              _ =>
+                errors.push({
+                  path: here,
+                  kind: InvalidSchema,
+                  message: "expected a reference string",
+                })
+            }
           "allOf" | "anyOf" | "oneOf" | "prefixItems" =>
             match wanted {
               Array(items~) => {
@@ -858,11 +962,11 @@ fn check_schema(
                   })
                 }
                 for index, subschema in items {
-                  check_schema(
+                  enqueue_schema_child(
+                    ctx,
                     subschema,
+                    [keyword, index.to_string()],
                     here + "[" + index.to_string() + "]",
-                    errors,
-                    cache,
                   )
                 }
               }
@@ -875,14 +979,19 @@ fn check_schema(
                 })
             }
           "not" | "additionalProperties" =>
-            check_schema(wanted, here, errors, cache)
+            enqueue_schema_child(ctx, wanted, [keyword], here)
           "patternProperties" =>
             match wanted {
               Object(members~) =>
                 for (text, subschema) in members {
                   let location = here + "[\"" + escape_json_string(text) + "\"]"
                   cache_schema_pattern(text, location, errors, cache)
-                  check_schema(subschema, location, errors, cache)
+                  enqueue_schema_child(
+                    ctx,
+                    subschema,
+                    [keyword, text],
+                    location,
+                  )
                 }
               _ =>
                 errors.push({
@@ -892,15 +1001,15 @@ fn check_schema(
                   kind_name(wanted),
                 })
             }
-          "properties" =>
+          "properties" | "$defs" =>
             match wanted {
               Object(members=subschemas) =>
                 for entry in subschemas {
-                  check_schema(
+                  enqueue_schema_child(
+                    ctx,
                     entry.1,
+                    [keyword, entry.0],
                     child_path(here, entry.0),
-                    errors,
-                    cache,
                   )
                 }
               _ =>
@@ -913,7 +1022,8 @@ fn check_schema(
             }
           "items" =>
             match wanted {
-              Object(_) | Bool(_) => check_schema(wanted, here, errors, cache)
+              Object(_) | Bool(_) =>
+                enqueue_schema_child(ctx, wanted, [keyword], here)
               _ =>
                 errors.push({
                   kind: InvalidSchema,

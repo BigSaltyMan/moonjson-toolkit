@@ -571,7 +571,8 @@ pub async fn run(
       passed = passed + 1
     } else {
       failures.push((outcome.source, outcome.err))
-      if code == exit_success {
+      if code == exit_success ||
+        (code == exit_input_error && outcome.code == exit_usage_error) {
         code = outcome.code
       }
       // Nothing after the first failure is printed: `--fail-fast` asks for the
@@ -792,7 +793,10 @@ async fn run_document(
   // in the input, which is what code 1 means here.
   match schema {
     Some(schema) => {
-      let violations = validate_compiled_schema(json, schema)
+      let violations = match validate_compiled_schema(json, schema) {
+        Ok(errors) => errors
+        Err(error) => return evaluation_failure(source, error)
+      }
       if violations.length() > 0 {
         return failure(
           error_prefix() +
@@ -991,9 +995,24 @@ fn run_jsonl(
         // schema is applied to the record rather than to the file, and a record
         // that does not match is reported with its line and skipped, the rest of
         // the file still being read.
-        let violations = match schema {
+        let verdict = match schema {
           Some(schema) => validate_compiled_schema(json, schema)
-          None => []
+          None => Ok([])
+        }
+        let violations = match verdict {
+          Ok(errors) => errors
+          Err(error) => {
+            let report = evaluation_failure(
+              source + " line " + line.to_string(),
+              error,
+            )
+            err.write_string(report.err)
+            code = exit_usage_error
+            if options.fail_fast {
+              break
+            }
+            continue
+          }
         }
         if violations.length() > 0 {
           err.write_string(
@@ -1049,4 +1068,22 @@ fn run_jsonl(
     }
   }
   { out: out.to_string(), err: err.to_string(), code, }
+}
+
+///|
+fn evaluation_failure(
+  source : String,
+  error : SchemaEvaluationError,
+) -> RunResult {
+  failure(
+    error_prefix() +
+    source +
+    " schema validation could not complete\n  " +
+    error.message +
+    " at instance " +
+    (if error.instance_path == "" { "(root)" } else { error.instance_path }) +
+    ", schema " +
+    (if error.schema_path == "" { "(root)" } else { error.schema_path }),
+    exit_usage_error,
+  )
 }

@@ -22,7 +22,7 @@ test "public validation refuses unsupported features with locations" {
       (
         "{\"anyOf\":[true,{\"unevaluatedProperties\":false}]}", "anyOf[1].unevaluatedProperties",
       ),
-      ("{\"$ref\":\"#/$defs/person\"}", "$ref"),
+      ("{\"$ref\":\"other.json#/$defs/person\"}", "$ref"),
       (
         "{\"properties\":{\"id\":{\"minimum\":0,\"unevaluatedProperties\":false}}}",
         "properties.id.unevaluatedProperties",
@@ -36,7 +36,14 @@ test "public validation refuses unsupported features with locations" {
     assert_eq(problems.length(), 1)
     assert_eq(problems[0].path, path)
     assert_eq(problems[0].kind, @moonjson-toolkit.UnsupportedFeature)
-    assert_eq(problems[0].message, "keyword is not supported")
+    assert_eq(
+      problems[0].message,
+      if path == "$ref" {
+        "external references are not supported"
+      } else {
+        "keyword is not supported"
+      },
+    )
     assert_true(
       @moonjson-toolkit.validate_schema(json("{}"), json(schema)) is Err(_),
     )
@@ -45,10 +52,7 @@ test "public validation refuses unsupported features with locations" {
 
 ///|
 test "schema mechanisms remain unsupported and booleans compile" {
-  for
-    keyword in [
-      "$defs", "$id", "$anchor", "$dynamicRef", "$vocabulary", "unknown",
-    ] {
+  for keyword in ["$id", "$anchor", "$dynamicRef", "$vocabulary", "unknown"] {
     let problems = rejected("{\"" + keyword + "\":null}")
     assert_eq(problems[0].path, keyword)
     assert_eq(problems[0].kind, @moonjson-toolkit.UnsupportedFeature)
@@ -123,18 +127,12 @@ test "public validation returns matches or violations for supported schemas" {
     Err(_) => abort("supported schema rejected")
   }
   assert_true(@moonjson-toolkit.validate_schema(json("2"), schema) is Ok([]))
-  assert_eq(
-    @moonjson-toolkit.validate_compiled_schema(json("2"), compiled).length(),
-    0,
-  )
+  assert_eq(checked_errors(json("2"), compiled).length(), 0)
   match @moonjson-toolkit.validate_schema(json("-1"), schema) {
     Ok(errors) => assert_eq(errors.length(), 1)
     Err(_) => abort("supported schema rejected")
   }
-  assert_eq(
-    @moonjson-toolkit.validate_compiled_schema(json("-1"), compiled).length(),
-    1,
-  )
+  assert_eq(checked_errors(json("-1"), compiled).length(), 1)
 }
 
 ///|
@@ -157,24 +155,15 @@ test "compilation snapshots arrays in nested schemas and enum values" {
   keywords.push(("unevaluatedProperties", json("false")))
   properties.clear()
   assert_eq(
-    @moonjson-toolkit.validate_compiled_schema(
-      json("{\"person\":{\"id\":1}}"),
-      compiled,
-    ).length(),
+    checked_errors(json("{\"person\":{\"id\":1}}"), compiled).length(),
     0,
   )
   assert_eq(
-    @moonjson-toolkit.validate_compiled_schema(
-      json("{\"person\":{\"id\":2}}"),
-      compiled,
-    ).length(),
+    checked_errors(json("{\"person\":{\"id\":2}}"), compiled).length(),
     1,
   )
   assert_eq(
-    @moonjson-toolkit.validate_compiled_schema(
-      json("{\"person\":{\"id\":3}}"),
-      compiled,
-    ).length(),
+    checked_errors(json("{\"person\":{\"id\":3}}"), compiled).length(),
     1,
   )
 }
@@ -219,7 +208,7 @@ test "public raw and compiled validators agree on exact numeric semantics" {
       Ok(violations) => violations
       Err(_) => abort("supported schema rejected")
     }
-    let reused = @moonjson-toolkit.validate_compiled_schema(document, compiled)
+    let reused = checked_errors(document, compiled)
     assert_eq(direct.length(), count)
     assert_eq(
       direct.map(@moonjson-toolkit.render_schema_error),
@@ -256,7 +245,9 @@ test "public length preflight reports category location and reason" {
     assert_eq(issues[0].kind, kind)
     assert_true(issues[0].message.contains(reason))
     match @moonjson-toolkit.validate_schema(json("{}"), schema) {
-      Err(problems) => assert_eq(problems, issues)
+      Err(@moonjson-toolkit.SchemaProblems(problems)) =>
+        assert_eq(problems, issues)
+      Err(_) => abort("unexpected evaluation failure")
       Ok(_) => abort("invalid or unsupported length was accepted")
     }
   }
@@ -312,7 +303,7 @@ test "public validators agree on boolean const combinations and extra properties
       Ok(violations) => violations
       Err(_) => abort("valid schema rejected")
     }
-    let reused = @moonjson-toolkit.validate_compiled_schema(value, compiled)
+    let reused = checked_errors(value, compiled)
     assert_eq(direct.length(), count)
     assert_eq(
       direct.map(@moonjson-toolkit.render_schema_error),
@@ -354,7 +345,9 @@ test "public compilation rejects invalid applicators and unsupported hidden bran
     assert_eq(issues[0].path, path)
     assert_eq(issues[0].kind, kind)
     match @moonjson-toolkit.validate_schema(json("null"), json(text)) {
-      Err(problems) => assert_eq(problems, issues)
+      Err(@moonjson-toolkit.SchemaProblems(problems)) =>
+        assert_eq(problems, issues)
+      Err(_) => abort("unexpected evaluation failure")
       Ok(_) => abort("schema preflight was bypassed")
     }
   }
@@ -377,14 +370,8 @@ test "compiled combinations const objects and extra schemas own snapshots" {
   branches.clear()
   branches.push(json("true"))
   branches.push(json("true"))
-  assert_eq(
-    @moonjson-toolkit.validate_compiled_schema(json("1"), combination).length(),
-    0,
-  )
-  assert_eq(
-    @moonjson-toolkit.validate_compiled_schema(json("3"), combination).length(),
-    1,
-  )
+  assert_eq(checked_errors(json("1"), combination).length(), 0)
+  assert_eq(checked_errors(json("3"), combination).length(), 1)
 
   let constant_members = [("id", json("9007199254740992"))]
   let constant = match
@@ -396,17 +383,11 @@ test "compiled combinations const objects and extra schemas own snapshots" {
   }
   constant_members[0] = ("id", json("9007199254740993"))
   assert_eq(
-    @moonjson-toolkit.validate_compiled_schema(
-      json("{\"id\":9007199254740992}"),
-      constant,
-    ).length(),
+    checked_errors(json("{\"id\":9007199254740992}"), constant).length(),
     0,
   )
   assert_eq(
-    @moonjson-toolkit.validate_compiled_schema(
-      json("{\"id\":9007199254740993}"),
-      constant,
-    ).length(),
+    checked_errors(json("{\"id\":9007199254740993}"), constant).length(),
     1,
   )
 
@@ -421,14 +402,8 @@ test "compiled combinations const objects and extra schemas own snapshots" {
     Err(_) => abort("valid schema rejected")
   }
   extra_members[0] = ("type", json("\"string\""))
-  assert_eq(
-    @moonjson-toolkit.validate_compiled_schema(json("{\"x\":1}"), extra).length(),
-    0,
-  )
-  let violations = @moonjson-toolkit.validate_compiled_schema(
-    json("{\"x\":\"bad\"}"),
-    extra,
-  )
+  assert_eq(checked_errors(json("{\"x\":1}"), extra).length(), 0)
+  let violations = checked_errors(json("{\"x\":\"bad\"}"), extra)
   assert_eq(violations.length(), 1)
   assert_eq(violations[0].path, "x")
 }
@@ -472,9 +447,7 @@ test "public numeric keyword validators agree before and after compilation" {
     assert_eq(direct.length(), count)
     assert_eq(
       direct.map(@moonjson-toolkit.render_schema_error),
-      @moonjson-toolkit.validate_compiled_schema(value, compiled).map(
-        @moonjson-toolkit.render_schema_error,
-      ),
+      checked_errors(value, compiled).map(@moonjson-toolkit.render_schema_error),
     )
   }
 }
@@ -499,7 +472,9 @@ test "public numeric preflight rejects invalid divisors even in hidden branches"
     assert_eq(issues[0].kind, @moonjson-toolkit.InvalidSchema)
     assert_eq(issues[0].path, path)
     match @moonjson-toolkit.validate_schema(json("{}"), json(schema_text)) {
-      Err(problems) => assert_eq(problems, issues)
+      Err(@moonjson-toolkit.SchemaProblems(problems)) =>
+        assert_eq(problems, issues)
+      Err(_) => abort("unexpected evaluation failure")
       Ok(_) => abort("invalid numeric schema was accepted")
     }
   }
@@ -527,23 +502,14 @@ test "compiled numeric assertions retain their private snapshot" {
   members[0] = ("exclusiveMinimum", json("1000"))
   members[1] = ("multipleOf", json("2"))
   members[2] = ("exclusiveMaximum", json("0"))
-  assert_eq(
-    @moonjson-toolkit.validate_compiled_schema(
-      json("{\"price\":12.34}"),
-      compiled,
-    ).length(),
-    0,
-  )
+  assert_eq(checked_errors(json("{\"price\":12.34}"), compiled).length(), 0)
   for
     (value, reason) in [
       ("12.345", "it is not a multiple of 0.01"),
       ("0", "it is not greater than the exclusive minimum 0"),
       ("100", "it is not less than the exclusive maximum 100"),
     ] {
-    let violations = @moonjson-toolkit.validate_compiled_schema(
-      json("{\"price\":" + value + "}"),
-      compiled,
-    )
+    let violations = checked_errors(json("{\"price\":" + value + "}"), compiled)
     assert_eq(violations.length(), 1)
     assert_eq(violations[0].path, "price")
     assert_eq(violations[0].message, reason)
@@ -599,9 +565,7 @@ test "public validators agree on array counts uniqueness and tuple suffixes" {
     assert_eq(direct.length(), count)
     assert_eq(
       direct.map(@moonjson-toolkit.render_schema_error),
-      @moonjson-toolkit.validate_compiled_schema(value, compiled).map(
-        @moonjson-toolkit.render_schema_error,
-      ),
+      checked_errors(value, compiled).map(@moonjson-toolkit.render_schema_error),
     )
     if count > 0 {
       assert_eq(direct[0].path, path)
@@ -637,7 +601,7 @@ test "public array preflight preserves categories and precise schema locations" 
         "prefixItems[0]",
       ),
       (
-        "{\"maxItems\":0,\"prefixItems\":[true,{\"$ref\":\"#/missing\"}]}",
+        "{\"maxItems\":0,\"prefixItems\":[true,{\"$ref\":\"other.json#/missing\"}]}",
         @moonjson-toolkit.UnsupportedFeature,
         "prefixItems[1].$ref",
       ),
@@ -658,7 +622,9 @@ test "public array preflight preserves categories and precise schema locations" 
     assert_eq(issues[0].kind, kind)
     assert_eq(issues[0].path, path)
     match @moonjson-toolkit.validate_schema(json("[]"), json(text)) {
-      Err(problems) => assert_eq(problems, issues)
+      Err(@moonjson-toolkit.SchemaProblems(problems)) =>
+        assert_eq(problems, issues)
+      Err(_) => abort("unexpected evaluation failure")
       Ok(_) => abort("array preflight was bypassed")
     }
   }
@@ -689,23 +655,14 @@ test "compiled tuple snapshots are isolated and unique validation never rewrites
   inner[0] = ("type", json("\"string\""))
   schemas.push(json("true"))
   schemas.clear()
-  assert_eq(
-    @moonjson-toolkit.validate_compiled_schema(
-      json("[{\"id\":1},\"a\"]"),
-      compiled,
-    ).length(),
-    0,
-  )
+  assert_eq(checked_errors(json("[{\"id\":1},\"a\"]"), compiled).length(), 0)
   for
     (text, path) in [
       ("[{\"id\":\"bad\"},\"a\"]", "[0].id"),
       ("[{\"id\":1},2]", "[1]"),
       ("[{\"id\":1},\"a\",true]", "[2]"),
     ] {
-    let violations = @moonjson-toolkit.validate_compiled_schema(
-      json(text),
-      compiled,
-    )
+    let violations = checked_errors(json(text), compiled)
     assert_eq(violations.length(), 1)
     assert_eq(violations[0].path, path)
   }
@@ -723,7 +680,7 @@ test "compiled tuple snapshots are isolated and unique validation never rewrites
     let direct = @moonjson-toolkit.validate_schema(value, schema)
     assert_true(direct is Ok(_))
     assert_eq(@moonjson-toolkit.format_compact(value), before)
-    let _ = @moonjson-toolkit.validate_compiled_schema(value, checked)
+    let _ = checked_errors(value, checked)
     assert_eq(@moonjson-toolkit.format_compact(value), before)
   }
 }
@@ -779,9 +736,7 @@ test "public object validation agrees with compiled regex validation" {
     assert_eq(direct.length(), count)
     assert_eq(
       direct.map(@moonjson-toolkit.render_schema_error),
-      @moonjson-toolkit.validate_compiled_schema(value, compiled).map(
-        @moonjson-toolkit.render_schema_error,
-      ),
+      checked_errors(value, compiled).map(@moonjson-toolkit.render_schema_error),
     )
     if count > 0 {
       assert_eq(direct[0].path, path)
@@ -832,7 +787,7 @@ test "public object preflight classifies patterns counts and nested schema failu
         "patternProperties[\"^x\"].type",
       ),
       (
-        "{\"patternProperties\":{\"^x\":{\"$ref\":\"#/missing\"}}}",
+        "{\"patternProperties\":{\"^x\":{\"$ref\":\"other.json#/missing\"}}}",
         @moonjson-toolkit.UnsupportedFeature,
         "patternProperties[\"^x\"].$ref",
       ),
@@ -847,7 +802,9 @@ test "public object preflight classifies patterns counts and nested schema failu
     assert_eq(issues[0].kind, kind)
     assert_eq(issues[0].path, path)
     match @moonjson-toolkit.validate_schema(json("{}"), json(schema_text)) {
-      Err(problems) => assert_eq(problems, issues)
+      Err(@moonjson-toolkit.SchemaProblems(problems)) =>
+        assert_eq(problems, issues)
+      Err(_) => abort("unexpected evaluation failure")
       Ok(_) => abort("object schema preflight was bypassed")
     }
   }
@@ -876,10 +833,7 @@ test "compiled pattern mappings own snapshots and matches never retain input sta
         ("{\"y\":1}", 1, "y"),
         ("{}", 0, ""),
       ] {
-      let violations = @moonjson-toolkit.validate_compiled_schema(
-        json(text),
-        compiled,
-      )
+      let violations = checked_errors(json(text), compiled)
       assert_eq(violations.length(), count)
       if count > 0 {
         assert_eq(violations[0].path, path)
@@ -892,17 +846,149 @@ test "compiled pattern mappings own snapshots and matches never retain input sta
     Err(_) => abort("valid schema rejected")
   }
   for _ in 0..<3 {
-    assert_eq(
-      @moonjson-toolkit.validate_compiled_schema(json("\"xx\""), regex).length(),
-      0,
+    assert_eq(checked_errors(json("\"xx\""), regex).length(), 0)
+    assert_eq(checked_errors(json("\"y\""), regex).length(), 1)
+    assert_eq(checked_errors(json("\"x\""), regex).length(), 0)
+  }
+}
+
+///|
+fn checked_errors(
+  value : @pjson.Json,
+  compiled : @moonjson-toolkit.CompiledSchema,
+) -> Array[@moonjson-toolkit.SchemaError] {
+  match @moonjson-toolkit.validate_compiled_schema(value, compiled) {
+    Ok(errors) => errors
+    Err(_) =>
+      abort("unexpected evaluation failure in a nonrecursive regression")
+  }
+}
+
+///|
+test "public reference validation distinguishes compile evaluation and data failures" {
+  let schema = json(
+    "{\"$defs\":{\"n\":{\"type\":\"integer\"}},\"$ref\":\"#/$defs/n\",\"minimum\":2}",
+  )
+  let compiled = match @moonjson-toolkit.compile_schema(schema) {
+    Ok(compiled) => compiled
+    Err(_) => abort("local reference refused")
+  }
+  for (input, count) in [("3", 0), ("1", 1), ("\"x\"", 1)] {
+    let direct = match @moonjson-toolkit.validate_schema(json(input), schema) {
+      Ok(violations) => violations.map(@moonjson-toolkit.render_schema_error)
+      Err(_) => abort("unexpected execution failure")
+    }
+    let reused = match
+      @moonjson-toolkit.validate_compiled_schema(json(input), compiled) {
+      Ok(violations) => violations.map(@moonjson-toolkit.render_schema_error)
+      Err(_) => abort("unexpected execution failure")
+    }
+    assert_eq(direct, reused)
+    assert_eq(direct.length(), count)
+  }
+  match
+    @moonjson-toolkit.validate_schema(
+      json("null"),
+      json("{\"$ref\":\"#/missing\"}"),
+    ) {
+    Err(@moonjson-toolkit.SchemaProblems(problems)) => {
+      assert_eq(problems[0].kind, @moonjson-toolkit.InvalidSchema)
+      assert_eq(problems[0].path, "$ref")
+    }
+    _ => abort("missing target did not fail compilation")
+  }
+  match
+    @moonjson-toolkit.validate_schema(json("null"), json("{\"$ref\":\"#\"}")) {
+    Err(@moonjson-toolkit.EvaluationFailed(error)) => {
+      assert_eq(error.kind, @moonjson-toolkit.ReferenceCycle)
+      assert_eq(error.instance_path, "")
+      assert_eq(error.schema_path, "/$ref")
+    }
+    _ => abort("cycle did not propagate through the raw interface")
+  }
+}
+
+///|
+test "compiled references definitions and explicitly referenced data are isolated snapshots" {
+  let target = [("type", json("\"integer\""))]
+  let defs = [("n", @pjson.Object(members=target))]
+  let ref_member = [("$ref", json("\"#/$defs/n\""))]
+  let keywords = [
+    ("$defs", @pjson.Object(members=defs)),
+    (
+      "properties",
+      @pjson.Object(members=[("x", @pjson.Object(members=ref_member))]),
+    ),
+  ]
+  let schema = @pjson.Object(members=keywords)
+  let compiled = match @moonjson-toolkit.compile_schema(schema) {
+    Ok(compiled) => compiled
+    Err(_) => abort("reference schema refused")
+  }
+  target[0] = ("type", json("\"string\""))
+  defs.clear()
+  ref_member[0] = ("$ref", json("\"#\""))
+  keywords.clear()
+  assert_true(
+    @moonjson-toolkit.validate_compiled_schema(json("{\"x\":1}"), compiled)
+    is Ok([]),
+  )
+  assert_true(
+    @moonjson-toolkit.validate_compiled_schema(
+      json("{\"x\":\"bad\"}"),
+      compiled,
     )
-    assert_eq(
-      @moonjson-toolkit.validate_compiled_schema(json("\"y\""), regex).length(),
-      1,
-    )
-    assert_eq(
-      @moonjson-toolkit.validate_compiled_schema(json("\"x\""), regex).length(),
-      0,
+    is Ok([_]),
+  )
+  let ordinary = [("type", json("\"number\""))]
+  let schema = @pjson.Object(members=[
+    ("default", @pjson.Object(members=ordinary)),
+    ("$ref", json("\"#/default\"")),
+  ])
+  let compiled = match @moonjson-toolkit.compile_schema(schema) {
+    Ok(compiled) => compiled
+    Err(_) => abort("explicitly referenced data refused")
+  }
+  ordinary[0] = ("type", json("\"string\""))
+  assert_true(
+    @moonjson-toolkit.validate_compiled_schema(json("1"), compiled) is Ok([]),
+  )
+}
+
+///|
+test "public compiled evaluation state resets after cycles and resource failures" {
+  let raw = "{\"type\":\"object\",\"properties\":{\"loop\":{\"$ref\":\"#/properties/loop\"},\"next\":{\"$ref\":\"#\"}}}"
+  let compiled = match @moonjson-toolkit.compile_schema(json(raw)) {
+    Ok(compiled) => compiled
+    Err(_) => abort("recursive schema refused")
+  }
+  assert_true(
+    @moonjson-toolkit.validate_compiled_schema(json("{\"loop\":1}"), compiled)
+    is Err({ kind: @moonjson-toolkit.ReferenceCycle, .. }),
+  )
+  let mut deep = json("{}")
+  for _ in 0..<70 {
+    deep = @pjson.Object(members=[("next", deep)])
+  }
+  assert_true(
+    @moonjson-toolkit.validate_compiled_schema(deep, compiled)
+    is Err({ kind: @moonjson-toolkit.ResourceLimit, .. }),
+  )
+  assert_true(
+    @moonjson-toolkit.validate_schema(deep, json(raw))
+    is Err(
+      @moonjson-toolkit.EvaluationFailed(
+        { kind: @moonjson-toolkit.ResourceLimit, .. }
+      )
+    ),
+  )
+  for _ in 0..<3 {
+    assert_true(
+      @moonjson-toolkit.validate_compiled_schema(
+        json("{\"next\":{}}"),
+        compiled,
+      )
+      is Ok([]),
     )
   }
 }

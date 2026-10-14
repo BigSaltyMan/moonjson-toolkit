@@ -360,14 +360,16 @@ test "unsupported keywords refuse the entire schema" {
     #|  "description": 3,
     #|  "type": "object",
     #|  "additionalProperties": false,
-    #|  "$ref": "#/$defs/person",
+    #|  "$ref": "other.json#/$defs/person",
     #|  "anyOf": [3, "nonsense"],
     #|  "properties": {
     #|    "id": { "type": "integer", "unevaluatedProperties": false, "format": 7 }
     #|  }
     #|}
   assert_true(compile_schema(parse_ok(schema)) is Err(_))
-  assert_true(problems(schema).contains("$ref: keyword is not supported"))
+  assert_true(
+    problems(schema).contains("$ref: external references are not supported"),
+  )
   assert_true(
     problems(schema).contains(
       "properties.id.unevaluatedProperties: keyword is not supported",
@@ -805,7 +807,7 @@ test "all branches are compiled even when their outcome is already decided" {
       (
         "{\"anyOf\":[true,{\"unevaluatedProperties\":false}]}", "anyOf[1].unevaluatedProperties",
       ),
-      ("{\"allOf\":[false,{\"$ref\":\"#/x\"}]}", "allOf[1].$ref"),
+      ("{\"allOf\":[false,{\"$ref\":\"other.json#/x\"}]}", "allOf[1].$ref"),
       (
         "{\"oneOf\":[true,true,{\"unevaluatedProperties\":false}]}", "oneOf[2].unevaluatedProperties",
       ),
@@ -816,7 +818,8 @@ test "all branches are compiled even when their outcome is already decided" {
         "{\"additionalProperties\":{\"unevaluatedProperties\":false}}", "additionalProperties.unevaluatedProperties",
       ),
       (
-        "{\"properties\":{\"missing\":{\"not\":{\"$ref\":\"#/x\"}}}}", "properties.missing.not.$ref",
+        "{\"properties\":{\"missing\":{\"not\":{\"$ref\":\"other.json#/x\"}}}}",
+        "properties.missing.not.$ref",
       ),
     ] {
     let issues = schema_problems(parse_ok(schema))
@@ -1243,7 +1246,7 @@ test "all array subschemas are prechecked and ordinary const enum fields stay da
   for
     (schema, path, kind) in [
       (
-        "{\"maxItems\":0,\"prefixItems\":[true,{\"$ref\":\"#/missing\"}]}",
+        "{\"maxItems\":0,\"prefixItems\":[true,{\"$ref\":\"other.json#/missing\"}]}",
         "prefixItems[1].$ref",
         UnsupportedFeature,
       ),
@@ -1253,7 +1256,7 @@ test "all array subschemas are prechecked and ordinary const enum fields stay da
         InvalidSchema,
       ),
       (
-        "{\"prefixItems\":[true],\"items\":{\"$ref\":\"#/missing\"}}",
+        "{\"prefixItems\":[true],\"items\":{\"$ref\":\"other.json#/missing\"}}",
         "items.$ref",
         UnsupportedFeature,
       ),
@@ -1467,7 +1470,7 @@ test "property count and regex preflight retain categories and escaped locations
         UnsupportedFeature,
       ),
       (
-        "{\"patternProperties\":{\"^x\":{\"$ref\":\"#/missing\"}}}",
+        "{\"patternProperties\":{\"^x\":{\"$ref\":\"other.json#/missing\"}}}",
         "patternProperties[\"^x\"].$ref",
         UnsupportedFeature,
       ),
@@ -1543,11 +1546,11 @@ test "regex cache collects only real schema positions and reuses identical patte
     ).length(),
     0,
   )
-  let patterns : Map[String, Pattern] = Map([("[", parsed)])
-  let compiled : CompiledSchema = {
-    schema: parse_ok("{\"pattern\":\"[\"}"),
-    patterns,
+  let compiled = match
+    compile_schema_snapshot(parse_ok("{\"pattern\":\"[\"}"), seeded) {
+    Ok(compiled) => compiled
+    Err(_) => abort("seeded cache was ignored")
   }
-  assert_eq(validate_compiled_schema(parse_ok("\"x\""), compiled).length(), 0)
-  assert_eq(validate_compiled_schema(parse_ok("\"y\""), compiled).length(), 1)
+  assert_true(validate_compiled_schema(parse_ok("\"x\""), compiled) is Ok([]))
+  assert_true(validate_compiled_schema(parse_ok("\"y\""), compiled) is Ok([_]))
 }

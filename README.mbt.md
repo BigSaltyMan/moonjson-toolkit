@@ -163,7 +163,8 @@ may be attached, as in -i4, -i=4, --indent=4 or --indent 4.
 
 --file may be repeated. Each file is handled in turn, each under a
 '==> path <==' heading once more than one is given, and the run exits with
-the first non-zero code among them.
+the first non-zero code among them, with schema execution errors (2) taking
+priority over input errors (1).
 
 --fail-fast stops the run at the first input that fails, so a batch of
 files ends at the one that went wrong rather than at the end of the list.
@@ -215,7 +216,14 @@ than a document. The supported JSON Schema Draft 2020-12 subset is: type,
 required, properties, patternProperties, minProperties, maxProperties,
 prefixItems, items, minItems, maxItems, uniqueItems,
 enum, const, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf,
-minLength, maxLength, pattern, allOf, anyOf, oneOf, not and additionalProperties.
+minLength, maxLength, pattern, allOf, anyOf, oneOf, not, additionalProperties, $defs and local JSON Pointer $ref.
+$defs contains reusable schemas; $ref supports # and #/ JSON Pointers.
+References resolve at compilation and siblings still apply. External references,
+named anchors, $id and dynamic references remain unsupported.
+Finite recursion through child instances is supported; same-instance cycles
+and exhausted budgets are execution errors (exit 2), even inside not/anyOf.
+Schema snapshot limits: depth 128, 100000 JSON nodes (including annotations).
+Evaluation limits: depth 128, 100000 schema-node visits per input record.
 prefixItems checks existing prefix positions; items checks remaining elements
 after the prefixItems declared in the same schema object.
 minItems/maxItems accept nonnegative integers up to 1000000000.
@@ -354,7 +362,8 @@ rather than written for whichever one came first.
 
 A run over several files does not stop at one that fails: the failure is
 reported as it happens, the files after it are still read, and the run ends with
-the first non-zero code among them. A batch is read a few files at a time and
+the first non-zero code among them, with schema execution errors (2) taking
+priority over input errors (1). A batch is read a few files at a time and
 answered in the order they were named, so the documents keep the order of the
 command line whatever order they were ready in. `--fail-fast` asks for the
 opposite reading and ends the run at the first input that fails: what is already
@@ -459,7 +468,7 @@ has stopped being the document the schema was written about.
 | ---- | ------- |
 | `0`  | the input was formatted, or validated successfully |
 | `1`  | the input could not be read, is not valid JSON, or does not match the schema |
-| `2`  | the command line or schema was invalid, or the schema uses unsupported keywords, versions or mechanisms |
+| `2`  | the command line or schema cannot be processed, or validation hits a reference cycle or resource limit |
 | `3`  | the input was valid, but the AI review could not be produced |
 
 A run that fails writes nothing to standard output for the document that failed.
@@ -860,7 +869,7 @@ The supported keywords are `type`, `required`, `properties`, `patternProperties`
 `items`, `minItems`, `maxItems`, `uniqueItems`, `enum`,
 `const`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`,
 `multipleOf`, `minLength`, `maxLength`, `pattern`, `allOf`, `anyOf`, `oneOf`,
-`not` and `additionalProperties`. Boolean schemas are also
+`not`, `additionalProperties`, `$defs` and same-document JSON Pointer `$ref`. Boolean schemas are also
 supported: `true` accepts every JSON value, and `false` rejects every value.
 `const` accepts only the specified value using the exact equality of `enum`;
 its contents are ordinary data rather than subschemas.
@@ -1063,6 +1072,61 @@ alternative branches. Schema locations escape pattern keys, for example
 as `data.x1`. Object members inside `const`, `enum`, `default` and `examples`
 remain ordinary data and are not collected as patterns.
 
+`$defs` declares reusable schemas without directly constraining the instance.
+Every definition is prechecked, even when unused. `$ref` supports the current
+document root `#` and JSON Pointer fragments such as `#/$defs/count` or
+`#/allOf/0`. The fragment is percent-decoded once as UTF-8, then pointer tokens
+use `~1` for `/` and `~0` for `~`. Plus signs remain plus signs; empty names and
+Unicode names are supported. Malformed escapes, missing or scalar targets, and
+invalid array indexes are `InvalidSchema` problems, reported before input is read.
+External URLs, files and named anchors are `UnsupportedFeature` problems.
+
+```json
+{
+  "$defs":{"count":{"type":"integer","minimum":0}},
+  "properties":{"left":{"$ref":"#/$defs/count"},"right":{"$ref":"#/$defs/count"}}
+}
+```
+
+Both fields reuse the definition: `{"left":1,"right":2}` matches;
+`{"left":-1}` violates the minimum at `left`. Keywords next to `$ref` still
+apply. Referenced property declarations and patterns do not become declarations
+in the calling object's `additionalProperties` scope.
+
+Finite recursion through child instances is supported:
+
+```json
+{
+  "$defs":{"node":{"type":"object","properties":{
+    "value":{"type":"integer"},"next":{"$ref":"#/$defs/node"}
+  }}},
+  "$ref":"#/$defs/node"
+}
+```
+
+`{"value":1,"next":{"value":2}}` matches; a string at `next.value` fails
+normally. `{"$ref":"#"}` revisits the same schema node at the same instance
+and returns `ReferenceCycle`, rather than a match or a data violation. Execution
+errors propagate through every branch, including `not` and successful `anyOf`.
+Repeating a target in sibling branches is allowed after the previous call ends.
+
+Default snapshot limits are **128 levels of JSON nesting** (root at depth 0)
+and **100000 JSON nodes**, including ordinary annotation data. Compilation
+scans iteratively before copying and checks each distinct schema node once.
+Evaluation permits **128 active schema calls** and **100000 schema-node visits**
+per input record. References and applicators share this budget. Exceeding it
+returns `ResourceLimit`; a fresh record starts with fresh state while reusing
+the compiled node graph, resolved references and regex cache.
+
+Execution errors contain `kind`, `message`, `instance_path` and `schema_path`.
+The two machine-readable paths are escaped JSON Pointers; `""` means the root.
+Ordinary violations retain their existing display paths. CLI execution errors
+exit `2` and say `schema validation could not complete`; the failed input gets
+no success output. JSONL includes line numbers and honors `--fail-fast`. Batch
+and JSONL preserve exit `2` over later ordinary failures (`1`). Compilation
+errors also exit `2`; completed validation with violations or invalid input
+exits `1`, and all matching inputs exit `0`.
+
 The allowed annotations are:
 
 | Annotation | Accepted value and behavior |
@@ -1074,10 +1138,11 @@ The allowed annotations are:
 
 `$schema`, when present, must be the string
 `https://json-schema.org/draft/2020-12/schema`. Without it, the same project
-subset applies. Other versions are rejected. Mechanisms such as `$ref`,
-`$defs`, `$id`, `$anchor`, `$dynamicRef` and `$vocabulary` are not supported yet.
+subset applies. Other versions are rejected. External references, named anchors,
+`$id`, `$anchor`, `$dynamicRef` and `$vocabulary` are not supported yet.
 Object members inside `const`, `enum`, `default` and `examples`
 are data, and property names under `properties` are names rather than keywords.
+An explicit `$ref` to an object or boolean in ordinary data compiles that target as a schema.
 `unevaluatedProperties` also remains unsupported and is explicitly rejected
 by schema compilation.
 
@@ -1117,21 +1182,24 @@ not a whole number, a `required` that is not a list of names — is code `2` wit
 the schema named; a document that fails a schema this tool can read is code `1`
 with the document named.
 
-The library API has changed: `validate_schema(json, schema)` now returns
-`Result[Array[SchemaError], Array[SchemaProblem]]`, rather than a bare error
-array. Callers no longer need to call `schema_problems` first. Each schema
-problem has `path`, `message` and `kind` (`InvalidSchema`, `UnsupportedFeature`
-or `UnsupportedVersion`). `schema_problems` also returns `Array[SchemaProblem]`;
-use `render_schema_problem` for its diagnostics.
+The library API now distinguishes compilation problems from execution failures:
+`validate_schema(json, schema)` returns
+`Result[Array[SchemaError], SchemaValidationFailure]`. The failure variants are
+`SchemaProblems(Array[SchemaProblem])` and `EvaluationFailed(SchemaEvaluationError)`.
+`SchemaProblem` retains `path`, `message` and `kind` (`InvalidSchema`,
+`UnsupportedFeature` or `UnsupportedVersion`). `compile_schema` keeps its
+`Result[CompiledSchema, Array[SchemaProblem]]` signature; `schema_problems`
+shares the same complete precheck and returns `Array[SchemaProblem]`.
 
 With this module imported as `@toolkit`, and parsed `document` and `schema`:
 
 ```moonbit nocheck
 match @toolkit.validate_schema(document, schema) {
-  Err(problems) =>
+  Err(@toolkit.SchemaProblems(problems)) =>
     for problem in problems {
       println(@toolkit.render_schema_problem(problem))
     }
+  Err(@toolkit.EvaluationFailed(error)) => println(error.message)
   Ok([]) => println("matches the schema")
   Ok(violations) =>
     for violation in violations {
@@ -1142,12 +1210,14 @@ match @toolkit.validate_schema(document, schema) {
 
 For repeated validation, call `compile_schema(schema)` once and pass the
 successful `CompiledSchema` to `validate_compiled_schema(document, compiled)`.
-Its result is an array of data violations; an empty array means a match.
+It now returns `Result[Array[SchemaError], SchemaEvaluationError]`: only
+`Ok([])` means a match, `Ok(violations)` means nonconformance, and `Err(error)`
+means validation could not complete. Callers must handle all three outcomes.
 `CompiledSchema` has private storage and owns a snapshot of the schema, so
 callers cannot construct it or change it through the original JSON arrays.
 The CLI compiles once per run and shares that result across files and JSONL
 records: supported schema plus matching data is exit `0`, supported schema
-plus violating data is exit `1`, and schema compilation failure is exit `2`.
+plus violating data is exit `1`, and compilation or evaluation failure is exit `2`.
 
 `--schema` describes the input rather than what the run makes of it, so it is
 applied as the document was read, before `--flatten`, `--select` and the
@@ -1722,7 +1792,7 @@ so `moon test` is the same command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 387 tests
+moon test  --target native   # 405 tests
 moon fmt                     # format
 
 cd frontend

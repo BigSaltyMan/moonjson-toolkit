@@ -142,7 +142,8 @@ may be attached, as in -i4, -i=4, --indent=4 or --indent 4.
 
 --file may be repeated. Each file is handled in turn, each under a
 '==> path <==' heading once more than one is given, and the run exits with
-the first non-zero code among them.
+the first non-zero code among them, with schema execution errors (2) taking
+priority over input errors (1).
 
 --fail-fast stops the run at the first input that fails, so a batch of
 files ends at the one that went wrong rather than at the end of the list.
@@ -194,7 +195,14 @@ than a document. The supported JSON Schema Draft 2020-12 subset is: type,
 required, properties, patternProperties, minProperties, maxProperties,
 prefixItems, items, minItems, maxItems, uniqueItems,
 enum, const, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf,
-minLength, maxLength, pattern, allOf, anyOf, oneOf, not and additionalProperties.
+minLength, maxLength, pattern, allOf, anyOf, oneOf, not, additionalProperties, $defs and local JSON Pointer $ref.
+$defs contains reusable schemas; $ref supports # and #/ JSON Pointers.
+References resolve at compilation and siblings still apply. External references,
+named anchors, $id and dynamic references remain unsupported.
+Finite recursion through child instances is supported; same-instance cycles
+and exhausted budgets are execution errors (exit 2), even inside not/anyOf.
+Schema snapshot limits: depth 128, 100000 JSON nodes (including annotations).
+Evaluation limits: depth 128, 100000 schema-node visits per input record.
 prefixItems checks existing prefix positions; items checks remaining elements
 after the prefixItems declared in the same schema object.
 minItems/maxItems accept nonnegative integers up to 1000000000.
@@ -326,7 +334,7 @@ Exit codes:
 文件时会直接拒绝，而不是只给最先读到的那份写文件。
 
 一次处理多个文件的运行不会停在出错的那一个上：错误在发生时报出来，后面的文件照读，
-整个运行以它们当中第一个非零退出码结束。一批文件是几个一起读的，回答则一律按命令行上
+整个运行以第一个非零退出码结束，但 Schema 执行错误 `2` 优先于输入错误 `1`。一批文件是几个一起读的，回答则一律按命令行上
 的先后给出，所以无论它们谁先准备好，文档的顺序都是命令行的顺序。`--fail-fast` 要的是
 相反的一种读法，遇到第一个失败输入就收尾：已经拿到手的照常打印，它之后的输入则被放弃，
 而不是等下去。`--continue-on-error` 保留默认读法，并在末尾补一份点名清单，列出每个失败
@@ -412,12 +420,12 @@ conflicting keys: "a" and "a.b"
 | ---- | ------- |
 | `0`  | 输入已格式化，或校验通过 |
 | `1`  | 输入读不出来、不是合法 JSON，或者不符合 schema |
-| `2`  | 命令行或 schema 参数有误，或者 schema 含未支持的关键字、版本或机制 |
+| `2`  | 命令行或 Schema 无法处理，或校验因引用循环、预算耗尽而无法完成 |
 | `3`  | 输入是合法的，但 AI 评审没能产出 |
 
 运行失败时，对于出错的那份文档，标准输出上什么都不会写。单份文档所有可能失败的步骤都
 发生在它第一个字节被打印之前，所以失败永远不会留下半份文档给正在读输出的下游。多个文件
-时这条保证逐文件成立：成功的照常打印，失败的在标准错误上，退出码取第一个非 `0` 的。
+时这条保证逐文件成立：成功的照常打印，失败的在标准错误上，退出码取第一个非 `0` 的，Schema 执行错误 `2` 优先于输入错误 `1`。
 `--jsonl` 下则逐记录成立，因为记录才是「要么解析得出、要么解析不出」的单位；只要出现过
 任何一条坏记录，这一轮就以 `1` 退出，不管后面还有多少条好的。
 
@@ -785,8 +793,7 @@ printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
 `maxProperties`、`prefixItems`、`items`、`minItems`、`maxItems`、
 `uniqueItems`、`enum`、`const`、`minimum`、
 `maximum`、`exclusiveMinimum`、`exclusiveMaximum`、`multipleOf`、`minLength`、
-`maxLength`、`pattern`、`allOf`、`anyOf`、`oneOf`、`not` 和
-`additionalProperties`。也支持布尔 Schema：`true` 接受所有 JSON 值，`false` 拒绝所有值。
+`maxLength`、`pattern`、`allOf`、`anyOf`、`oneOf`、`not`、`additionalProperties`、`$defs` 和同文档 JSON Pointer `$ref`。也支持布尔 Schema：`true` 接受所有 JSON 值，`false` 拒绝所有值。
 `const` 只接受指定的常量，复用 `enum` 的精确相等逻辑；其内容作为普通数据处理。
 
 | 关键字 | 通过条件 |
@@ -960,6 +967,51 @@ BOM 和 Unicode 空格分隔符，`\S` 使用其补集；U+200B 不是空白。
 `patternProperties["^x"].type`；字段值违规使用实例位置，如 `data.x1`。
 `const`、`enum`、`default`、`examples` 中的同名字段仍作为普通数据，不收集进正则缓存。
 
+`$defs` 用于声明可复用的 Schema，本身不限制实例；未使用的定义也完整预检查。
+`$ref` 支持当前文档根 `#` 和 JSON Pointer 片段，如 `#/$defs/count`、`#/allOf/0`。
+片段先按 UTF-8 百分号解码一次，再处理 token 中的 `~1`（斜杠）和 `~0`（波浪号）。
+加号保持加号，支持空键和 Unicode 名称。非法转义、缺失或标量目标、非法数组索引属于
+`InvalidSchema`，在读取输入前报错；外部 URL、跨文件引用及命名锚点仍为 `UnsupportedFeature`。
+
+```json
+{
+  "$defs":{"count":{"type":"integer","minimum":0}},
+  "properties":{"left":{"$ref":"#/$defs/count"},"right":{"$ref":"#/$defs/count"}}
+}
+```
+
+`{"left":1,"right":2}` 通过，`{"left":-1}` 在实例位置 `left` 违反下界。
+`$ref` 的同级关键字继续执行。引用目标中的属性声明和模式不会合并到调用方
+`additionalProperties` 的同级作用域。
+
+允许沿子实例前进的有限递归：
+
+```json
+{
+  "$defs":{"node":{"type":"object","properties":{
+    "value":{"type":"integer"},"next":{"$ref":"#/$defs/node"}
+  }}},
+  "$ref":"#/$defs/node"
+}
+```
+
+`{"value":1,"next":{"value":2}}` 通过；`next.value` 为字符串时产生普通违规。
+`{"$ref":"#"}` 在同一实例位置重新进入活动中的 Schema 节点，返回 `ReferenceCycle`。
+执行错误从所有分支向上传递，即使在 `not` 中或 `anyOf` 已有成功分支，也不能变成通过。
+兄弟分支在前一次调用结束后复用同一目标不会被误报循环。
+
+默认 Schema 快照上限为 **128 层 JSON 嵌套**（根深度为 0）和 **100000 个 JSON 节点**，
+包括注解等普通数据。先迭代检查资源限制，再复制快照；每个 Schema 节点只编译一次。
+每条输入的校验上限为 **128 个同时活动的 Schema 调用**及 **100000 次 Schema 节点访问**。
+所有分支和引用共享预算，耗尽时返回 `ResourceLimit`。下一条记录重新建立状态，复用只读的
+编译节点、已解析引用和正则缓存。
+
+执行错误包含 `kind`、`message`、`instance_path` 和 `schema_path`；两个机器可读位置使用
+正确转义的 JSON Pointer，空字符串表示根。普通违规保留原有展示路径。CLI 报告
+`schema validation could not complete`，退出 `2`，该输入没有成功输出。
+JSONL 诊断带行号，遵守 `--fail-fast`；批量和 JSONL 汇总时 `2` 优先于 `1`。
+Schema 编译失败也退出 `2`；输入错误或完成校验后不符合约束退出 `1`；全部符合退出 `0`。
+
 允许的注解为：
 
 | 注解 | 参数要求与行为 |
@@ -970,9 +1022,10 @@ BOM 和 Unicode 空格分隔符，`\S` 使用其补集；U+200B 不是空白。
 | `format` | 字符串，仅作为注解，不校验邮箱等格式 |
 
 `$schema` 若存在，只接受字符串 `https://json-schema.org/draft/2020-12/schema`；缺省时
-使用项目的同一子集，其它版本会被拒绝。`$ref`、`$defs`、`$id`、`$anchor`、`$dynamicRef`、
+使用项目的同一子集，其它版本会被拒绝。外部引用、命名锚点、`$id`、`$anchor`、`$dynamicRef`、
 `$vocabulary` 等机制暂不支持。`const`、`enum`、`default`、`examples`
 中的对象是数据；`properties` 下的字段名也不会被当作关键字检查。
+只有显式 `$ref` 指向普通数据中的对象或布尔值时，该目标才加入 Schema 编译流程。
 `unevaluatedProperties` 等关键字仍未实现，出现时由预检查明确拒绝。
 
 含未支持约束的 schema 会在读取业务输入前失败，原因写入标准错误，标准输出为空，退出码为 `2`：
@@ -1007,20 +1060,22 @@ printf '{"id":1}' | moon run cmd/main -- -v --schema broken.schema.json
 没通过「本工具读得懂的 schema」的文档是码 `1` 并点名文档。
 
 库接口有破坏性变化：`validate_schema(json, schema)` 现在返回
-`Result[Array[SchemaError], Array[SchemaProblem]]`，不再直接返回错误数组，也不需要调用者
-先调用 `schema_problems`。`SchemaProblem` 包含 `path`、`message` 和 `kind`，分别定位问题、
-说明原因、区分 `InvalidSchema`（参数错误）、`UnsupportedFeature`（未支持功能）和
-`UnsupportedVersion`（未支持版本）。`schema_problems` 也改为返回 `Array[SchemaProblem]`，
-用 `render_schema_problem` 格式化诊断。
+`Result[Array[SchemaError], SchemaValidationFailure]`。失败类型区分
+`SchemaProblems(Array[SchemaProblem])` 和 `EvaluationFailed(SchemaEvaluationError)`。
+`SchemaProblem` 保留 `path`、`message` 和 `kind`，区分 `InvalidSchema`、
+`UnsupportedFeature` 和 `UnsupportedVersion`。`compile_schema` 保持
+`Result[CompiledSchema, Array[SchemaProblem]]`；`schema_problems` 与编译共用完整预检查，
+仍返回 `Array[SchemaProblem]`，用 `render_schema_problem` 格式化诊断。
 
 将模块导入为 `@toolkit`，并解析得到 `document` 和 `schema` 后：
 
 ```moonbit
 match @toolkit.validate_schema(document, schema) {
-  Err(problems) =>
+  Err(@toolkit.SchemaProblems(problems)) =>
     for problem in problems {
       println(@toolkit.render_schema_problem(problem))
     }
+  Err(@toolkit.EvaluationFailed(error)) => println(error.message)
   Ok([]) => println("matches the schema")
   Ok(violations) =>
     for violation in violations {
@@ -1030,10 +1085,12 @@ match @toolkit.validate_schema(document, schema) {
 ```
 
 重复校验时，先调用一次 `compile_schema(schema)`，再将成功得到的 `CompiledSchema` 传给
-`validate_compiled_schema(document, compiled)`。后者返回数据违规列表，空列表才表示符合约束。
+`validate_compiled_schema(document, compiled)`。后者现在返回
+`Result[Array[SchemaError], SchemaEvaluationError]`：只有 `Ok([])` 表示符合，
+`Ok(非空违规列表)` 表示不符合，`Err(error)` 表示校验未能完成，调用方必须分别处理。
 `CompiledSchema` 的存储私有，并保存 schema 的独立副本，外部不能自行构造，也不能通过原始
 JSON 数组修改它。CLI 每轮只编译一次，供单文件、批量文件和 JSONL 共用：合法 schema 配合
-合法数据返回 `0`，合法 schema 配合违规数据返回 `1`，schema 编译失败返回 `2`。
+合法数据返回 `0`，合法 schema 配合违规数据返回 `1`，Schema 编译失败或执行错误返回 `2`。
 
 `--schema` 描述的是输入，而不是这一轮对输入做了什么，所以它作用于文档刚被读进来的样子，
 早于 `--flatten`、`--select` 和各种修剪发挥作用：schema 是为你手上这份文档写的，而被压平
@@ -1556,7 +1613,7 @@ AI 响应处理都不需要联网，所以在任何机器上 `moon test` 都是�
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 387 tests
+moon test  --target native   # 405 tests
 moon fmt                     # format
 
 cd frontend

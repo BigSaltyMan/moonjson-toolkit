@@ -1099,8 +1099,8 @@ async fn run_against_schema(
 async test "unsupported schema features exit 2 without a success verdict" {
   for
     (name, schema, path) in [
-      ("reference", "{\"$ref\":\"#/person\"}", "$ref"),
-      ("mixed", "{\"type\":\"object\",\"$ref\":\"#/person\"}", "$ref"),
+      ("reference", "{\"$ref\":\"other.json#/person\"}", "$ref"),
+      ("mixed", "{\"type\":\"object\",\"$ref\":\"other.json#/person\"}", "$ref"),
       (
         "nested", "{\"properties\":{\"id\":{\"minimum\":0,\"unevaluatedProperties\":false}}}",
         "properties.id.unevaluatedProperties",
@@ -1116,7 +1116,18 @@ async test "unsupported schema features exit 2 without a success verdict" {
     assert_eq(result.code, 2)
     assert_eq(result.out, "")
     assert_true(result.err.contains("contains unsupported features"))
-    assert_true(result.err.contains("  " + path + ": keyword is not supported"))
+    assert_true(
+      result.err.contains(
+        "  " +
+        path +
+        ": " +
+        (if path == "$ref" {
+          "external references are not supported"
+        } else {
+          "keyword is not supported"
+        }),
+      ),
+    )
     assert_false(result.err.contains("matches the schema"))
   }
 }
@@ -1136,7 +1147,7 @@ async test "schema compilation precedes missing input for single batch and JSONL
     discard(scratch.input)
     @fs.write_file(
       scratch.schema,
-      "{\"anyOf\":[true,{\"$ref\":\"#/missing\"}]}",
+      "{\"anyOf\":[true,{\"$ref\":\"other.json#/missing\"}]}",
     )
     let result = run(
       ["-v", "--no-color", "--schema", scratch.schema, "-f", scratch.input] +
@@ -1146,7 +1157,11 @@ async test "schema compilation precedes missing input for single batch and JSONL
     discard(scratch.schema)
     assert_eq(result.code, 2)
     assert_eq(result.out, "")
-    assert_true(result.err.contains("anyOf[1].$ref: keyword is not supported"))
+    assert_true(
+      result.err.contains(
+        "anyOf[1].$ref: external references are not supported",
+      ),
+    )
     assert_false(result.err.contains("cannot read " + scratch.input))
     assert_false(result.err.contains("matches the schema"))
   }
@@ -1165,14 +1180,16 @@ async test "JSONL and batch reject unsupported schemas even with valid inputs" {
     let result = run_against_schema(
       scratch,
       text,
-      "{\"type\":\"object\",\"$ref\":\"#/$defs/person\"}",
+      "{\"type\":\"object\",\"$ref\":\"other.json#/$defs/person\"}",
       ["--no-color"] + extra + files,
       StubAnalyzer::new(Ok("unused")),
     )
     discard(scratch.stats)
     assert_eq(result.code, 2)
     assert_eq(result.out, "")
-    assert_true(result.err.contains("$ref: keyword is not supported"))
+    assert_true(
+      result.err.contains("$ref: external references are not supported"),
+    )
     assert_false(result.err.contains("matches the schema"))
   }
 }
@@ -1720,7 +1737,7 @@ async test "CLI refuses invalid combinations and unsupported hidden constraints"
       ("{\"allOf\":[]}", "allOf"),
       ("{\"anyOf\":[]}", "anyOf"),
       ("{\"oneOf\":[null]}", "oneOf[0]"),
-      ("{\"anyOf\":[true,{\"$ref\":\"#/missing\"}]}", "anyOf[1].$ref"),
+      ("{\"anyOf\":[true,{\"$ref\":\"other.json#/missing\"}]}", "anyOf[1].$ref"),
       (
         "{\"not\":{\"unevaluatedProperties\":false}}", "not.unevaluatedProperties",
       ),
@@ -1934,7 +1951,7 @@ async test "CLI array schema problems have exit 2 and no business verdict" {
       ("{\"uniqueItems\":1}", "uniqueItems"),
       ("{\"prefixItems\":[]}", "prefixItems"),
       (
-        "{\"prefixItems\":[true,{\"$ref\":\"#/missing\"}]}", "prefixItems[1].$ref",
+        "{\"prefixItems\":[true,{\"$ref\":\"other.json#/missing\"}]}", "prefixItems[1].$ref",
       ),
     ] {
     let result = run_against_schema(
@@ -1957,7 +1974,7 @@ async test "unused prefix schema is rejected before a missing input is read" {
   discard(scratch.input)
   @fs.write_file(
     scratch.schema,
-    "{\"prefixItems\":[true,{\"$ref\":\"#/missing\"}]}",
+    "{\"prefixItems\":[true,{\"$ref\":\"other.json#/missing\"}]}",
   )
   let result = run(
     ["-v", "--no-color", "--schema", scratch.schema, "-f", scratch.input],
@@ -1967,7 +1984,9 @@ async test "unused prefix schema is rejected before a missing input is read" {
   assert_eq(result.code, 2)
   assert_eq(result.out, "")
   assert_true(
-    result.err.contains("prefixItems[1].$ref: keyword is not supported"),
+    result.err.contains(
+      "prefixItems[1].$ref: external references are not supported",
+    ),
   )
   assert_false(result.err.contains("cannot read " + scratch.input))
 }
@@ -2051,7 +2070,7 @@ async test "CLI object schema problems retain schema locations and exit 2" {
         "{\"patternProperties\":{\"^x\":{\"type\":123}}}", "patternProperties[\"^x\"].type",
       ),
       (
-        "{\"patternProperties\":{\"^x\":{\"$ref\":\"#/missing\"}}}", "patternProperties[\"^x\"].$ref",
+        "{\"patternProperties\":{\"^x\":{\"$ref\":\"other.json#/missing\"}}}", "patternProperties[\"^x\"].$ref",
       ),
     ] {
     let result = run_against_schema(
@@ -2121,4 +2140,160 @@ async test "JSONL and batch share compiled property patterns and correct instanc
     ),
   )
   assert_true(batch.out.contains("Summary: 1 passed, 1 failed"))
+}
+
+///|
+async test "CLI local references return 0 1 or execution error 2" {
+  for
+    index, (schema, input, code, reason) in [
+      (
+        "{\"$defs\":{\"n\":{\"type\":\"integer\"}},\"$ref\":\"#/$defs/n\"}", "1",
+        0, "",
+      ),
+      (
+        "{\"$defs\":{\"n\":{\"type\":\"integer\"}},\"$ref\":\"#/$defs/n\"}", "\"bad\"",
+        1, "does not match the schema",
+      ),
+      (
+        "{\"$ref\":\"#\"}", "null", 2, "reference cycle at instance (root), schema /$ref",
+      ),
+      ("{\"not\":{\"$ref\":\"#\"}}", "null", 2, "schema /not/$ref"),
+      ("{\"anyOf\":[true,{\"$ref\":\"#\"}]}", "null", 2, "schema /anyOf/1/$ref"),
+    ] {
+    let result = run_against_schema(
+      Scratch::named("reference_verdict_" + index.to_string()),
+      input,
+      schema,
+      ["--no-color"],
+      StubAnalyzer::new(Ok("unused")),
+    )
+    assert_eq(result.code, code)
+    if code == 0 {
+      assert_eq(result.err, "")
+      assert_true(result.out.contains("matches the schema"))
+    } else {
+      assert_eq(result.out, "")
+      assert_true(result.err.contains(reason))
+      assert_false(result.err.contains("matches the schema"))
+      if code == 2 {
+        assert_true(result.err.contains("schema validation could not complete"))
+        assert_false(result.err.contains("does not match the schema"))
+      }
+    }
+  }
+}
+
+///|
+async test "unresolved local references fail before business input is read" {
+  let scratch = Scratch::named("missing_local_reference")
+  discard(scratch.input)
+  @fs.write_file(scratch.schema, "{\"anyOf\":[true,{\"$ref\":\"#/missing\"}]}")
+  for extra in [[], ["--jsonl"], ["-f", scratch.stats, "--continue-on-error"]] {
+    let result = run(
+      ["-v", "--no-color", "--schema", scratch.schema, "-f", scratch.input] +
+      extra,
+      analyze=StubAnalyzer::new(Ok("unused")).analyzer(),
+    )
+    assert_eq(result.code, 2)
+    assert_eq(result.out, "")
+    assert_true(
+      result.err.contains("anyOf[1].$ref: reference target does not exist"),
+    )
+    assert_false(result.err.contains("cannot read " + scratch.input))
+  }
+  discard(scratch.schema)
+}
+
+///|
+async test "CLI depth limit is an execution error without a success verdict" {
+  let input = StringBuilder()
+  for _ in 0..<70 {
+    input.write_string("[")
+  }
+  for _ in 0..<70 {
+    input.write_string("]")
+  }
+  let result = run_against_schema(
+    Scratch::named("reference_depth_limit"),
+    input.to_string(),
+    "{\"type\":\"array\",\"items\":{\"$ref\":\"#\"}}",
+    ["--no-color"],
+    StubAnalyzer::new(Ok("unused")),
+  )
+  assert_eq(result.code, 2)
+  assert_eq(result.out, "")
+  assert_true(result.err.contains("schema validation could not complete"))
+  assert_true(result.err.contains("node visit limit exceeded at instance /0/0"))
+  assert_false(result.err.contains("matches the schema"))
+}
+
+///|
+async test "JSONL evaluation errors dominate data violations and records have independent state" {
+  let schema = "{\"type\":\"object\",\"properties\":{\"n\":{\"type\":\"integer\"},\"loop\":{\"$ref\":\"#/properties/loop\"}}}"
+  let data = "{\"n\":\"bad\"}\n{\"loop\":1}\n{}\n{\"n\":\"bad\"}\n"
+  let result = run_against_schema(
+    Scratch::named("reference_jsonl_budget"),
+    data,
+    schema,
+    ["--jsonl", "--continue-on-error", "--no-color"],
+    StubAnalyzer::new(Ok("unused")),
+  )
+  assert_eq(result.code, 2)
+  assert_true(result.err.contains("line 1 does not match the schema"))
+  assert_true(
+    result.err.contains("line 2 schema validation could not complete"),
+  )
+  assert_true(
+    result.err.contains(
+      "reference cycle at instance /loop, schema /properties/loop/$ref",
+    ),
+  )
+  assert_true(result.err.contains("line 4 does not match the schema"))
+  assert_false(result.err.contains("line 3"))
+  assert_false(result.out.contains("every record matches the schema"))
+  let stop = run_against_schema(
+    Scratch::named("reference_jsonl_stop"),
+    data,
+    schema,
+    ["--jsonl", "--fail-fast", "--no-color"],
+    StubAnalyzer::new(Ok("unused")),
+  )
+  assert_eq(stop.code, 1)
+  assert_false(stop.err.contains("line 2"))
+  let recover = run_against_schema(
+    Scratch::named("reference_jsonl_state"),
+    "{\"loop\":1}\n{\"n\":1}\n",
+    schema,
+    ["--jsonl", "--no-color"],
+    StubAnalyzer::new(Ok("unused")),
+  )
+  assert_eq(recover.code, 2)
+  assert_false(recover.err.contains("line 2"))
+  assert_false(recover.out.contains("every record matches the schema"))
+}
+
+///|
+async test "batch exit 2 wins over violations before or after an evaluation failure" {
+  let schema = "{\"properties\":{\"n\":{\"type\":\"integer\"},\"loop\":{\"$ref\":\"#/properties/loop\"}}}"
+  for
+    i, (first, second) in [
+      ("{\"n\":\"bad\"}", "{\"loop\":1}"),
+      ("{\"loop\":1}", "{\"n\":\"bad\"}"),
+    ] {
+    let scratch = Scratch::named("reference_batch_" + i.to_string())
+    @fs.write_file(scratch.stats, second)
+    let result = run_against_schema(
+      scratch,
+      first,
+      schema,
+      ["-f", scratch.stats, "--continue-on-error", "--no-color"],
+      StubAnalyzer::new(Ok("unused")),
+    )
+    discard(scratch.stats)
+    assert_eq(result.code, 2)
+    assert_true(result.err.contains("does not match the schema"))
+    assert_true(result.err.contains("schema validation could not complete"))
+    assert_true(result.out.contains("Summary: 0 passed, 2 failed"))
+    assert_false(result.out.contains("matches the schema"))
+  }
 }
