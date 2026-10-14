@@ -1092,6 +1092,35 @@ match @toolkit.validate_schema(document, schema) {
 JSON 数组修改它。CLI 每轮只编译一次，供单文件、批量文件和 JSONL 共用：合法 schema 配合
 合法数据返回 `0`，合法 schema 配合违规数据返回 `1`，Schema 编译失败或执行错误返回 `2`。
 
+标准测试命令使用仓库内的
+[JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite/tree/55719286c33ae0d1823bfb65fea10338a19bc37c)
+固定版本 `55719286c33ae0d1823bfb65fea10338a19bc37c`，并用独立清单逐组声明范围。
+本次实际覆盖 **462 组、2354 条测试**：支持范围内 **执行 862 条、通过 862 条**，另有
+**602 条编译拒绝、890 条明确跳过**。拒绝和跳过不计作标准校验通过；误通过、误拒绝、
+执行错误和范围错误均为零。这些结果只验证声明的子集，不代表完整 Draft 2020-12 支持。
+各能力统计和每项排除原因见生成的[兼容性报告](docs/schema-compatibility.md)，具体策略见
+`testdata/schema-suite-manifest.json`。
+
+在仓库根目录的 Git Bash 或 Linux 中复现：
+
+```sh
+moon run --target native cmd/schema_suite -- \
+  --manifest testdata/schema-suite-manifest.json \
+  --report-json _build/schema-suite/report.json \
+  --report-md docs/schema-compatibility.md \
+  --strict
+python scripts/check_schema_suite_report.py
+```
+
+运行器校验原始字节 SHA-256、完整文件清单和文件/组索引/描述，用 `@pjson` 保留数字原文，
+每个执行组只编译一次。其独立退出码为：全部范围行为符合预期时 `0`，结果差异或范围行为错误时
+`1`，运行器、数据、清单或报告写入错误时 `2`。校验阶段不联网。
+CI 以 SHA-256 锁定官方 `0.10.13+cbb11c36f` 编译器和 core 包，核对
+`moon 0.1.20260915` 版本，失败时也上传报告。Linux 的分类和逐条诊断必须与已审阅的
+跨平台基线一致，不能临时下载测试数据或自动修改策略。更新数据时按 `UPSTREAM.json` 和
+`scripts/vendor_schema_suite.py` 操作，先按能力审阅每组策略，再运行测试；基线变化也需显式审阅。
+标准测试运行器不改变产品库的公开 API。
+
 `--schema` 描述的是输入，而不是这一轮对输入做了什么，所以它作用于文档刚被读进来的样子，
 早于 `--flatten`、`--select` 和各种修剪发挥作用：schema 是为你手上这份文档写的，而被压平
 或修剪过的文档是另一份文档。在 `--jsonl` 下每条记录都是一份自己的文档，所以每条记录都单
@@ -1613,7 +1642,7 @@ AI 响应处理都不需要联网，所以在任何机器上 `moon test` 都是�
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 405 tests
+moon test  --target native   # 414 tests
 moon fmt                     # format
 
 cd frontend

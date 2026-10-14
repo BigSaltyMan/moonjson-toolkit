@@ -1,0 +1,5 @@
+# Original upstream bytes must retain their SHA-256 across platforms.
+# Upstream itself contains four trailing spaces; preserve original bytes.
+testdata/json-schema-suite/** -text whitespace=-blank-at-eol
+testdata/schema-suite-manifest.json text eol=lf
+scripts/*.sh text eol=lf

@@ -1,0 +1,1098 @@
+{
+  "upstream_commit": "55719286c33ae0d1823bfb65fea10338a19bc37c",
+  "manifest_sha256": "6351a45edc87a84da2f0f8b75f1dba6772f7f5a0b8cf73e4a1166aeecc2586c0",
+  "counts": {
+    "groups": 462,
+    "tests": 2354,
+    "executed": 862,
+    "passed": 862,
+    "false_accept": 0,
+    "false_reject": 0,
+    "compile_rejected": 602,
+    "execution_error": 0,
+    "skipped": 890
+  },
+  "capabilities": [
+    {
+      "capability": "id",
+      "counts": {
+        "groups": 1,
+        "tests": 3,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 3,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "iri",
+      "counts": {
+        "groups": 1,
+        "tests": 26,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 26
+      }
+    },
+    {
+      "capability": "not",
+      "counts": {
+        "groups": 9,
+        "tests": 40,
+        "executed": 38,
+        "passed": 38,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 2,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "ref",
+      "counts": {
+        "groups": 36,
+        "tests": 79,
+        "executed": 32,
+        "passed": 32,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 47,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "uri",
+      "counts": {
+        "groups": 1,
+        "tests": 47,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 47
+      }
+    },
+    {
+      "capability": "date",
+      "counts": {
+        "groups": 1,
+        "tests": 81,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 81
+      }
+    },
+    {
+      "capability": "defs",
+      "counts": {
+        "groups": 1,
+        "tests": 2,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 2,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "enum",
+      "counts": {
+        "groups": 16,
+        "tests": 53,
+        "executed": 53,
+        "passed": 53,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "ipv4",
+      "counts": {
+        "groups": 1,
+        "tests": 41,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 41
+      }
+    },
+    {
+      "capability": "ipv6",
+      "counts": {
+        "groups": 1,
+        "tests": 51,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 51
+      }
+    },
+    {
+      "capability": "time",
+      "counts": {
+        "groups": 1,
+        "tests": 56,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 56
+      }
+    },
+    {
+      "capability": "type",
+      "counts": {
+        "groups": 11,
+        "tests": 80,
+        "executed": 80,
+        "passed": 80,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "uuid",
+      "counts": {
+        "groups": 1,
+        "tests": 29,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 29
+      }
+    },
+    {
+      "capability": "allOf",
+      "counts": {
+        "groups": 12,
+        "tests": 30,
+        "executed": 30,
+        "passed": 30,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "anyOf",
+      "counts": {
+        "groups": 8,
+        "tests": 18,
+        "executed": 18,
+        "passed": 18,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "const",
+      "counts": {
+        "groups": 17,
+        "tests": 54,
+        "executed": 54,
+        "passed": 54,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "email",
+      "counts": {
+        "groups": 1,
+        "tests": 71,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 71
+      }
+    },
+    {
+      "capability": "items",
+      "counts": {
+        "groups": 10,
+        "tests": 29,
+        "executed": 29,
+        "passed": 29,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "oneOf",
+      "counts": {
+        "groups": 11,
+        "tests": 27,
+        "executed": 27,
+        "passed": 27,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "regex",
+      "counts": {
+        "groups": 1,
+        "tests": 18,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 18
+      }
+    },
+    {
+      "capability": "anchor",
+      "counts": {
+        "groups": 5,
+        "tests": 12,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 12,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "bignum",
+      "counts": {
+        "groups": 7,
+        "tests": 9,
+        "executed": 9,
+        "passed": 9,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "format",
+      "counts": {
+        "groups": 19,
+        "tests": 133,
+        "executed": 133,
+        "passed": 133,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "content",
+      "counts": {
+        "groups": 4,
+        "tests": 18,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 18,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "default",
+      "counts": {
+        "groups": 3,
+        "tests": 7,
+        "executed": 7,
+        "passed": 7,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "maximum",
+      "counts": {
+        "groups": 2,
+        "tests": 8,
+        "executed": 8,
+        "passed": 8,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "minimum",
+      "counts": {
+        "groups": 2,
+        "tests": 11,
+        "executed": 11,
+        "passed": 11,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "pattern",
+      "counts": {
+        "groups": 3,
+        "tests": 12,
+        "executed": 9,
+        "passed": 9,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 3,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "unknown",
+      "counts": {
+        "groups": 1,
+        "tests": 7,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 7
+      }
+    },
+    {
+      "capability": "contains",
+      "counts": {
+        "groups": 7,
+        "tests": 21,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 21,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "duration",
+      "counts": {
+        "groups": 1,
+        "tests": 52,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 52
+      }
+    },
+    {
+      "capability": "hostname",
+      "counts": {
+        "groups": 2,
+        "tests": 64,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 64
+      }
+    },
+    {
+      "capability": "maxItems",
+      "counts": {
+        "groups": 2,
+        "tests": 6,
+        "executed": 6,
+        "passed": 6,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "minItems",
+      "counts": {
+        "groups": 2,
+        "tests": 6,
+        "executed": 6,
+        "passed": 6,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "required",
+      "counts": {
+        "groups": 5,
+        "tests": 18,
+        "executed": 18,
+        "passed": 18,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "date-time",
+      "counts": {
+        "groups": 1,
+        "tests": 47,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 47
+      }
+    },
+    {
+      "capability": "idn-email",
+      "counts": {
+        "groups": 1,
+        "tests": 24,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 24
+      }
+    },
+    {
+      "capability": "maxLength",
+      "counts": {
+        "groups": 2,
+        "tests": 7,
+        "executed": 7,
+        "passed": 7,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "minLength",
+      "counts": {
+        "groups": 2,
+        "tests": 7,
+        "executed": 7,
+        "passed": 7,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "no-schema",
+      "counts": {
+        "groups": 1,
+        "tests": 3,
+        "executed": 3,
+        "passed": 3,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "refRemote",
+      "counts": {
+        "groups": 15,
+        "tests": 31,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 31,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "dynamicRef",
+      "counts": {
+        "groups": 22,
+        "tests": 46,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 46,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "multipleOf",
+      "counts": {
+        "groups": 5,
+        "tests": 11,
+        "executed": 11,
+        "passed": 11,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "properties",
+      "counts": {
+        "groups": 6,
+        "tests": 28,
+        "executed": 28,
+        "passed": 28,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "vocabulary",
+      "counts": {
+        "groups": 2,
+        "tests": 5,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 5,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "cross-draft",
+      "counts": {
+        "groups": 1,
+        "tests": 1,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 1,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "maxContains",
+      "counts": {
+        "groups": 5,
+        "tests": 14,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 14,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "minContains",
+      "counts": {
+        "groups": 8,
+        "tests": 28,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 28,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "prefixItems",
+      "counts": {
+        "groups": 4,
+        "tests": 11,
+        "executed": 11,
+        "passed": 11,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "uniqueItems",
+      "counts": {
+        "groups": 6,
+        "tests": 69,
+        "executed": 69,
+        "passed": 69,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "idn-hostname",
+      "counts": {
+        "groups": 2,
+        "tests": 98,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 98
+      }
+    },
+    {
+      "capability": "if-then-else",
+      "counts": {
+        "groups": 12,
+        "tests": 30,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 30,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "json-pointer",
+      "counts": {
+        "groups": 1,
+        "tests": 40,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 40
+      }
+    },
+    {
+      "capability": "uri-template",
+      "counts": {
+        "groups": 1,
+        "tests": 48,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 48
+      }
+    },
+    {
+      "capability": "iri-reference",
+      "counts": {
+        "groups": 1,
+        "tests": 21,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 21
+      }
+    },
+    {
+      "capability": "maxProperties",
+      "counts": {
+        "groups": 3,
+        "tests": 10,
+        "executed": 10,
+        "passed": 10,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "minProperties",
+      "counts": {
+        "groups": 2,
+        "tests": 10,
+        "executed": 10,
+        "passed": 10,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "non-bmp-regex",
+      "counts": {
+        "groups": 2,
+        "tests": 12,
+        "executed": 12,
+        "passed": 12,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "propertyNames",
+      "counts": {
+        "groups": 6,
+        "tests": 22,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 22,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "uri-reference",
+      "counts": {
+        "groups": 1,
+        "tests": 31,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 31
+      }
+    },
+    {
+      "capability": "boolean_schema",
+      "counts": {
+        "groups": 2,
+        "tests": 18,
+        "executed": 18,
+        "passed": 18,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "float-overflow",
+      "counts": {
+        "groups": 1,
+        "tests": 1,
+        "executed": 1,
+        "passed": 1,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "unknownKeyword",
+      "counts": {
+        "groups": 1,
+        "tests": 3,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 3,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "dependentSchemas",
+      "counts": {
+        "groups": 4,
+        "tests": 20,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 20,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "ecmascript-regex",
+      "counts": {
+        "groups": 26,
+        "tests": 86,
+        "executed": 56,
+        "passed": 56,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 18,
+        "execution_error": 0,
+        "skipped": 12
+      }
+    },
+    {
+      "capability": "exclusiveMaximum",
+      "counts": {
+        "groups": 1,
+        "tests": 4,
+        "executed": 4,
+        "passed": 4,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "exclusiveMinimum",
+      "counts": {
+        "groups": 1,
+        "tests": 4,
+        "executed": 4,
+        "passed": 4,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "format-assertion",
+      "counts": {
+        "groups": 2,
+        "tests": 4,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 4,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "unevaluatedItems",
+      "counts": {
+        "groups": 29,
+        "tests": 71,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 71,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "dependentRequired",
+      "counts": {
+        "groups": 4,
+        "tests": 20,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 20,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "patternProperties",
+      "counts": {
+        "groups": 6,
+        "tests": 26,
+        "executed": 23,
+        "passed": 23,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 3,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "refOfUnknownKeyword",
+      "counts": {
+        "groups": 5,
+        "tests": 10,
+        "executed": 2,
+        "passed": 2,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 8,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "additionalProperties",
+      "counts": {
+        "groups": 9,
+        "tests": 21,
+        "executed": 16,
+        "passed": 16,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 5,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "relative-json-pointer",
+      "counts": {
+        "groups": 1,
+        "tests": 26,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 26
+      }
+    },
+    {
+      "capability": "unevaluatedProperties",
+      "counts": {
+        "groups": 44,
+        "tests": 129,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 129,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "infinite-loop-detection",
+      "counts": {
+        "groups": 1,
+        "tests": 2,
+        "executed": 2,
+        "passed": 2,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 0,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "capability": "dependencies-compatibility",
+      "counts": {
+        "groups": 7,
+        "tests": 36,
+        "executed": 0,
+        "passed": 0,
+        "false_accept": 0,
+        "false_reject": 0,
+        "compile_rejected": 36,
+        "execution_error": 0,
+        "skipped": 0
+      }
+    }
+  ],
+  "scope_errors": [],
+  "runner_errors": [],
+  "records_sha256": "3ab911e168a0072c03d5396185dfb45a1c94aba1475e9ac60ed4f200dfd311f7"
+}
