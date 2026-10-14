@@ -21,6 +21,9 @@ curl -fsSL --retry 3 "https://cli.moonbitlang.com/cores/core-$version.tar.gz" -o
 mkdir -p "$moon_home/lib"
 tar -xzf "$archive_dir/moon.tar.gz" -C "$moon_home"
 tar -xzf "$archive_dir/core.tar.gz" -C "$moon_home/lib"
+# The official release archive omits executable mode bits (the upstream
+# installer applies these too).
+chmod +x "$moon_home/bin/"* "$moon_home/bin/internal/tcc"
 export PATH="$moon_home/bin:$PATH"
 moon -C "$moon_home/lib/core" bundle --warn-list -a --all
 versions=$(moon version --all)
