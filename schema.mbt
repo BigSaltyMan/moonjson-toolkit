@@ -113,6 +113,7 @@ fn check_value(
           "maxItems" => check_array_length(value, wanted, path, errors, false)
           "uniqueItems" => check_unique_items(value, wanted, path, errors)
           "contains" => check_contains(value, members, path, errors, ctx)
+          "if" => check_conditional(value, members, path, errors, ctx)
           "enum" => check_enum(value, wanted, path, errors)
           "const" => check_const(value, wanted, path, errors)
           "allOf" | "anyOf" | "oneOf" =>
@@ -169,6 +170,38 @@ fn branch_errors(
   match ctx.failure {
     Some(error) => Err(error)
     None => Ok(errors)
+  }
+}
+
+///|
+/// Conditions and selected branches use the current instance and shared budget.
+/// Every branch was prechecked; only the selected sibling branch runs here.
+fn check_conditional(
+  value : @pjson.Json,
+  schema_members : Array[(String, @pjson.Json)],
+  path : String,
+  errors : Array[SchemaError],
+  ctx : SchemaEvaluationContext,
+) -> Unit {
+  if find_member(schema_members, "if") is None {
+    return
+  }
+  let has_then = find_member(schema_members, "then") is Some(_)
+  let has_else = find_member(schema_members, "else") is Some(_)
+  // We do not collect annotations, so a lone condition has no runtime effect.
+  if !has_then && !has_else {
+    return
+  }
+  let condition_matches = match branch_errors(value, ["if"], path, ctx) {
+    Ok(violations) => violations.is_empty()
+    Err(_) => return // The shared context propagates the execution failure.
+  }
+  if condition_matches {
+    if has_then {
+      evaluate_schema_child(value, ["then"], None, path, errors, ctx)
+    }
+  } else if has_else {
+    evaluate_schema_child(value, ["else"], None, path, errors, ctx)
   }
 }
 
@@ -1050,8 +1083,12 @@ fn check_schema(
                   kind: InvalidSchema,
                 })
             }
-          "not" | "additionalProperties" | "contains" =>
-            enqueue_schema_child(ctx, wanted, [keyword], here)
+          "not"
+          | "additionalProperties"
+          | "contains"
+          | "if"
+          | "then"
+          | "else" => enqueue_schema_child(ctx, wanted, [keyword], here)
           "patternProperties" =>
             match wanted {
               Object(members~) =>

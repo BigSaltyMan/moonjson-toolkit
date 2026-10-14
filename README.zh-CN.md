@@ -195,7 +195,7 @@ than a document. The supported JSON Schema Draft 2020-12 subset is: type,
 required, properties, patternProperties, minProperties, maxProperties,
 prefixItems, items, minItems, maxItems, uniqueItems, contains, minContains, maxContains,
 enum, const, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf,
-minLength, maxLength, pattern, allOf, anyOf, oneOf, not, additionalProperties, $defs and local JSON Pointer $ref.
+minLength, maxLength, pattern, allOf, anyOf, oneOf, not, if, then, else, additionalProperties, $defs and local JSON Pointer $ref.
 $defs contains reusable schemas; $ref supports # and #/ JSON Pointers.
 References resolve at compilation and siblings still apply. External references,
 named anchors, $id and dynamic references remain unsupported.
@@ -224,6 +224,11 @@ This is not a full ECMA-262 engine; unsupported mechanisms are rejected.
 Exclusive bounds exclude equality. multipleOf uses exact decimal divisibility
 with a strictly positive divisor.
 Boolean schemas are supported: true accepts every value; false rejects it.
+if selects its sibling then when the condition matches, otherwise else.
+All conditional branches are prechecked, but only the selected branch runs.
+Without if, then/else do nothing; if alone imposes no assertion here.
+Conditions and branches share the current instance and evaluation budget;
+execution errors propagate instead of making the condition false.
 oneOf requires exactly one matching branch. Unsupported keywords, versions
 and mechanisms are rejected
 before validation with exit 2. Allowed annotations are title, description,
@@ -233,6 +238,10 @@ Examples: {"properties":{"id":true},"additionalProperties":false}
 allows only id; {"oneOf":[{"const":"a"},{"const":"b"}]} accepts a or b.
 Money: {"type":"number","exclusiveMinimum":0,"multipleOf":0.01}
 accepts 12.34 and rejects 12.345 and 0.
+Conditional: {"type":"object","if":{"required":["kind"],"properties":{"kind":{"const":"business"}}},
+"then":{"required":["taxId"]},"else":{"required":["name"]}}
+accepts {"kind":"business","taxId":"T1"} and {"kind":"personal","name":"Li"};
+rejects {"kind":"business"}. required ensures kind exists; properties alone does not.
 
 A document that does not match is reported with every place it disagrees,
 one to a line, and the run exits 1. A schema this tool cannot read is a
@@ -799,7 +808,7 @@ printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
 `maxProperties`、`prefixItems`、`items`、`minItems`、`maxItems`、
 `uniqueItems`、`contains`、`minContains`、`maxContains`、`enum`、`const`、`minimum`、
 `maximum`、`exclusiveMinimum`、`exclusiveMaximum`、`multipleOf`、`minLength`、
-`maxLength`、`pattern`、`allOf`、`anyOf`、`oneOf`、`not`、`additionalProperties`、`$defs` 和同文档 JSON Pointer `$ref`。也支持布尔 Schema：`true` 接受所有 JSON 值，`false` 拒绝所有值。
+`maxLength`、`pattern`、`allOf`、`anyOf`、`oneOf`、`not`、`if`、`then`、`else`、`additionalProperties`、`$defs` 和同文档 JSON Pointer `$ref`。也支持布尔 Schema：`true` 接受所有 JSON 值，`false` 拒绝所有值。
 `const` 只接受指定的常量，复用 `enum` 的精确相等逻辑；其内容作为普通数据处理。
 
 | 关键字 | 通过条件 |
@@ -813,6 +822,35 @@ printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
 每个分支都会预检查，即使已有分支为 `true`。例如 `{"anyOf":[true,{"$ref":"#/missing"}]}`
 仍会在 `anyOf[1].$ref` 报错，退出 `2`。`properties`、`items`、`not`、
 `additionalProperties` 下的子 Schema 也会预检查，包括输入中没有出现的属性。
+
+`if`、`then`、`else` 都接受对象或布尔 Schema。条件符合时执行同级 `then`，不符合时
+执行同级 `else`；选中分支不存在时不追加约束。条件自身的普通违规只用于选择分支，不进入
+最终报告。没有同级 `if` 时，`then/else` 不生效；本工具不收集注解，单独的 `if` 在执行阶段
+也可跳过。不同 `allOf` 子 Schema 的条件和分支不会跨边界配对，同级其它约束仍独立执行。
+
+```json
+{
+  "type": "object",
+  "if": {
+    "required": ["kind"],
+    "properties": {"kind": {"const": "business"}}
+  },
+  "then": {"required": ["taxId"]},
+  "else": {"required": ["name"]}
+}
+```
+
+`{"kind":"business","taxId":"T1"}` 和 `{"kind":"personal","name":"Li"}` 通过；
+`{"kind":"business"}` 缺少 `taxId`，失败。条件中的 `required: ["kind"]` 用于确保字段
+存在：单独的 `properties` 不要求字段必须出现，省略这项 `required` 时，缺少 kind 的对象
+反而会符合条件。
+
+所有分支完整预检查，包括没有 `if` 的 `then/else` 和永远不会选中的分支。因此非法参数、
+未支持关键词、非法正则和无法解析的引用仍在读取输入前拒绝。运行时只执行选中分支，条件与
+分支使用当前实例 JSON Pointer 并共享预算。条件的引用循环或超限向上传递为执行错误，
+不能作为条件不成立而执行 `else`；未选中分支中的可编译循环不执行。CLI 退出码仍为 `0/1/2`。
+`dependentRequired`、`dependentSchemas`、`propertyNames` 和 `unevaluated*` 仍未实现，
+继续由预检查明确拒绝。
 
 `additionalProperties` 省略或为 `true` 时允许额外属性；为 `false` 时逐个拒绝；为 Schema
 时校验每个额外属性的值。只有未被同级 `properties` 声明、也未匹配任何同级
@@ -1126,8 +1164,8 @@ JSON 数组修改它。CLI 每轮只编译一次，供单文件、批量文件�
 标准测试命令使用仓库内的
 [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite/tree/55719286c33ae0d1823bfb65fea10338a19bc37c)
 固定版本 `55719286c33ae0d1823bfb65fea10338a19bc37c`，并用独立清单逐组声明范围。
-本次实际覆盖 **462 组、2354 条测试**：支持范围内 **执行 923 条、通过 923 条**，另有
-**541 条编译拒绝、890 条明确跳过**。拒绝和跳过不计作标准校验通过；误通过、误拒绝、
+本次实际覆盖 **462 组、2354 条测试**：支持范围内 **执行 955 条、通过 955 条**，另有
+**509 条编译拒绝、890 条明确跳过**。拒绝和跳过不计作标准校验通过；误通过、误拒绝、
 执行错误和范围错误均为零。这些结果只验证声明的子集，不代表完整 Draft 2020-12 支持。
 各能力统计和每项排除原因见生成的[兼容性报告](docs/schema-compatibility.md)，具体策略见
 `testdata/schema-suite-manifest.json`。
@@ -1673,7 +1711,7 @@ AI 响应处理都不需要联网，所以在任何机器上 `moon test` 都是�
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 424 tests
+moon test  --target native   # 435 tests
 moon fmt                     # format
 
 cd frontend

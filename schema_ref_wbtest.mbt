@@ -7,6 +7,143 @@ fn ref_compiled(text : String) -> CompiledSchema {
 }
 
 ///|
+test "conditional references resolve normally while unselected cycles remain inactive" {
+  let schema = ref_compiled(
+    "{\"$defs\":{\"predicate\":{\"type\":\"integer\"},\"positive\":{\"minimum\":0},\"text\":{\"type\":\"string\"}},\"if\":{\"$ref\":\"#/$defs/predicate\"},\"then\":{\"$ref\":\"#/$defs/positive\"},\"else\":{\"$ref\":\"#/$defs/text\"}}",
+  )
+  for raw in ["1", "\"x\""] {
+    assert_true(validate_compiled_schema(parse_ok(raw), schema) is Ok([]))
+  }
+  for raw in ["-1", "false"] {
+    assert_true(validate_compiled_schema(parse_ok(raw), schema) is Ok([_]))
+  }
+  for
+    raw in [
+      "{\"if\":false,\"then\":{\"$ref\":\"#\"},\"else\":true}", "{\"if\":true,\"then\":true,\"else\":{\"$ref\":\"#\"}}",
+      "{\"if\":{\"$ref\":\"#\"}}", "{\"then\":{\"$ref\":\"#\"},\"else\":{\"$ref\":\"#\"}}",
+      "{\"if\":true,\"then\":{\"$ref\":\"#/if\"}}",
+    ] {
+    assert_true(
+      validate_compiled_schema(parse_ok("null"), ref_compiled(raw)) is Ok([]),
+    )
+  }
+  assert_true(
+    evaluate_schema_with_limits(
+      parse_ok("null"),
+      ref_compiled("{\"if\":{\"$ref\":\"#\"}}"),
+      1,
+      1,
+    )
+    is Ok([]),
+  )
+}
+
+///|
+test "conditional and selected branch cycles propagate without changing instance pointers" {
+  for
+    (raw, location) in [
+      ("{\"if\":{\"$ref\":\"#\"},\"then\":true,\"else\":false}", "/if/$ref"),
+      ("{\"if\":true,\"then\":{\"$ref\":\"#\"},\"else\":true}", "/then/$ref"),
+      ("{\"if\":false,\"then\":true,\"else\":{\"$ref\":\"#\"}}", "/else/$ref"),
+    ] {
+    match validate_compiled_schema(parse_ok("null"), ref_compiled(raw)) {
+      Err(error) => {
+        assert_eq(error.kind, ReferenceCycle)
+        assert_eq(error.instance_path, "")
+        assert_eq(error.schema_path, location)
+      }
+      _ => abort("conditional execution failure became a branch decision")
+    }
+    assert_true(
+      validate_schema(parse_ok("null"), parse_ok(raw))
+      is Err(EvaluationFailed(_)),
+    )
+  }
+  let schema = ref_compiled(
+    "{\"properties\":{\"a/b~c\":{\"if\":{\"$ref\":\"#/properties/a~1b~0c\"},\"then\":true,\"else\":true}}}",
+  )
+  match validate_compiled_schema(parse_ok("{\"a/b~c\":1}"), schema) {
+    Err(error) => {
+      assert_eq(error.kind, ReferenceCycle)
+      assert_eq(error.instance_path, "/a~1b~0c")
+      assert_eq(error.schema_path, "/properties/a~1b~0c/if/$ref")
+    }
+    _ => abort("condition moved the current instance pointer")
+  }
+  assert_true(validate_compiled_schema(parse_ok("{}"), schema) is Ok([]))
+}
+
+///|
+test "conditional predicates and selected branches share budgets with exact limits" {
+  for (predicate, selected) in [("true", "then"), ("false", "else")] {
+    let schema = ref_compiled(
+      "{\"if\":" + predicate + ",\"then\":true,\"else\":true}",
+    )
+    assert_true(
+      evaluate_schema_with_limits(parse_ok("null"), schema, 2, 3) is Ok([]),
+    )
+    match evaluate_schema_with_limits(parse_ok("null"), schema, 2, 2) {
+      Err(error) => {
+        assert_eq(error.kind, ResourceLimit)
+        assert_eq(error.schema_path, "/" + selected)
+        assert_eq(error.instance_path, "")
+      }
+      _ => abort("conditional branch reset the shared visit budget")
+    }
+    match evaluate_schema_with_limits(parse_ok("null"), schema, 1, 3) {
+      Err(error) => {
+        assert_eq(error.kind, ResourceLimit)
+        assert_eq(error.schema_path, "/if")
+      }
+      _ => abort("condition depth limit was swallowed")
+    }
+    assert_true(
+      evaluate_schema_with_limits(parse_ok("null"), schema, 2, 3) is Ok([]),
+    )
+  }
+}
+
+///|
+test "nested predicates restore schema positions before selected branch evaluation" {
+  let schema = ref_compiled(
+    "{\"properties\":{\"data\":{\"if\":{\"if\":true,\"then\":false,\"else\":false},\"then\":{\"$ref\":\"#\"},\"else\":{\"properties\":{\"name\":{\"type\":\"string\"}}}}}}",
+  )
+  assert_true(
+    evaluate_schema_with_limits(
+      parse_ok("{\"data\":{\"name\":\"ok\"}}"),
+      schema,
+      4,
+      7,
+    )
+    is Ok([]),
+  )
+  match
+    evaluate_schema_with_limits(
+      parse_ok("{\"data\":{\"name\":\"ok\"}}"),
+      schema,
+      4,
+      6,
+    ) {
+    Err(error) => {
+      assert_eq(error.kind, ResourceLimit)
+      assert_eq(error.instance_path, "/data/name")
+      assert_eq(error.schema_path, "/properties/data/else/properties/name")
+    }
+    _ =>
+      abort(
+        "nested condition did not retain shared visits or restore schema pointer",
+      )
+  }
+  match validate_compiled_schema(parse_ok("{\"data\":{\"name\":1}}"), schema) {
+    Ok([error]) => {
+      assert_eq(error.path, "data.name")
+      assert_true(error.message.contains("expects a string"))
+    }
+    _ => abort("nested predicate errors leaked into the result")
+  }
+}
+
+///|
 test "contains references advance instance positions and finite recursion stays valid" {
   let schema = ref_compiled(
     "{\"$defs\":{\"number\":{\"type\":\"integer\"}},\"contains\":{\"$ref\":\"#/$defs/number\"},\"minContains\":2}",

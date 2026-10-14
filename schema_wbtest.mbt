@@ -16,6 +16,184 @@ fn problems(schema : String) -> String {
 }
 
 ///|
+test "conditional selection discards predicate errors and ignores absent branches" {
+  for
+    (schema, data, count) in [
+      ("{\"if\":true,\"then\":false,\"else\":true}", "null", 1),
+      ("{\"if\":false,\"then\":false,\"else\":true}", "null", 0),
+      ("{\"if\":true,\"then\":true,\"else\":false}", "null", 0),
+      ("{\"if\":false,\"then\":true,\"else\":false}", "null", 1),
+      (
+        "{\"if\":{\"type\":\"integer\"},\"then\":{\"minimum\":10},\"else\":{\"const\":\"x\"}}",
+        "12", 0,
+      ),
+      (
+        "{\"if\":{\"type\":\"integer\"},\"then\":{\"minimum\":10},\"else\":{\"const\":\"x\"}}",
+        "2", 1,
+      ),
+      (
+        "{\"if\":{\"type\":\"integer\"},\"then\":{\"minimum\":10},\"else\":{\"const\":\"x\"}}",
+        "\"x\"", 0,
+      ),
+      (
+        "{\"if\":{\"type\":\"integer\"},\"then\":{\"minimum\":10},\"else\":{\"const\":\"x\"}}",
+        "true", 1,
+      ),
+      ("{\"if\":false,\"then\":false}", "null", 0),
+      ("{\"if\":true,\"else\":false}", "null", 0),
+      ("{\"if\":false}", "null", 0),
+      ("{\"if\":{\"type\":\"integer\"}}", "\"x\"", 0),
+      ("{\"then\":false}", "null", 0),
+      ("{\"else\":false}", "null", 0),
+      ("{\"then\":false,\"else\":false}", "null", 0),
+    ] {
+    match validate_schema(parse_ok(data), parse_ok(schema)) {
+      Ok(errors) => assert_eq(errors.length(), count)
+      Err(_) => abort("valid conditional could not complete")
+    }
+  }
+  assert_eq(
+    report(
+      "true", "{\"if\":{\"type\":\"integer\"},\"else\":{\"type\":\"string\"}}",
+    ),
+    "(root): it is a boolean where the schema expects a string",
+  )
+  let business = "{\"type\":\"object\",\"if\":{\"required\":[\"kind\"],\"properties\":{\"kind\":{\"const\":\"business\"}}},\"then\":{\"required\":[\"taxId\"]},\"else\":{\"required\":[\"name\"]}}"
+  assert_eq(report("{\"kind\":\"business\",\"taxId\":\"T1\"}", business), "")
+  assert_eq(report("{\"kind\":\"personal\",\"name\":\"Li\"}", business), "")
+  assert_eq(report("{\"name\":\"Li\"}", business), "")
+  assert_true(report("{\"kind\":\"business\"}", business).contains("taxId"))
+  assert_true(
+    report(
+      "{\"name\":\"Li\"}", "{\"if\":{\"properties\":{\"kind\":{\"const\":\"business\"}}},\"then\":{\"required\":[\"taxId\"]},\"else\":{\"required\":[\"name\"]}}",
+    ).contains("taxId"),
+  )
+}
+
+///|
+test "conditional sibling order and allOf scopes preserve independent constraints" {
+  let keywords = [
+    "\"if\":{\"const\":1}", "\"then\":{\"minimum\":5}", "\"else\":{\"maximum\":0}",
+  ]
+  for data in ["-1", "0", "1", "4", "8"] {
+    let expected = report(data, "{" + keywords.join(",") + "}")
+    for
+      order in [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+      ] {
+      assert_eq(
+        report(data, "{" + order.map(fn(i) { keywords[i] }).join(",") + "}"),
+        expected,
+      )
+    }
+  }
+  assert_eq(
+    report(
+      "null", "{\"allOf\":[{\"if\":true},{\"then\":false},{\"else\":false}]}",
+    ),
+    "",
+  )
+  assert_eq(report("null", "{\"if\":true,\"allOf\":[{\"then\":false}]}"), "")
+  assert_eq(report("null", "{\"then\":false,\"allOf\":[{\"if\":true}]}"), "")
+  match
+    validate_schema(
+      parse_ok("{}"),
+      parse_ok(
+        "{\"type\":\"array\",\"required\":[\"tag\"],\"if\":true,\"then\":false}",
+      ),
+    ) {
+    Ok(errors) => assert_eq(errors.length(), 3)
+    _ => abort("sibling constraints were bypassed")
+  }
+}
+
+///|
+test "conditions nested in items properties contains and predicates select correctly" {
+  let schema = "{\"properties\":{\"orders\":{\"items\":{\"if\":{\"type\":\"integer\"},\"then\":{\"minimum\":0},\"else\":{\"type\":\"string\"}}}}}"
+  assert_eq(report("{\"orders\":[1,\"x\"]}", schema), "")
+  let failures = report("{\"orders\":[-1,true]}", schema)
+  assert_true(failures.contains("orders[0]: it is less than the minimum 0"))
+  assert_true(
+    failures.contains(
+      "orders[1]: it is a boolean where the schema expects a string",
+    ),
+  )
+  assert_false(failures.contains("expects an integer"))
+  let contains = "{\"contains\":{\"if\":{\"type\":\"integer\"},\"then\":{\"minimum\":2},\"else\":false},\"minContains\":2}"
+  assert_eq(report("[2,\"x\",3,1]", contains), "")
+  assert_eq(
+    report("[1,\"x\"]", contains),
+    "(root): contains matched 0 items; expected at least 2",
+  )
+  let nested = "{\"if\":{\"if\":{\"type\":\"integer\"},\"then\":{\"minimum\":10},\"else\":false},\"then\":{\"maximum\":20},\"else\":{\"const\":0}}"
+  for data in ["0", "15"] {
+    assert_eq(report(data, nested), "")
+  }
+  assert_eq(report("21", nested), "(root): it is more than the maximum 20")
+  assert_eq(
+    report("1", nested),
+    "(root): it is not the constant value the schema specifies",
+  )
+}
+
+///|
+test "every conditional branch is prechecked even when ignored or never selected" {
+  for
+    (raw, path, kind) in [
+      ("{\"if\":null}", "if", InvalidSchema),
+      ("{\"then\":123}", "then", InvalidSchema),
+      ("{\"else\":[]}", "else", InvalidSchema),
+      (
+        "{\"if\":true,\"else\":{\"propertyNames\":true}}",
+        "else.propertyNames",
+        UnsupportedFeature,
+      ),
+      (
+        "{\"if\":false,\"then\":{\"pattern\":\"[\"}}",
+        "then.pattern",
+        InvalidSchema,
+      ),
+      ("{\"else\":{\"$ref\":\"#/missing\"}}", "else.$ref", InvalidSchema),
+      (
+        "{\"then\":{\"$dynamicRef\":\"#x\"}}",
+        "then.$dynamicRef",
+        UnsupportedFeature,
+      ),
+      (
+        "{\"if\":{\"minLength\":-1},\"then\":true}",
+        "if.minLength",
+        InvalidSchema,
+      ),
+      (
+        "{\"properties\":{\"x\":{\"if\":false,\"then\":{\"required\":123}}}}",
+        "properties.x.then.required",
+        InvalidSchema,
+      ),
+    ] {
+    let issues = schema_problems(parse_ok(raw))
+    assert_eq(issues.length(), 1)
+    assert_eq(issues[0].path, path)
+    assert_eq(issues[0].kind, kind)
+    assert_true(
+      validate_schema(parse_ok("{}"), parse_ok(raw)) is Err(SchemaProblems(_)),
+    )
+  }
+  assert_true(
+    compile_schema(
+      parse_ok(
+        "{\"const\":{\"if\":null,\"then\":3},\"default\":{\"else\":[]},\"enum\":[{\"if\":false}]}",
+      ),
+    )
+    is Ok(_),
+  )
+}
+
+///|
 test "a document the schema describes is not reported on" {
   let schema =
     #|{

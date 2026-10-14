@@ -17,6 +17,58 @@ fn cli_err(args : Array[String]) -> String {
 }
 
 ///|
+async test "conditional CLI preserves selected instance paths and exit 0 1 2" {
+  for
+    index, (schema, input, code, reason) in [
+      (
+        "{\"if\":{\"type\":\"integer\"},\"then\":{\"minimum\":10},\"else\":{\"type\":\"string\"}}",
+        "12", 0, "",
+      ),
+      (
+        "{\"if\":{\"type\":\"integer\"},\"then\":{\"minimum\":10},\"else\":{\"type\":\"string\"}}",
+        "\"x\"", 0, "",
+      ),
+      (
+        "{\"properties\":{\"data\":{\"if\":{\"type\":\"integer\"},\"then\":{\"minimum\":10},\"else\":{\"type\":\"string\"}}}}",
+        "{\"data\":2}", 1, "data: it is less than the minimum 10",
+      ),
+      (
+        "{\"properties\":{\"data\":{\"if\":{\"type\":\"integer\"},\"then\":true,\"else\":{\"type\":\"string\"}}}}",
+        "{\"data\":true}", 1, "data: it is a boolean where the schema expects a string",
+      ),
+      (
+        "{\"if\":true,\"else\":{\"propertyNames\":true}}", "{}", 2, "else.propertyNames",
+      ),
+      ("{\"then\":1}", "{}", 2, "then"),
+      (
+        "{\"properties\":{\"data\":{\"if\":{\"$ref\":\"#/properties/data\"},\"else\":true}}}",
+        "{\"data\":1}", 2, "reference cycle at instance /data, schema /properties/data/if/$ref",
+      ),
+      (
+        "{\"if\":true,\"then\":{\"$ref\":\"#\"}}", "null", 2, "schema /then/$ref",
+      ),
+      ("{\"if\":false,\"then\":{\"$ref\":\"#\"},\"else\":true}", "null", 0, ""),
+    ] {
+    let result = run_against_schema(
+      Scratch::named("conditional_cli_" + index.to_string()),
+      input,
+      schema,
+      ["--no-color"],
+      StubAnalyzer::new(Ok("unused")),
+    )
+    assert_eq(result.code, code)
+    if code == 0 {
+      assert_eq(result.err, "")
+      assert_true(result.out.contains("matches the schema"))
+    } else {
+      assert_eq(result.out, "")
+      assert_true(result.err.contains(reason))
+      assert_false(result.err.contains("matches the schema"))
+    }
+  }
+}
+
+///|
 async test "contains CLI preserves success violation and schema execution exit codes" {
   for
     index, (schema, input, code, reason) in [

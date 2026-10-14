@@ -510,20 +510,7 @@
       "group": 5,
       "description": "contains with false if subschema",
       "capability": "contains",
-      "action": "reject",
-      "reason": "Keyword/mechanism if is not implemented; Keyword/mechanism else is not implemented",
-      "expected_problems": [
-        {
-          "path": "contains.if",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "contains.else",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/contains.json",
@@ -1199,7 +1186,7 @@
       "description": "multiple dynamic paths to the $dynamicRef keyword",
       "capability": "dynamicRef",
       "action": "reject",
-      "reason": "Keyword/mechanism $id is not implemented; Keyword/mechanism if is not implemented; Keyword/mechanism then is not implemented; Keyword/mechanism else is not implemented; External/meta-schema references are not implemented; Keyword/mechanism $dynamicAnchor is not implemented; Keyword/mechanism $dynamicRef is not implemented",
+      "reason": "Keyword/mechanism $id is not implemented; External/meta-schema references are not implemented; Keyword/mechanism $dynamicAnchor is not implemented; Keyword/mechanism $dynamicRef is not implemented",
       "expected_problems": [
         {
           "path": "$id",
@@ -1207,19 +1194,14 @@
           "message_contains": "keyword is not supported"
         },
         {
-          "path": "if",
+          "path": "then.$ref",
           "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
+          "message_contains": "external references are not supported"
         },
         {
-          "path": "then",
+          "path": "else.$ref",
           "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "else",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
+          "message_contains": "external references are not supported"
         },
         {
           "path": "$defs.genericList.$id",
@@ -1274,7 +1256,7 @@
       "description": "after leaving a dynamic scope, it is not used by a $dynamicRef",
       "capability": "dynamicRef",
       "action": "reject",
-      "reason": "Keyword/mechanism $id is not implemented; Keyword/mechanism if is not implemented; Keyword/mechanism then is not implemented; Keyword/mechanism $dynamicRef is not implemented; Keyword/mechanism $dynamicAnchor is not implemented",
+      "reason": "Keyword/mechanism $id is not implemented; External/meta-schema references are not implemented; Keyword/mechanism $dynamicRef is not implemented; Keyword/mechanism $dynamicAnchor is not implemented",
       "expected_problems": [
         {
           "path": "$id",
@@ -1282,14 +1264,19 @@
           "message_contains": "keyword is not supported"
         },
         {
-          "path": "if",
+          "path": "if.$id",
           "kind": "UnsupportedFeature",
           "message_contains": "keyword is not supported"
         },
         {
-          "path": "then",
+          "path": "then.$id",
           "kind": "UnsupportedFeature",
           "message_contains": "keyword is not supported"
+        },
+        {
+          "path": "then.$ref",
+          "kind": "UnsupportedFeature",
+          "message_contains": "external references are not supported"
         },
         {
           "path": "$defs.start.$id",
@@ -1308,6 +1295,16 @@
         },
         {
           "path": "$defs.thingy.$dynamicAnchor",
+          "kind": "UnsupportedFeature",
+          "message_contains": "keyword is not supported"
+        },
+        {
+          "path": "if.$defs.thingy.$dynamicAnchor",
+          "kind": "UnsupportedFeature",
+          "message_contains": "keyword is not supported"
+        },
+        {
+          "path": "then.$defs.thingy.$dynamicAnchor",
           "kind": "UnsupportedFeature",
           "message_contains": "keyword is not supported"
         }
@@ -1827,250 +1824,84 @@
       "group": 0,
       "description": "ignore if without then or else",
       "capability": "if-then-else",
-      "action": "reject",
-      "reason": "Keyword/mechanism if is not implemented",
-      "expected_problems": [
-        {
-          "path": "if",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/if-then-else.json",
       "group": 1,
       "description": "ignore then without if",
       "capability": "if-then-else",
-      "action": "reject",
-      "reason": "Keyword/mechanism then is not implemented",
-      "expected_problems": [
-        {
-          "path": "then",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/if-then-else.json",
       "group": 2,
       "description": "ignore else without if",
       "capability": "if-then-else",
-      "action": "reject",
-      "reason": "Keyword/mechanism else is not implemented",
-      "expected_problems": [
-        {
-          "path": "else",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/if-then-else.json",
       "group": 3,
       "description": "if and then without else",
       "capability": "if-then-else",
-      "action": "reject",
-      "reason": "Keyword/mechanism if is not implemented; Keyword/mechanism then is not implemented",
-      "expected_problems": [
-        {
-          "path": "if",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "then",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/if-then-else.json",
       "group": 4,
       "description": "if and else without then",
       "capability": "if-then-else",
-      "action": "reject",
-      "reason": "Keyword/mechanism if is not implemented; Keyword/mechanism else is not implemented",
-      "expected_problems": [
-        {
-          "path": "if",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "else",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/if-then-else.json",
       "group": 5,
       "description": "validate against correct branch, then vs else",
       "capability": "if-then-else",
-      "action": "reject",
-      "reason": "Keyword/mechanism if is not implemented; Keyword/mechanism then is not implemented; Keyword/mechanism else is not implemented",
-      "expected_problems": [
-        {
-          "path": "if",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "then",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "else",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/if-then-else.json",
       "group": 6,
       "description": "non-interference across combined schemas",
       "capability": "if-then-else",
-      "action": "reject",
-      "reason": "Keyword/mechanism if is not implemented; Keyword/mechanism then is not implemented; Keyword/mechanism else is not implemented",
-      "expected_problems": [
-        {
-          "path": "allOf[0].if",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "allOf[1].then",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "allOf[2].else",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/if-then-else.json",
       "group": 7,
       "description": "if with boolean schema true",
       "capability": "if-then-else",
-      "action": "reject",
-      "reason": "Keyword/mechanism if is not implemented; Keyword/mechanism then is not implemented; Keyword/mechanism else is not implemented",
-      "expected_problems": [
-        {
-          "path": "if",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "then",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "else",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/if-then-else.json",
       "group": 8,
       "description": "if with boolean schema false",
       "capability": "if-then-else",
-      "action": "reject",
-      "reason": "Keyword/mechanism if is not implemented; Keyword/mechanism then is not implemented; Keyword/mechanism else is not implemented",
-      "expected_problems": [
-        {
-          "path": "if",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "then",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "else",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/if-then-else.json",
       "group": 9,
       "description": "if appears at the end when serialized (keyword processing sequence)",
       "capability": "if-then-else",
-      "action": "reject",
-      "reason": "Keyword/mechanism then is not implemented; Keyword/mechanism else is not implemented; Keyword/mechanism if is not implemented",
-      "expected_problems": [
-        {
-          "path": "then",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "else",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "if",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/if-then-else.json",
       "group": 10,
       "description": "then: false fails when condition matches",
       "capability": "if-then-else",
-      "action": "reject",
-      "reason": "Keyword/mechanism if is not implemented; Keyword/mechanism then is not implemented",
-      "expected_problems": [
-        {
-          "path": "if",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "then",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/if-then-else.json",
       "group": 11,
       "description": "else: false fails when condition does not match",
       "capability": "if-then-else",
-      "action": "reject",
-      "reason": "Keyword/mechanism if is not implemented; Keyword/mechanism else is not implemented",
-      "expected_problems": [
-        {
-          "path": "if",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "else",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/infinite-loop-detection.json",
@@ -4107,7 +3938,7 @@
       "description": "ref to if",
       "capability": "ref",
       "action": "reject",
-      "reason": "External/meta-schema references are not implemented; Keyword/mechanism if is not implemented",
+      "reason": "External/meta-schema references are not implemented; Keyword/mechanism $id is not implemented",
       "expected_problems": [
         {
           "path": "$ref",
@@ -4115,7 +3946,7 @@
           "message_contains": "external references are not supported"
         },
         {
-          "path": "if",
+          "path": "if.$id",
           "kind": "UnsupportedFeature",
           "message_contains": "keyword is not supported"
         }
@@ -4127,7 +3958,7 @@
       "description": "ref to then",
       "capability": "ref",
       "action": "reject",
-      "reason": "External/meta-schema references are not implemented; Keyword/mechanism then is not implemented",
+      "reason": "External/meta-schema references are not implemented; Keyword/mechanism $id is not implemented",
       "expected_problems": [
         {
           "path": "$ref",
@@ -4135,7 +3966,7 @@
           "message_contains": "external references are not supported"
         },
         {
-          "path": "then",
+          "path": "then.$id",
           "kind": "UnsupportedFeature",
           "message_contains": "keyword is not supported"
         }
@@ -4147,7 +3978,7 @@
       "description": "ref to else",
       "capability": "ref",
       "action": "reject",
-      "reason": "External/meta-schema references are not implemented; Keyword/mechanism else is not implemented",
+      "reason": "External/meta-schema references are not implemented; Keyword/mechanism $id is not implemented",
       "expected_problems": [
         {
           "path": "$ref",
@@ -4155,7 +3986,7 @@
           "message_contains": "external references are not supported"
         },
         {
-          "path": "else",
+          "path": "else.$id",
           "kind": "UnsupportedFeature",
           "message_contains": "keyword is not supported"
         }
@@ -4841,23 +4672,8 @@
       "description": "unevaluatedItems with if/then/else",
       "capability": "unevaluatedItems",
       "action": "reject",
-      "reason": "Keyword/mechanism if is not implemented; Keyword/mechanism then is not implemented; Keyword/mechanism else is not implemented; Keyword/mechanism unevaluatedItems is not implemented",
+      "reason": "Keyword/mechanism unevaluatedItems is not implemented",
       "expected_problems": [
-        {
-          "path": "if",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "then",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "else",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
         {
           "path": "unevaluatedItems",
           "kind": "UnsupportedFeature",
@@ -5021,18 +4837,8 @@
       "description": "unevaluatedItems and contains interact to control item dependency relationship",
       "capability": "unevaluatedItems",
       "action": "reject",
-      "reason": "Keyword/mechanism if is not implemented; Keyword/mechanism then is not implemented; Keyword/mechanism unevaluatedItems is not implemented",
+      "reason": "Keyword/mechanism unevaluatedItems is not implemented",
       "expected_problems": [
-        {
-          "path": "if",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "then",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
         {
           "path": "unevaluatedItems",
           "kind": "UnsupportedFeature",
@@ -5091,13 +4897,8 @@
       "description": "unevaluatedItems can see annotations from if without then and else",
       "capability": "unevaluatedItems",
       "action": "reject",
-      "reason": "Keyword/mechanism if is not implemented; Keyword/mechanism unevaluatedItems is not implemented",
+      "reason": "Keyword/mechanism unevaluatedItems is not implemented",
       "expected_problems": [
-        {
-          "path": "if",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
         {
           "path": "unevaluatedItems",
           "kind": "UnsupportedFeature",
@@ -5341,23 +5142,8 @@
       "description": "unevaluatedProperties with if/then/else",
       "capability": "unevaluatedProperties",
       "action": "reject",
-      "reason": "Keyword/mechanism if is not implemented; Keyword/mechanism then is not implemented; Keyword/mechanism else is not implemented; Keyword/mechanism unevaluatedProperties is not implemented",
+      "reason": "Keyword/mechanism unevaluatedProperties is not implemented",
       "expected_problems": [
-        {
-          "path": "if",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "then",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "else",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
         {
           "path": "unevaluatedProperties",
           "kind": "UnsupportedFeature",
@@ -5371,18 +5157,8 @@
       "description": "unevaluatedProperties with if/then/else, then not defined",
       "capability": "unevaluatedProperties",
       "action": "reject",
-      "reason": "Keyword/mechanism if is not implemented; Keyword/mechanism else is not implemented; Keyword/mechanism unevaluatedProperties is not implemented",
+      "reason": "Keyword/mechanism unevaluatedProperties is not implemented",
       "expected_problems": [
-        {
-          "path": "if",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "else",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
         {
           "path": "unevaluatedProperties",
           "kind": "UnsupportedFeature",
@@ -5396,18 +5172,8 @@
       "description": "unevaluatedProperties with if/then/else, else not defined",
       "capability": "unevaluatedProperties",
       "action": "reject",
-      "reason": "Keyword/mechanism if is not implemented; Keyword/mechanism then is not implemented; Keyword/mechanism unevaluatedProperties is not implemented",
+      "reason": "Keyword/mechanism unevaluatedProperties is not implemented",
       "expected_problems": [
-        {
-          "path": "if",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "then",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
         {
           "path": "unevaluatedProperties",
           "kind": "UnsupportedFeature",
@@ -5826,13 +5592,8 @@
       "description": "unevaluatedProperties can see annotations from if without then and else",
       "capability": "unevaluatedProperties",
       "action": "reject",
-      "reason": "Keyword/mechanism if is not implemented; Keyword/mechanism unevaluatedProperties is not implemented",
+      "reason": "Keyword/mechanism unevaluatedProperties is not implemented",
       "expected_problems": [
-        {
-          "path": "if",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
         {
           "path": "unevaluatedProperties",
           "kind": "UnsupportedFeature",

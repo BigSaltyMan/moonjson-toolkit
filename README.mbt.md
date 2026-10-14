@@ -216,7 +216,7 @@ than a document. The supported JSON Schema Draft 2020-12 subset is: type,
 required, properties, patternProperties, minProperties, maxProperties,
 prefixItems, items, minItems, maxItems, uniqueItems, contains, minContains, maxContains,
 enum, const, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf,
-minLength, maxLength, pattern, allOf, anyOf, oneOf, not, additionalProperties, $defs and local JSON Pointer $ref.
+minLength, maxLength, pattern, allOf, anyOf, oneOf, not, if, then, else, additionalProperties, $defs and local JSON Pointer $ref.
 $defs contains reusable schemas; $ref supports # and #/ JSON Pointers.
 References resolve at compilation and siblings still apply. External references,
 named anchors, $id and dynamic references remain unsupported.
@@ -245,6 +245,11 @@ This is not a full ECMA-262 engine; unsupported mechanisms are rejected.
 Exclusive bounds exclude equality. multipleOf uses exact decimal divisibility
 with a strictly positive divisor.
 Boolean schemas are supported: true accepts every value; false rejects it.
+if selects its sibling then when the condition matches, otherwise else.
+All conditional branches are prechecked, but only the selected branch runs.
+Without if, then/else do nothing; if alone imposes no assertion here.
+Conditions and branches share the current instance and evaluation budget;
+execution errors propagate instead of making the condition false.
 oneOf requires exactly one matching branch. Unsupported keywords, versions
 and mechanisms are rejected
 before validation with exit 2. Allowed annotations are title, description,
@@ -254,6 +259,10 @@ Examples: {"properties":{"id":true},"additionalProperties":false}
 allows only id; {"oneOf":[{"const":"a"},{"const":"b"}]} accepts a or b.
 Money: {"type":"number","exclusiveMinimum":0,"multipleOf":0.01}
 accepts 12.34 and rejects 12.345 and 0.
+Conditional: {"type":"object","if":{"required":["kind"],"properties":{"kind":{"const":"business"}}},
+"then":{"required":["taxId"]},"else":{"required":["name"]}}
+accepts {"kind":"business","taxId":"T1"} and {"kind":"personal","name":"Li"};
+rejects {"kind":"business"}. required ensures kind exists; properties alone does not.
 
 A document that does not match is reported with every place it disagrees,
 one to a line, and the run exits 1. A schema this tool cannot read is a
@@ -875,7 +884,7 @@ The supported keywords are `type`, `required`, `properties`, `patternProperties`
 `items`, `minItems`, `maxItems`, `uniqueItems`, `contains`, `minContains`, `maxContains`, `enum`,
 `const`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`,
 `multipleOf`, `minLength`, `maxLength`, `pattern`, `allOf`, `anyOf`, `oneOf`,
-`not`, `additionalProperties`, `$defs` and same-document JSON Pointer `$ref`. Boolean schemas are also
+`not`, `if`, `then`, `else`, `additionalProperties`, `$defs` and same-document JSON Pointer `$ref`. Boolean schemas are also
 supported: `true` accepts every JSON value, and `false` rejects every value.
 `const` accepts only the specified value using the exact equality of `enum`;
 its contents are ordinary data rather than subschemas.
@@ -892,6 +901,41 @@ must be nonempty arrays of schemas. Every branch is prechecked, even when
 another branch is `true`; `{"anyOf":[true,{"$ref":"#/missing"}]}` is refused at
 `anyOf[1].$ref` with exit `2`. Subschemas in `properties`, `items`, `not`
 and `additionalProperties` are also prechecked, including absent properties.
+
+`if`, `then` and `else` accept object or boolean schemas. A matching `if`
+selects its sibling `then`; a nonmatching condition selects `else`. An absent
+selected branch adds no constraint. Conditions' ordinary violations only select
+the branch and do not appear in the final report. With no sibling `if`,
+`then`/`else` do nothing. This tool does not collect annotations, so a lone `if`
+is skipped during evaluation. Keywords in separate `allOf` schemas cannot pair
+with one another, and sibling assertions still apply independently.
+
+```json
+{
+  "type": "object",
+  "if": {
+    "required": ["kind"],
+    "properties": {"kind": {"const": "business"}}
+  },
+  "then": {"required": ["taxId"]},
+  "else": {"required": ["name"]}
+}
+```
+
+`{"kind":"business","taxId":"T1"}` and `{"kind":"personal","name":"Li"}` pass.
+`{"kind":"business"}` fails because `taxId` is missing. The condition's
+`required: ["kind"]` ensures the field exists: `properties` alone does not
+require it, and without that `required`, an absent kind would match the condition.
+
+Every branch is compiled, including `then`/`else` without `if` and branches
+which can never be selected. Invalid parameters, unsupported keywords, invalid
+patterns and unresolved references therefore still fail before input is read.
+Only the selected branch runs. Conditions and branches retain the current
+instance JSON Pointer and share the evaluation budget. A condition's reference
+cycle or resource limit propagates as an execution error, never as false; an
+unselected branch's compilable cycle is not executed. CLI exits remain `0/1/2`.
+`dependentRequired`, `dependentSchemas`, `propertyNames` and the unevaluated
+keywords remain unsupported and are explicitly rejected.
 
 `additionalProperties` allows extra members when omitted or `true`, rejects
 each extra member when `false`, and validates extra values when given a schema.
@@ -1259,8 +1303,8 @@ plus violating data is exit `1`, and compilation or evaluation failure is exit `
 The native standard-suite command uses the vendored
 [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite/tree/55719286c33ae0d1823bfb65fea10338a19bc37c)
 revision `55719286c33ae0d1823bfb65fea10338a19bc37c` and an independently reviewed
-manifest. The current run covers **462 groups / 2354 tests**: **923 executed and
-923 passed**, **541 compile rejected**, **890 explicitly skipped**. Rejections
+manifest. The current run covers **462 groups / 2354 tests**: **955 executed and
+955 passed**, **509 compile rejected**, **890 explicitly skipped**. Rejections
 and skips are not counted as standard-validation passes. False accepts, false
 rejects, execution errors and scope errors are zero. This establishes the stated
 subset, not full Draft 2020-12 conformance. See the generated
@@ -1864,7 +1908,7 @@ so `moon test` is the same command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 424 tests
+moon test  --target native   # 435 tests
 moon fmt                     # format
 
 cd frontend

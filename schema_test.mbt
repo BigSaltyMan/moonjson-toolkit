@@ -7,6 +7,130 @@ fn json(text : String) -> @pjson.Json {
 }
 
 ///|
+test "public conditional validators agree and precheck inactive branches" {
+  for
+    (raw, input, count) in [
+      (
+        "{\"if\":{\"type\":\"integer\"},\"then\":{\"minimum\":10},\"else\":{\"type\":\"string\"}}",
+        "12", 0,
+      ),
+      (
+        "{\"if\":{\"type\":\"integer\"},\"then\":{\"minimum\":10},\"else\":{\"type\":\"string\"}}",
+        "2", 1,
+      ),
+      (
+        "{\"if\":{\"type\":\"integer\"},\"then\":{\"minimum\":10},\"else\":{\"type\":\"string\"}}",
+        "\"x\"", 0,
+      ),
+      ("{\"if\":false}", "null", 0),
+      ("{\"then\":false,\"else\":false}", "null", 0),
+      ("{\"contains\":{\"if\":false,\"else\":false}}", "[1]", 1),
+    ] {
+    let schema = json(raw)
+    let compiled = match @moonjson-toolkit.compile_schema(schema) {
+      Ok(compiled) => compiled
+      Err(_) => abort("valid condition refused")
+    }
+    let direct = match @moonjson-toolkit.validate_schema(json(input), schema) {
+      Ok(errors) => errors
+      Err(_) => abort("unexpected conditional failure")
+    }
+    let reused = match
+      @moonjson-toolkit.validate_compiled_schema(json(input), compiled) {
+      Ok(errors) => errors
+      Err(_) => abort("unexpected conditional failure")
+    }
+    assert_eq(direct.length(), count)
+    assert_eq(
+      direct.map(@moonjson-toolkit.render_schema_error),
+      reused.map(@moonjson-toolkit.render_schema_error),
+    )
+  }
+  for
+    (raw, path, kind) in [
+      ("{\"then\":3}", "then", @moonjson-toolkit.InvalidSchema),
+      (
+        "{\"if\":true,\"else\":{\"dependentRequired\":{}}}",
+        "else.dependentRequired",
+        @moonjson-toolkit.UnsupportedFeature,
+      ),
+      (
+        "{\"if\":false,\"then\":{\"pattern\":\"[\"}}",
+        "then.pattern",
+        @moonjson-toolkit.InvalidSchema,
+      ),
+      (
+        "{\"else\":{\"$ref\":\"#/missing\"}}",
+        "else.$ref",
+        @moonjson-toolkit.InvalidSchema,
+      ),
+    ] {
+    match @moonjson-toolkit.validate_schema(json("null"), json(raw)) {
+      Err(@moonjson-toolkit.SchemaProblems(problems)) => {
+        assert_eq(problems[0].path, path)
+        assert_eq(problems[0].kind, kind)
+      }
+      _ => abort("inactive conditional branch escaped compilation")
+    }
+  }
+  match
+    @moonjson-toolkit.validate_schema(
+      json("null"),
+      json("{\"if\":{\"$ref\":\"#\"},\"else\":true}"),
+    ) {
+    Err(@moonjson-toolkit.EvaluationFailed(error)) => {
+      assert_eq(error.kind, @moonjson-toolkit.ReferenceCycle)
+      assert_eq(error.schema_path, "/if/$ref")
+    }
+    _ => abort("conditional cycle became else success")
+  }
+}
+
+///|
+test "compiled condition and branch snapshots and invocation state are isolated" {
+  let predicate = [("const", json("1"))]
+  let choices = [json("1"), json("2")]
+  let branch = [("enum", @pjson.Array(items=choices))]
+  let members = [
+    ("if", @pjson.Object(members=predicate)),
+    ("then", @pjson.Object(members=branch)),
+    ("else", json("false")),
+  ]
+  let schema = @pjson.Object(members~)
+  let compiled = match @moonjson-toolkit.compile_schema(schema) {
+    Ok(compiled) => compiled
+    Err(_) => abort("valid condition refused")
+  }
+  predicate[0] = ("const", json("2"))
+  choices.clear()
+  branch[0] = ("$ref", json("\"#\""))
+  members.clear()
+  for _ in 0..<3 {
+    assert_true(
+      @moonjson-toolkit.validate_compiled_schema(json("1"), compiled) is Ok([]),
+    )
+    assert_true(
+      @moonjson-toolkit.validate_compiled_schema(json("2"), compiled) is Ok([_]),
+    )
+  }
+  let schema = json(
+    "{\"if\":{\"type\":\"integer\"},\"then\":{\"$ref\":\"#\"},\"else\":true}",
+  )
+  let compiled = match @moonjson-toolkit.compile_schema(schema) {
+    Ok(compiled) => compiled
+    Err(_) => abort("recursive branch refused")
+  }
+  assert_true(
+    @moonjson-toolkit.validate_compiled_schema(json("1"), compiled)
+    is Err({ kind: @moonjson-toolkit.ReferenceCycle, .. }),
+  )
+  assert_true(
+    @moonjson-toolkit.validate_compiled_schema(json("\"x\""), compiled)
+    is Ok([]),
+  )
+}
+
+///|
 test "public contains APIs agree on match counts and schema problem locations" {
   for
     (raw, data, count) in [
