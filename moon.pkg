@@ -1,6 +1,7 @@
 import {
   "Nanaloveyuki/parsec",
   "Nanaloveyuki/parsec/json" @pjson,
+  "moonbitlang/core/bigint",
   "moonbitlang/core/debug",
   "moonbitlang/core/double",
   "moonbitlang/core/env",

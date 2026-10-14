@@ -145,36 +145,10 @@ fn type_matches(json : @pjson.Json, name : String) -> Bool {
 }
 
 ///|
-/// Whether a numeral stands for a whole number: `1`, `1.0` and `1e3` do, `1.5`
-/// and `0.25` do not.
-///
-/// Read off the text the document was written with, so the answer does not
-/// depend on what a double can hold: a numeral with thirty digits and nothing
-/// after the point is a whole number whatever it is too large to become.
+/// Determine integrality from the normalized mathematical value, including
+/// fractional mantissas shifted by positive or negative exponents.
 fn is_whole_number(raw : String) -> Bool {
-  let chars = raw.to_array()
-  let mut index = if chars.length() > 0 && (chars[0] == '-' || chars[0] == '+') {
-    1
-  } else {
-    0
-  }
-  let mut whole = true
-  while index < chars.length() {
-    let ch = chars[index]
-    if ch == '.' {
-      whole = false
-    } else if ch == 'e' || ch == 'E' {
-      // An exponent moves the point without putting anything after it, so every
-      // numeral with one stands for a whole number or for nothing at all.
-      return true
-    } else if !ch.is_ascii_digit() {
-      return false
-    } else if !whole && ch != '0' {
-      return false
-    }
-    index = index + 1
-  }
-  true
+  schema_number(raw).is_integer()
 }
 
 ///|
@@ -401,9 +375,7 @@ fn listed(count : Int) -> String {
 /// `minimum` and `maximum`: the number has to be inside the bound, which is
 /// included in it.
 ///
-/// The bound is compared as the number it denotes, so `5` and `5.0` are one
-/// bound, and a numeral past the end of the double range is read as the end it
-/// went past — the reading `--sort-by` compares numbers with.
+/// Bounds use exact decimal comparison, without rounding, overflow or underflow.
 fn check_bound(
   value : @pjson.Json,
   wanted : @pjson.Json,
@@ -412,20 +384,20 @@ fn check_bound(
   least : Bool,
 ) -> Unit {
   let bound = match wanted {
-    Number(raw~) => Some(number_value(raw))
+    Number(raw~) => Some(raw)
     // Unreachable: `schema_problems` refuses a bound that is not a number.
     _ => None
   }
   match (value, bound) {
     (Number(raw~), Some(bound)) => {
-      let number = number_value(raw)
-      if least && number < bound {
+      let order = schema_number_compare(raw, bound)
+      if least && order < 0 {
         errors.push({
           path,
           message: "it is less than the minimum " + raw_of(wanted),
         })
       }
-      if !least && number > bound {
+      if !least && order > 0 {
         errors.push({
           path,
           message: "it is more than the maximum " + raw_of(wanted),
@@ -448,9 +420,9 @@ fn check_length(
   least : Bool,
 ) -> Unit {
   let length = match length_argument(wanted) {
-    Some(length) => length
+    Ok(length) => length
     // Unreachable: `schema_problems` refuses a length that is not a count.
-    None => return
+    Err(_) => return
   }
   match value {
     Text(value~) => {
@@ -592,19 +564,20 @@ fn check_schema(
             }
           "minLength" | "maxLength" =>
             match length_argument(wanted) {
-              Some(_) => ()
-              None =>
+              Ok(_) => ()
+              Err(kind) =>
                 errors.push({
-                  kind: InvalidSchema,
+                  kind,
                   path: here,
                   message: match wanted {
-                    // A number that is not a count is a number with a point in
-                    // it, a negative one, or one no document could hold: saying
-                    // which number it is leaves the reading of the message to
-                    // the schema's author.
                     Number(raw~) =>
-                      raw +
-                      " is not a count of characters; a count is a whole number from 0 to 1000000000"
+                      if kind == UnsupportedFeature {
+                        raw +
+                        " exceeds the supported character count limit of 1000000000"
+                      } else {
+                        raw +
+                        " is not a count of characters; a count must be a nonnegative integer"
+                      }
                     _ =>
                       "expected a count of characters, but this is " +
                       kind_name(wanted)
@@ -787,29 +760,12 @@ fn check_name_list(
 }
 
 ///|
-/// The value of a `minLength` or `maxLength` keyword, if it is a count of
-/// characters.
-///
-/// A length is a whole number of characters, so `3`, `3.0` and `1e3` are the
-/// counts three, three and a thousand: what is not a count is a number with a
-/// fraction in it, which would be a fraction of a character, and a negative one,
-/// which no string is shorter than. A count past a billion is not read either —
-/// no document this tool is handed holds that many characters of one string, and
-/// reading it would mean answering with a number that is not there.
-fn length_argument(wanted : @pjson.Json) -> Int? {
+/// Exact nonnegative integer length, distinguishing invalid parameters from
+/// mathematically valid counts exceeding the current implementation limit.
+fn length_argument(wanted : @pjson.Json) -> Result[Int, SchemaProblemKind] {
   match wanted {
-    Number(raw~) =>
-      if !is_whole_number(raw) {
-        None
-      } else {
-        let count = number_value(raw)
-        if count < 0.0 || count > 1_000_000_000.0 {
-          None
-        } else {
-          Some(count.to_int())
-        }
-      }
-    _ => None
+    Number(raw~) => schema_number_count(raw)
+    _ => Err(InvalidSchema)
   }
 }
 
@@ -848,8 +804,8 @@ fn check_pattern_argument(
 /// Whether two values are the same value, as `enum` means it.
 ///
 /// Numbers are compared as the numbers they denote rather than as the text they
-/// were written with, so `1` is the same value as `1.0` — the reading the sort
-/// order compares them with. Two objects are the same when they hold the same
+/// were written with, so 1, 1.0 and 1e0 are equal. Comparisons are exact even
+/// beyond floating-point range. Two objects are equal when they hold the same
 /// members, whatever order they were written in, and two arrays when they hold
 /// the same values in the same order. Values of different kinds are never the
 /// same one.
@@ -858,7 +814,7 @@ fn same_value(one : @pjson.Json, other : @pjson.Json) -> Bool {
     (Null, Null) => true
     (Bool(value=first), Bool(value=second)) => first == second
     (Number(raw=first), Number(raw=second)) =>
-      number_value(first) == number_value(second)
+      schema_number_equal(first, second)
     (Text(value=first), Text(value=second)) => first == second
     (Array(items=first), Array(items=second)) => {
       let mut equal = first.length() == second.length()

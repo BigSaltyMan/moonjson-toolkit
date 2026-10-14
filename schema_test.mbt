@@ -180,3 +180,86 @@ test "compilation snapshots arrays in nested schemas and enum values" {
     1,
   )
 }
+
+///|
+test "public raw and compiled validators agree on exact numeric semantics" {
+  for
+    (schema_text, document_text, count) in [
+      ("{\"minimum\":9007199254740993}", "9007199254740992", 1),
+      ("{\"maximum\":9007199254740992}", "9007199254740993", 1),
+      ("{\"maximum\":1e400}", "1e401", 1),
+      ("{\"minimum\":1e-400}", "0", 1),
+      ("{\"maximum\":0.1}", "0.10000000000000001", 1),
+      ("{\"minimum\":-9007199254740992}", "-9007199254740993", 1),
+      ("{\"maximum\":-1e400}", "-9e399", 1),
+      ("{\"minimum\":-1e400,\"maximum\":-1e400}", "-10e399", 0),
+      ("{\"enum\":[1]}", "1.0", 0),
+      ("{\"enum\":[9007199254740992]}", "9007199254740993", 1),
+      ("{\"enum\":[1e400]}", "1e401", 1),
+      ("{\"enum\":[0]}", "1e-400", 1),
+      (
+        "{\"enum\":[{\"id\":[9007199254740992]}]}", "{\"id\":[9007199254740993]}",
+        1,
+      ),
+      ("{\"type\":\"integer\"}", "1.2e1", 0),
+      ("{\"type\":\"integer\"}", "1e-1", 1),
+      ("{\"type\":\"integer\"}", "1.0e-1", 1),
+      ("{\"type\":\"integer\"}", "12e-1", 1),
+      ("{\"type\":\"integer\"}", "100e-2", 0),
+      ("{\"type\":\"integer\"}", "0.001e3", 0),
+      ("{\"type\":\"integer\"}", "0e-1000", 0),
+      ("{\"maxLength\":1.2e1}", "\"abcdefghijkl\"", 0),
+      ("{\"maxLength\":1.2e1}", "\"abcdefghijklm\"", 1),
+    ] {
+    let schema = json(schema_text)
+    let document = json(document_text)
+    let compiled = match @moonjson-toolkit.compile_schema(schema) {
+      Ok(compiled) => compiled
+      Err(_) => abort("supported schema rejected")
+    }
+    let direct = match @moonjson-toolkit.validate_schema(document, schema) {
+      Ok(violations) => violations
+      Err(_) => abort("supported schema rejected")
+    }
+    let reused = @moonjson-toolkit.validate_compiled_schema(document, compiled)
+    assert_eq(direct.length(), count)
+    assert_eq(
+      direct.map(@moonjson-toolkit.render_schema_error),
+      reused.map(@moonjson-toolkit.render_schema_error),
+    )
+  }
+}
+
+///|
+test "public length preflight reports category location and reason" {
+  for
+    (raw, kind, reason) in [
+      ("1e-1", @moonjson-toolkit.InvalidSchema, "nonnegative integer"),
+      ("1e-400", @moonjson-toolkit.InvalidSchema, "nonnegative integer"),
+      ("-1", @moonjson-toolkit.InvalidSchema, "nonnegative integer"),
+      ("false", @moonjson-toolkit.InvalidSchema, "expected a count"),
+      (
+        "1000000001",
+        @moonjson-toolkit.UnsupportedFeature,
+        "supported character count limit",
+      ),
+      (
+        "1e400",
+        @moonjson-toolkit.UnsupportedFeature,
+        "supported character count limit",
+      ),
+    ] {
+    let schema = json("{\"properties\":{\"name\":{\"minLength\":" + raw + "}}}")
+    let issues = rejected(
+      "{\"properties\":{\"name\":{\"minLength\":" + raw + "}}}",
+    )
+    assert_eq(issues.length(), 1)
+    assert_eq(issues[0].path, "properties.name.minLength")
+    assert_eq(issues[0].kind, kind)
+    assert_true(issues[0].message.contains(reason))
+    match @moonjson-toolkit.validate_schema(json("{}"), schema) {
+      Err(problems) => assert_eq(problems, issues)
+      Ok(_) => abort("invalid or unsupported length was accepted")
+    }
+  }
+}

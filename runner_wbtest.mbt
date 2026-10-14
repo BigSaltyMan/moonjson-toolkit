@@ -1582,3 +1582,97 @@ async test "an unknown option exits 2" {
   inspect(result.out, content="")
   assert_true(result.err.contains("--nonsense"))
 }
+
+///|
+async test "invalid and unsupported length schemas exit 2 before data validation" {
+  for
+    index, (raw, reason) in [
+      ("1e-1", "nonnegative integer"),
+      ("1e-400", "nonnegative integer"),
+      ("-1", "nonnegative integer"),
+      ("1000000001", "supported character count limit"),
+    ] {
+    let result = run_against_schema(
+      Scratch::named("number_length_" + index.to_string()),
+      "{\"name\":\"a\"}",
+      "{\"properties\":{\"name\":{\"minLength\":" + raw + "}}}",
+      ["--no-color"],
+      StubAnalyzer::new(Ok("unused")),
+    )
+    assert_eq(result.code, 2)
+    assert_eq(result.out, "")
+    assert_true(result.err.contains("properties.name.minLength: " + raw))
+    assert_true(result.err.contains(reason))
+    assert_false(result.err.contains("matches the schema"))
+  }
+}
+
+///|
+async test "exact numeric constraints retain data exit codes 1 and 0" {
+  for
+    index, (schema, value, code) in [
+      ("{\"minimum\":9007199254740993}", "9007199254740992", 1),
+      ("{\"maximum\":9007199254740992}", "9007199254740993", 1),
+      ("{\"maximum\":1e400}", "1e401", 1),
+      ("{\"minimum\":1e-400}", "0", 1),
+      ("{\"maximum\":0.1}", "0.10000000000000001", 1),
+      ("{\"enum\":[9007199254740992]}", "9007199254740993", 1),
+      ("{\"enum\":[0]}", "1e-400", 1),
+      ("{\"type\":\"integer\"}", "1e-1", 1),
+      ("{\"type\":\"integer\"}", "1.2e1", 0),
+      ("{\"minimum\":9007199254740993}", "9007199254740993", 0),
+      ("{\"enum\":[1]}", "1.0", 0),
+      ("{\"maxLength\":1.2e1}", "\"abcdefghijkl\"", 0),
+      ("{\"maxLength\":1.2e1}", "\"abcdefghijklm\"", 1),
+    ] {
+    let result = run_against_schema(
+      Scratch::named("number_verdict_" + index.to_string()),
+      value,
+      schema,
+      ["--no-color"],
+      StubAnalyzer::new(Ok("unused")),
+    )
+    assert_eq(result.code, code)
+    if code == 0 {
+      assert_eq(result.err, "")
+      assert_true(result.out.contains("matches the schema"))
+    } else {
+      assert_eq(result.out, "")
+      assert_true(result.err.contains("does not match the schema"))
+      assert_false(result.err.contains("matches the schema"))
+    }
+  }
+}
+
+///|
+async test "JSONL and batch use the same exact numeric comparison" {
+  let jsonl = run_against_schema(
+    Scratch::named("number_jsonl"),
+    "9007199254740993\n9007199254740994\n",
+    "{\"maximum\":9007199254740992}",
+    ["--jsonl", "--continue-on-error", "--no-color"],
+    StubAnalyzer::new(Ok("unused")),
+  )
+  assert_eq(jsonl.code, 1)
+  assert_true(jsonl.out.contains("Summary: 0 passed, 1 failed"))
+  assert_false(jsonl.out.contains("matches the schema"))
+  assert_true(jsonl.err.contains("line 1 does not match the schema"))
+  assert_true(jsonl.err.contains("line 2 does not match the schema"))
+  assert_false(jsonl.err.contains("matches the schema"))
+  let scratch = Scratch::named("number_batch")
+  @fs.write_file(scratch.stats, "1e402")
+  let batch = run_against_schema(
+    scratch,
+    "1e401",
+    "{\"maximum\":1e400}",
+    ["-f", scratch.stats, "--continue-on-error", "--no-color"],
+    StubAnalyzer::new(Ok("unused")),
+  )
+  discard(scratch.stats)
+  assert_eq(batch.code, 1)
+  assert_true(batch.out.contains("Summary: 0 passed, 2 failed"))
+  assert_false(batch.out.contains("matches the schema"))
+  assert_true(batch.err.contains(scratch.input + " does not match the schema"))
+  assert_true(batch.err.contains(scratch.stats + " does not match the schema"))
+  assert_false(batch.err.contains("matches the schema"))
+}

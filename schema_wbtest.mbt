@@ -107,8 +107,7 @@ test "an integer is a number with nothing after the point" {
     report("1.5", "{\"type\":\"integer\"}"),
     "(root): it is a number where the schema expects an integer",
   )
-  // A point with nothing but zeros after it is still a whole number, and an
-  // exponent moves the point without putting anything after it.
+  // Decimal notation and exponents are interpreted by their mathematical value.
   assert_eq(report("1.0", "{\"type\":\"integer\"}"), "")
   assert_eq(report("1e3", "{\"type\":\"integer\"}"), "")
   assert_eq(
@@ -428,11 +427,11 @@ test "a schema this tool cannot read says where" {
   )
   assert_eq(
     problems("{\"maxLength\":2.5}"),
-    "maxLength: 2.5 is not a count of characters; a count is a whole number from 0 to 1000000000",
+    "maxLength: 2.5 is not a count of characters; a count must be a nonnegative integer",
   )
   assert_eq(
     problems("{\"minLength\":-1}"),
-    "minLength: -1 is not a count of characters; a count is a whole number from 0 to 1000000000",
+    "minLength: -1 is not a count of characters; a count must be a nonnegative integer",
   )
   assert_eq(
     problems("{\"pattern\":3}"),
@@ -532,5 +531,113 @@ test "the root of a document is named rather than left blank" {
       message: "required member \"c\" is missing",
     }),
     "a[0].b: required member \"c\" is missing",
+  )
+}
+
+///|
+test "integer schemas accept shifted fractions and refuse fractional exponents" {
+  for
+    raw in [
+      "1", "1.0", "1e3", "1.2e1", "100e-2", "0.001e3", "0", "-0", "0e-1000", "-1.2e1",
+    ] {
+    assert_eq(report(raw, "{\"type\":\"integer\"}"), "")
+  }
+  for raw in ["1e-1", "1.0e-1", "12e-1", "-1e-1", "1e-400"] {
+    assert_eq(
+      report(raw, "{\"type\":\"integer\"}"),
+      "(root): it is a number where the schema expects an integer",
+    )
+  }
+}
+
+///|
+test "schema bounds compare exact decimals including negatives and equality" {
+  for
+    (schema, value, message) in [
+      (
+        "{\"minimum\":9007199254740993}", "9007199254740992", "it is less than the minimum 9007199254740993",
+      ),
+      (
+        "{\"maximum\":9007199254740992}", "9007199254740993", "it is more than the maximum 9007199254740992",
+      ),
+      ("{\"maximum\":1e400}", "1e401", "it is more than the maximum 1e400"),
+      ("{\"minimum\":1e-400}", "0", "it is less than the minimum 1e-400"),
+      (
+        "{\"maximum\":0.1}", "0.10000000000000001", "it is more than the maximum 0.1",
+      ),
+      (
+        "{\"minimum\":-9007199254740992}", "-9007199254740993", "it is less than the minimum -9007199254740992",
+      ),
+      ("{\"maximum\":-1e400}", "-9e399", "it is more than the maximum -1e400"),
+    ] {
+    assert_eq(report(value, schema), "(root): " + message)
+  }
+  for
+    (schema, value) in [
+      ("{\"minimum\":1.2e1,\"maximum\":12}", "12.0"),
+      ("{\"minimum\":-1e400,\"maximum\":-1e400}", "-10e399"),
+      ("{\"minimum\":1e-400,\"maximum\":1e-400}", "10e-401"),
+      ("{\"minimum\":0,\"maximum\":0}", "-0e-1000"),
+    ] {
+    assert_eq(report(value, schema), "")
+  }
+}
+
+///|
+test "enum decimal equality remains exact inside arrays and objects" {
+  assert_eq(report("1.0", "{\"enum\":[1]}"), "")
+  assert_eq(report("1e0", "{\"enum\":[1]}"), "")
+  assert_eq(report("-0e-1000", "{\"enum\":[0]}"), "")
+  for
+    (schema, value) in [
+      ("{\"enum\":[9007199254740992]}", "9007199254740993"),
+      ("{\"enum\":[1e400]}", "1e401"),
+      ("{\"enum\":[0]}", "1e-400"),
+      ("{\"enum\":[[9007199254740992]]}", "[9007199254740993]"),
+      ("{\"enum\":[{\"id\":[1e400,0]}]}", "{\"id\":[1e401,0]}"),
+      ("{\"enum\":[{\"id\":[1e400,0]}]}", "{\"id\":[1e400,1e-400]}"),
+    ] {
+    assert_eq(
+      report(value, schema),
+      "(root): it is not the value the schema lists",
+    )
+  }
+  assert_eq(
+    report("{\"id\":[1.0,10e399,-0]}", "{\"enum\":[{\"id\":[1,1e400,0]}]}"),
+    "",
+  )
+}
+
+///|
+test "length arguments are exact integers with an explicit implementation cap" {
+  for
+    schema in [
+      "{\"minLength\":0}", "{\"maxLength\":1000000000}", "{\"maxLength\":1e9}", "{\"minLength\":-0e-1000}",
+    ] {
+    assert_eq(problems(schema), "")
+  }
+  assert_eq(report("\"abcdefghijkl\"", "{\"maxLength\":1.2e1}"), "")
+  assert_eq(
+    report("\"abcdefghijklm\"", "{\"maxLength\":1.2e1}"),
+    "(root): it is 13 characters long, and the schema asks for at most 12",
+  )
+  for
+    (raw, kind) in [
+      ("-1", InvalidSchema),
+      ("1e-1", InvalidSchema),
+      ("1e-400", InvalidSchema),
+      ("1000000001", UnsupportedFeature),
+      ("1e400", UnsupportedFeature),
+    ] {
+    let errors = schema_problems(
+      parse_ok("{\"properties\":{\"name\":{\"minLength\":" + raw + "}}}"),
+    )
+    assert_eq(errors.length(), 1)
+    assert_eq(errors[0].path, "properties.name.minLength")
+    assert_eq(errors[0].kind, kind)
+  }
+  assert_eq(
+    problems("{\"maxLength\":1000000001}"),
+    "maxLength: 1000000001 exceeds the supported character count limit of 1000000000",
   )
 }

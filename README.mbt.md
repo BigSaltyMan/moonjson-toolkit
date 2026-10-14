@@ -835,7 +835,23 @@ with exit code `2`; this is not a full Draft 2020-12 implementation.
 The ten supported constraint keywords are `type`, `required`, `properties`,
 `items`, `enum`, `minimum`, `maximum`, `minLength`, `maxLength` and `pattern`.
 Subschemas in `properties` and `items` are checked recursively, including
-properties that are absent from the input. The allowed annotations are:
+properties that are absent from the input.
+
+`integer` is determined by the mathematical value: `1.2e1`, `100e-2` and
+`0.001e3` are integers, while `1e-1` is not. `minimum`, `maximum` and numeric
+equality in `enum` use exact decimal semantics, including large numbers and
+positive or negative exponents beyond floating-point range. The comparisons
+also apply to numbers nested inside enum arrays and objects; `0` and `-0` are
+equal. Comparison does not expand numbers into exponent-sized strings.
+
+Length parameters must be nonnegative integers. The current implementation
+supports counts up to `1_000_000_000`: negative or fractional values are
+`InvalidSchema`, and larger nonnegative integers are `UnsupportedFeature`.
+Both are rejected before data validation with exit `2` and the keyword's
+schema location. For example, `maxLength: 1.2e1` means twelve characters,
+while `minLength: 1e-400` is invalid rather than rounded down to zero.
+
+The allowed annotations are:
 
 | Annotation | Accepted value and behavior |
 | ---------- | --------------------------- |
@@ -850,6 +866,8 @@ subset applies. Other versions are rejected. Boolean schemas and mechanisms
 such as `$ref`, `$defs`, `$id`, `$anchor`, `$dynamicRef` and `$vocabulary` are
 not supported yet. Object members inside `enum`, `default` and `examples`
 are data, and property names under `properties` are names rather than keywords.
+`multipleOf` and `exclusiveMinimum` also remain unsupported and are explicitly
+rejected by schema compilation.
 
 A schema with an unsupported constraint fails before any business input is
 read. Its diagnostics go to standard error, standard output is empty, and
@@ -1465,6 +1483,7 @@ moonjson-toolkit/
 ├── emit.mbt              a MoonBit type read off the shape of a document
 ├── schema.mbt            checking a document against a JSON Schema
 ├── schema_compile.mbt    safe schema compilation and structured problems
+├── schema_number.mbt     exact decimal arithmetic for schema assertions
 ├── pattern.mbt           the regular expressions a schema pattern is read with
 ├── jsonl.mbt             splitting a JSON Lines input into records
 ├── diagnostics.mbt       offsets to line/column, rendered error snippets
@@ -1491,7 +1510,7 @@ so `moon test` is the same command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 314 tests
+moon test  --target native   # 328 tests
 moon fmt                     # format
 
 cd frontend
@@ -1574,10 +1593,9 @@ the same shape: fallbacks for a schema this tool refuses to read rather than for
 any document — a schema that is not an object, a type name it does not know, an
 empty list of names being joined into a phrase — each written out so that a walk
 can never fall through to nothing, and none of them reachable while
-schema compilation succeeds first. The point inside `is_whole_number` guards
-against a numeral holding something that is not a digit, which the parser does
-not write, and the one in `raw_of` is that same guard for a value that is not a
-number, which its caller has read already.
+schema compilation succeeds first. The guard in `raw_of` handles a value that
+is not a number, which its caller has checked already. Integer detection and
+exact comparison now share the decimal representation in `schema_number.mbt`.
 
 The seven points left in `pattern.mbt` are the reader's own written-out arms: the
 ones that would read a range back out of an escape or a class item when neither

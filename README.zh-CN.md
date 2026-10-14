@@ -760,7 +760,19 @@ printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
 
 当前支持的十个约束关键字是 `type`、`required`、`properties`、`items`、`enum`、
 `minimum`、`maximum`、`minLength`、`maxLength` 和 `pattern`。`properties` 和 `items`
-中的子 schema 会递归预检查，包括业务输入中没有出现的字段。允许的注解为：
+中的子 schema 会递归预检查，包括业务输入中没有出现的字段。
+
+`integer` 按数学值判断：`1.2e1`、`100e-2`、`0.001e3` 是整数，`1e-1` 不是。
+`minimum`、`maximum` 和 `enum` 中的数字相等采用精确十进制语义，大数以及超出浮点范围的
+正负指数都不会因舍入、溢出或下溢而误判。`enum` 内数组、对象中的数字也沿用同一比较逻辑，
+`0` 与 `-0` 相等。比较时不会按指数展开字符串。
+
+长度参数必须是非负整数，当前支持上限为 `1_000_000_000`。负数、非整数属于
+`InvalidSchema`；数学上合法但超过上限的非负整数属于 `UnsupportedFeature`。两种情况
+都会在校验输入前报错，包含关键字在 schema 中的位置，CLI 退出码为 `2`。
+例如 `maxLength: 1.2e1` 等价于长度上限十二，`minLength: 1e-400` 会报参数错误，不能下溢为零。
+
+允许的注解为：
 
 | 注解 | 参数要求与行为 |
 | ---- | -------------- |
@@ -772,7 +784,8 @@ printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
 `$schema` 若存在，只接受字符串 `https://json-schema.org/draft/2020-12/schema`；缺省时
 使用项目的同一子集，其它版本会被拒绝。布尔 schema，以及 `$ref`、`$defs`、`$id`、
 `$anchor`、`$dynamicRef`、`$vocabulary` 等机制暂不支持。`enum`、`default`、`examples`
-中的对象是数据；`properties` 下的字段名也不会被当作关键字检查。
+中的对象是数据；`properties` 下的字段名也不会被当作关键字检查。`multipleOf`、
+`exclusiveMinimum` 等关键字仍未实现，出现时由预检查明确拒绝。
 
 含未支持约束的 schema 会在读取业务输入前失败，原因写入标准错误，标准输出为空，退出码为 `2`：
 
@@ -1330,6 +1343,7 @@ moonjson-toolkit/
 ├── emit.mbt              a MoonBit type read off the shape of a document
 ├── schema.mbt            checking a document against a JSON Schema
 ├── schema_compile.mbt    safe schema compilation and structured problems
+├── schema_number.mbt     exact decimal arithmetic for schema assertions
 ├── pattern.mbt           the regular expressions a schema pattern is read with
 ├── jsonl.mbt             splitting a JSON Lines input into records
 ├── diagnostics.mbt       offsets to line/column, rendered error snippets
@@ -1354,7 +1368,7 @@ AI 响应处理都不需要联网，所以在任何机器上 `moon test` 都是�
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 314 tests
+moon test  --target native   # 328 tests
 moon fmt                     # format
 
 cd frontend
@@ -1405,7 +1419,7 @@ Total: 2558/2667
 
 `cmd/main/main.mbt` 是唯一一个有意为之的零：它是进程入口，而 `moon test` 从不运行 `main`。它做的事只是把真实的命令行和两个真实的数据流交给 `run`，而 `run` 本身由测试直接覆盖。
 
-其余没覆盖到的，都是需要进程之外的东西才能触发的分支。`ai.mbt` 里的 `analyze`——唯一与服务商通信的函数——从未被调用，因为任何测试都不允许访问真实 API；`parser.mbt` 和 `runner.mbt` 的标准输入路径没有被触及，因为每个测试都指定了文件；`color.mbt` 剩下的两个点都是内核针对一个测试套件选不了的标准输出给出的回答：管道解析不出路径，所以把路径读回来的那一支不会走到；而管道是内核描述得很清楚的一种类型，所以探测失败时的那一支也不会走到；`diagnostics.mbt` 则留着测试套件无法构造出来的那些解析错误分支和限制类型；`transform.mbt` 剩下的两个点在同一行上，是逐成员重建一个装着数组的对象时走的那一支，它到不了，因为被重建的那个成员正是名字的来源。这一行写出来而不是省掉，是为了万一哪天它不再成立，也不至于悄悄丢掉一个成员；`emit.mbt` 剩下的那个点也是同一类东西：两种都被留作可选的形状的合并，它不会发生，因为只有被前面某条记录落下的成员才是可选的，而合并进去的东西是从一条有该成员的记录上读出来的。这一行同样写出来，而不是留给它下面那个兜底分支，后者会对一对说不定哪天就会相遇的形状答 `Json`。`schema.mbt` 剩下的六个点也是同一类东西：它们是为「本工具读不懂的 schema」准备的兜底分支，而不是为任何一份文档准备的——一份不是对象的 schema、一个不认识的类型名、一个空的名字列表被连成短语——每一个都写出来，是为了让遍历不会一路落空，而在 schema 编译通过的前提下，它们一个都到不了。`is_whole_number` 里的那个点防的是数字字面量里出现非数字字符，而解析器写不出这样的字面量；`raw_of` 里的那个点防的是同一个东西，只是对象换成了「不是数字的值」，而它的调用方已经先读过了。
+其余没覆盖到的，都是需要进程之外的东西才能触发的分支。`ai.mbt` 里的 `analyze`——唯一与服务商通信的函数——从未被调用，因为任何测试都不允许访问真实 API；`parser.mbt` 和 `runner.mbt` 的标准输入路径没有被触及，因为每个测试都指定了文件；`color.mbt` 剩下的两个点都是内核针对一个测试套件选不了的标准输出给出的回答：管道解析不出路径，所以把路径读回来的那一支不会走到；而管道是内核描述得很清楚的一种类型，所以探测失败时的那一支也不会走到；`diagnostics.mbt` 则留着测试套件无法构造出来的那些解析错误分支和限制类型；`transform.mbt` 剩下的两个点在同一行上，是逐成员重建一个装着数组的对象时走的那一支，它到不了，因为被重建的那个成员正是名字的来源。这一行写出来而不是省掉，是为了万一哪天它不再成立，也不至于悄悄丢掉一个成员；`emit.mbt` 剩下的那个点也是同一类东西：两种都被留作可选的形状的合并，它不会发生，因为只有被前面某条记录落下的成员才是可选的，而合并进去的东西是从一条有该成员的记录上读出来的。这一行同样写出来，而不是留给它下面那个兜底分支，后者会对一对说不定哪天就会相遇的形状答 `Json`。`schema.mbt` 剩下的六个点也是同一类东西：它们是为「本工具读不懂的 schema」准备的兜底分支，而不是为任何一份文档准备的——一份不是对象的 schema、一个不认识的类型名、一个空的名字列表被连成短语——每一个都写出来，是为了让遍历不会一路落空，而在 schema 编译通过的前提下，它们一个都到不了。`raw_of` 的兜底处理的是「不是数字的值」，其调用方已经先检查过。整数判断和精确比较现在共用 `schema_number.mbt` 中的十进制表示。
 
 `pattern.mbt` 剩下的七个点是读取器自己写出来的分支：本该从转义序列或字符类成员里读出区间、而那两处都不会产出区间的分支，两处「不可能失败的」数字解析下面的兜底，以及 `class_item_matches` 对转义读取器从不写出的集合字母回答 `false` 的那一支。每一个说的都是「如果它上面的读法变了会怎样」，而在它没变的时候，一个都不会发生。
 
