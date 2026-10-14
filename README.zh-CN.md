@@ -191,13 +191,22 @@ way to it, and -v wins over it as it wins over the name lists.
 --schema <path> checks the input against a JSON Schema instead of printing
 it, and is read with -v, which is the flag that asks for a verdict rather
 than a document. The supported JSON Schema Draft 2020-12 subset is: type,
-required, properties, prefixItems, items, minItems, maxItems, uniqueItems,
+required, properties, patternProperties, minProperties, maxProperties,
+prefixItems, items, minItems, maxItems, uniqueItems,
 enum, const, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf,
 minLength, maxLength, pattern, allOf, anyOf, oneOf, not and additionalProperties.
 prefixItems checks existing prefix positions; items checks remaining elements
 after the prefixItems declared in the same schema object.
 minItems/maxItems accept nonnegative integers up to 1000000000.
 uniqueItems uses exact JSON equality: 1 and 1.0 count as duplicates.
+patternProperties searches field names; every matching rule checks the value.
+additionalProperties excludes names declared explicitly or matched by patterns
+in the same schema object, even when their values fail validation.
+minProperties/maxProperties accept nonnegative integers up to 1000000000.
+Regex subset: literals, dot, classes, groups, alternation, repetitions, ^ and $.
+Dot excludes LF, CR, U+2028 and U+2029. \s uses ECMAScript whitespace;
+\S is its complement. Patterns compile once per schema and are reused.
+This is not a full ECMA-262 engine; unsupported mechanisms are rejected.
 Exclusive bounds exclude equality. multipleOf uses exact decimal divisibility
 with a strictly positive divisor.
 Boolean schemas are supported: true accepts every value; false rejects it.
@@ -772,7 +781,8 @@ printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
 本工具支持明确列出的 JSON Schema Draft 2020-12 子集。未支持的关键字、版本或机制会在
 校验前报错，退出码为 `2`。本工具尚未完整实现 Draft 2020-12。
 
-当前支持 `type`、`required`、`properties`、`prefixItems`、`items`、`minItems`、`maxItems`、
+当前支持 `type`、`required`、`properties`、`patternProperties`、`minProperties`、
+`maxProperties`、`prefixItems`、`items`、`minItems`、`maxItems`、
 `uniqueItems`、`enum`、`const`、`minimum`、
 `maximum`、`exclusiveMinimum`、`exclusiveMaximum`、`multipleOf`、`minLength`、
 `maxLength`、`pattern`、`allOf`、`anyOf`、`oneOf`、`not` 和
@@ -792,9 +802,9 @@ printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
 `additionalProperties` 下的子 Schema 也会预检查，包括输入中没有出现的属性。
 
 `additionalProperties` 省略或为 `true` 时允许额外属性；为 `false` 时逐个拒绝；为 Schema
-时校验每个额外属性的值。已声明属性只按同一个 Schema 对象中 `properties` 的名称判断，
-与关键字顺序无关；`required` 中的名称、其他 `allOf` 分支中的声明都不算已声明属性。
-`patternProperties` 尚未支持，出现时仍提前拒绝。
+时校验每个额外属性的值。只有未被同级 `properties` 声明、也未匹配任何同级
+`patternProperties` 模式的名称才属于额外属性，判断与值是否通过校验、关键字顺序无关。
+`required` 中的名称、其他 `allOf` 分支中的声明和模式都不参与本对象的额外属性判断。
 
 例如，以下 Schema 禁止未声明的字段：
 
@@ -904,6 +914,52 @@ printf '[1,"a",true]' | moon run cmd/main -- -v --schema tuple.schema.json
 旧式数组形式的 `items` 属于非法参数。`additionalItems`、`contains`、`unevaluatedItems`
 等仍未支持，出现时提前拒绝，继续按 Draft 2020-12 的明确子集描述能力。
 
+`minProperties`、`maxProperties` 只统计当前对象自身的属性，不累计嵌套对象的属性数量。
+参数采用精确非负整数判断，`2.0`、`2e0` 均接受，当前实现上限为 `1_000_000_000`。
+非法参数属于 `InvalidSchema`，超过上限的合法整数属于 `UnsupportedFeature`。
+这两个关键字对非对象实例不生效。
+
+`patternProperties` 是正则到子 Schema 的对象映射，允许空对象。正则匹配字段名，
+不会自动添加 `^`、`$`；每个命中的子 Schema 都校验对应字段值。同一个字段同时命中
+显式属性和多个模式时，所有约束都执行。模式不要求匹配字段存在。
+`additionalProperties` 只检查既未显式声明、也未命中同级模式的字段。
+
+例如，以下对象允许整数 id 和字符串类型的 tag 字段：
+
+```sh
+cat > tags.schema.json <<'EOF'
+{
+  "type": "object",
+  "properties": {"id":{"type":"integer"}},
+  "patternProperties": {"^tag_":{"type":"string"}},
+  "minProperties": 1,
+  "additionalProperties": false
+}
+EOF
+printf '{"id":1,"tag_name":"a"}' | moon run cmd/main -- -v --schema tags.schema.json
+# <stdin>: valid JSON, and it matches the schema
+printf '{"tag_name":3}' | moon run cmd/main -- -v --schema tags.schema.json
+# error: <stdin> does not match the schema
+#   tag_name: it is a number where the schema expects a string
+printf '{"other":1}' | moon run cmd/main -- -v --schema tags.schema.json
+# error: <stdin> does not match the schema
+#   other: additional property is not allowed
+```
+
+正则只支持明确子集，不宣称完整 ECMA-262 兼容：支持字面字符、`.`、字符类和范围、
+`^`/`$`、普通分组、分支，以及 `*`、`+`、`?`、`{n}`、`{n,}`、`{n,m}` 重复。
+支持 `\d`、`\w`、`\s`、它们的大写补集、基本字符转义和非代理项 `\uXXXX`。
+`.` 排除 LF、CR、U+2028、U+2029。`\s` 覆盖 ECMAScript 空白和行终止符，包括 NBSP、
+BOM 和 Unicode 空格分隔符，`\S` 使用其补集；U+200B 不是空白。
+字母数字集合仍按 ASCII 判断，匹配按 Unicode 字符计数，不按 UTF-16 代码单元计数。
+
+`pattern` 和 `patternProperties` 在预检查时编译，每次 Schema 编译对同一模式原文只解析一次，
+校验期间复用私有缓存。未闭合字符类等语法错误属于 `InvalidSchema`；前后查找、反向引用、
+词边界、属性转义和特殊分组等未支持机制属于 `UnsupportedFeature`。两者均在读取输入前
+退出 `2`，空对象或恒成立分支不能掩盖错误模式。Schema 诊断会转义模式键，例如
+`patternProperties["^x"].type`；字段值违规使用实例位置，如 `data.x1`。
+`const`、`enum`、`default`、`examples` 中的同名字段仍作为普通数据，不收集进正则缓存。
+
 允许的注解为：
 
 | 注解 | 参数要求与行为 |
@@ -927,13 +983,13 @@ cat > unsupported.schema.json <<'EOF'
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "A person",
   "type": "object",
-  "patternProperties": {}
+  "unevaluatedProperties": false
 }
 EOF
 printf '{"id":1,"nickname":"Moon"}' \
   | moon run cmd/main -- -v --schema unsupported.schema.json
 # error: the schema unsupported.schema.json contains unsupported features
-#   patternProperties: keyword is not supported
+#   unevaluatedProperties: keyword is not supported
 # exit code: 2
 ```
 
@@ -1500,7 +1556,7 @@ AI 响应处理都不需要联网，所以在任何机器上 `moon test` 都是�
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 370 tests
+moon test  --target native   # 387 tests
 moon fmt                     # format
 
 cd frontend

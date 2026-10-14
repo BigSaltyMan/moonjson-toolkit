@@ -18,7 +18,7 @@ fn rejected(text : String) -> Array[@moonjson-toolkit.SchemaProblem] {
 test "public validation refuses unsupported features with locations" {
   for
     (schema, path) in [
-      ("{\"patternProperties\":{}}", "patternProperties"),
+      ("{\"unevaluatedProperties\":false}", "unevaluatedProperties"),
       (
         "{\"anyOf\":[true,{\"unevaluatedProperties\":false}]}", "anyOf[1].unevaluatedProperties",
       ),
@@ -725,5 +725,184 @@ test "compiled tuple snapshots are isolated and unique validation never rewrites
     assert_eq(@moonjson-toolkit.format_compact(value), before)
     let _ = @moonjson-toolkit.validate_compiled_schema(value, checked)
     assert_eq(@moonjson-toolkit.format_compact(value), before)
+  }
+}
+
+///|
+test "public object validation agrees with compiled regex validation" {
+  for
+    (schema_text, value_text, count, path) in [
+      ("{\"minProperties\":1}", "{}", 1, ""),
+      ("{\"maxProperties\":0}", "{}", 0, ""),
+      ("{\"maxProperties\":0}", "{\"x\":null}", 1, ""),
+      ("{\"maxProperties\":1}", "{\"x\":{\"a\":1,\"b\":2}}", 0, ""),
+      ("{\"patternProperties\":{}}", "{\"x\":1}", 0, ""),
+      (
+        "{\"patternProperties\":{\"x\":false}}", "{\"prefix_x_suffix\":1}", 1, "prefix_x_suffix",
+      ),
+      ("{\"patternProperties\":{\"^x\":false}}", "{\"y\":1}", 0, ""),
+      (
+        "{\"patternProperties\":{\"^x\":true},\"additionalProperties\":false}", "{\"x1\":1}",
+        0, "",
+      ),
+      (
+        "{\"patternProperties\":{\"^x\":true},\"additionalProperties\":false}", "{\"y\":1}",
+        1, "y",
+      ),
+      (
+        "{\"patternProperties\":{\"^x\":{\"type\":\"integer\"}},\"additionalProperties\":false}",
+        "{\"x1\":\"bad\"}", 1, "x1",
+      ),
+      (
+        "{\"properties\":{\"data\":{\"patternProperties\":{\"^x\":{\"type\":\"integer\"}}}}}",
+        "{\"data\":{\"x1\":\"bad\"}}", 1, "data.x1",
+      ),
+      (
+        "{\"allOf\":[{\"patternProperties\":{\"^x\":true}},{\"additionalProperties\":false}]}",
+        "{\"x\":1}", 1, "x",
+      ),
+      ("{\"items\":{\"pattern\":\"^x\"}}", "[\"x\",\"y\"]", 1, "[1]"),
+      (
+        "{\"minProperties\":1,\"patternProperties\":{\"\":false}}", "null", 0, "",
+      ),
+    ] {
+    let schema = json(schema_text)
+    let value = json(value_text)
+    let compiled = match @moonjson-toolkit.compile_schema(schema) {
+      Ok(compiled) => compiled
+      Err(_) => abort("valid object schema rejected")
+    }
+    let direct = match @moonjson-toolkit.validate_schema(value, schema) {
+      Ok(violations) => violations
+      Err(_) => abort("valid object schema rejected")
+    }
+    assert_eq(direct.length(), count)
+    assert_eq(
+      direct.map(@moonjson-toolkit.render_schema_error),
+      @moonjson-toolkit.validate_compiled_schema(value, compiled).map(
+        @moonjson-toolkit.render_schema_error,
+      ),
+    )
+    if count > 0 {
+      assert_eq(direct[0].path, path)
+    }
+  }
+  let ordinary = "{\"patternProperties\":{\"[\":false},\"pattern\":\"(\"}"
+  for
+    schema in ["{\"const\":" + ordinary + "}", "{\"enum\":[" + ordinary + "]}"] {
+    assert_true(
+      @moonjson-toolkit.validate_schema(json(ordinary), json(schema)) is Ok([]),
+    )
+  }
+}
+
+///|
+test "public object preflight classifies patterns counts and nested schema failures" {
+  for
+    (schema_text, kind, path) in [
+      (
+        "{\"minProperties\":-1}",
+        @moonjson-toolkit.InvalidSchema,
+        "minProperties",
+      ),
+      (
+        "{\"maxProperties\":1000000001}",
+        @moonjson-toolkit.UnsupportedFeature,
+        "maxProperties",
+      ),
+      ("{\"pattern\":\"[\"}", @moonjson-toolkit.InvalidSchema, "pattern"),
+      (
+        "{\"pattern\":\"(?=x)\"}",
+        @moonjson-toolkit.UnsupportedFeature,
+        "pattern",
+      ),
+      (
+        "{\"patternProperties\":{\"[\":true}}",
+        @moonjson-toolkit.InvalidSchema,
+        "patternProperties[\"[\"]",
+      ),
+      (
+        "{\"patternProperties\":{\"(?=x)\":true}}",
+        @moonjson-toolkit.UnsupportedFeature,
+        "patternProperties[\"(?=x)\"]",
+      ),
+      (
+        "{\"patternProperties\":{\"^x\":{\"type\":123}}}",
+        @moonjson-toolkit.InvalidSchema,
+        "patternProperties[\"^x\"].type",
+      ),
+      (
+        "{\"patternProperties\":{\"^x\":{\"$ref\":\"#/missing\"}}}",
+        @moonjson-toolkit.UnsupportedFeature,
+        "patternProperties[\"^x\"].$ref",
+      ),
+      (
+        "{\"anyOf\":[true,{\"patternProperties\":{\"[\":true}}]}",
+        @moonjson-toolkit.InvalidSchema,
+        "anyOf[1].patternProperties[\"[\"]",
+      ),
+    ] {
+    let issues = rejected(schema_text)
+    assert_eq(issues.length(), 1)
+    assert_eq(issues[0].kind, kind)
+    assert_eq(issues[0].path, path)
+    match @moonjson-toolkit.validate_schema(json("{}"), json(schema_text)) {
+      Err(problems) => assert_eq(problems, issues)
+      Ok(_) => abort("object schema preflight was bypassed")
+    }
+  }
+}
+
+///|
+test "compiled pattern mappings own snapshots and matches never retain input state" {
+  let inner = [("type", json("\"integer\""))]
+  let rules = [("^x", @pjson.Object(members=inner))]
+  let schema = @pjson.Object(members=[
+    ("patternProperties", @pjson.Object(members=rules)),
+    ("additionalProperties", json("false")),
+  ])
+  let compiled = match @moonjson-toolkit.compile_schema(schema) {
+    Ok(compiled) => compiled
+    Err(_) => abort("valid schema rejected")
+  }
+  inner[0] = ("type", json("\"string\""))
+  rules[0] = ("[", json("true"))
+  rules.clear()
+  for _ in 0..<3 {
+    for
+      (text, count, path) in [
+        ("{\"x1\":1}", 0, ""),
+        ("{\"x1\":\"bad\"}", 1, "x1"),
+        ("{\"y\":1}", 1, "y"),
+        ("{}", 0, ""),
+      ] {
+      let violations = @moonjson-toolkit.validate_compiled_schema(
+        json(text),
+        compiled,
+      )
+      assert_eq(violations.length(), count)
+      if count > 0 {
+        assert_eq(violations[0].path, path)
+      }
+    }
+  }
+  let regex = match
+    @moonjson-toolkit.compile_schema(json("{\"pattern\":\"^x+$\"}")) {
+    Ok(compiled) => compiled
+    Err(_) => abort("valid schema rejected")
+  }
+  for _ in 0..<3 {
+    assert_eq(
+      @moonjson-toolkit.validate_compiled_schema(json("\"xx\""), regex).length(),
+      0,
+    )
+    assert_eq(
+      @moonjson-toolkit.validate_compiled_schema(json("\"y\""), regex).length(),
+      1,
+    )
+    assert_eq(
+      @moonjson-toolkit.validate_compiled_schema(json("\"x\""), regex).length(),
+      0,
+    )
   }
 }

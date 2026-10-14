@@ -212,13 +212,22 @@ way to it, and -v wins over it as it wins over the name lists.
 --schema <path> checks the input against a JSON Schema instead of printing
 it, and is read with -v, which is the flag that asks for a verdict rather
 than a document. The supported JSON Schema Draft 2020-12 subset is: type,
-required, properties, prefixItems, items, minItems, maxItems, uniqueItems,
+required, properties, patternProperties, minProperties, maxProperties,
+prefixItems, items, minItems, maxItems, uniqueItems,
 enum, const, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf,
 minLength, maxLength, pattern, allOf, anyOf, oneOf, not and additionalProperties.
 prefixItems checks existing prefix positions; items checks remaining elements
 after the prefixItems declared in the same schema object.
 minItems/maxItems accept nonnegative integers up to 1000000000.
 uniqueItems uses exact JSON equality: 1 and 1.0 count as duplicates.
+patternProperties searches field names; every matching rule checks the value.
+additionalProperties excludes names declared explicitly or matched by patterns
+in the same schema object, even when their values fail validation.
+minProperties/maxProperties accept nonnegative integers up to 1000000000.
+Regex subset: literals, dot, classes, groups, alternation, repetitions, ^ and $.
+Dot excludes LF, CR, U+2028 and U+2029. \s uses ECMAScript whitespace;
+\S is its complement. Patterns compile once per schema and are reused.
+This is not a full ECMA-262 engine; unsupported mechanisms are rejected.
 Exclusive bounds exclude equality. multipleOf uses exact decimal divisibility
 with a strictly positive divisor.
 Boolean schemas are supported: true accepts every value; false rejects it.
@@ -846,7 +855,8 @@ This tool supports an explicitly listed JSON Schema Draft 2020-12 subset.
 Unsupported keywords, versions or mechanisms are rejected before validation
 with exit code `2`; this is not a full Draft 2020-12 implementation.
 
-The supported keywords are `type`, `required`, `properties`, `prefixItems`,
+The supported keywords are `type`, `required`, `properties`, `patternProperties`,
+`minProperties`, `maxProperties`, `prefixItems`,
 `items`, `minItems`, `maxItems`, `uniqueItems`, `enum`,
 `const`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`,
 `multipleOf`, `minLength`, `maxLength`, `pattern`, `allOf`, `anyOf`, `oneOf`,
@@ -870,10 +880,11 @@ and `additionalProperties` are also prechecked, including absent properties.
 
 `additionalProperties` allows extra members when omitted or `true`, rejects
 each extra member when `false`, and validates extra values when given a schema.
-Only names in `properties` in the same schema object count as declared;
-`required` names and declarations in another `allOf` branch do not count.
-Keyword order does not affect that decision. `patternProperties` remains
-unsupported and is rejected before validation.
+Names declared in `properties` or matching any `patternProperties` expression
+in the same schema object are covered. Coverage depends on the field name,
+even if the value fails its constraints. `required` names and declarations or
+patterns in another `allOf` branch do not count. Keyword order does not affect
+that decision.
 
 For example, this schema refuses an undeclared field:
 
@@ -996,6 +1007,62 @@ printf '[1,"a",true]' | moon run cmd/main -- -v --schema tuple.schema.json
 Legacy array-valued `items` is invalid. `additionalItems`, `contains` and
 `unevaluatedItems` remain unsupported and are rejected before validation.
 
+`minProperties` and `maxProperties` count only an object's own members, without
+adding nested objects' members. Parameters use exact nonnegative integer counts,
+including `2.0` and `2e0`, with the current implementation cap of
+`1_000_000_000`. Invalid parameters are `InvalidSchema`; larger valid counts
+are `UnsupportedFeature`. These keywords do not constrain nonobject instances.
+
+`patternProperties` is an object mapping regex patterns to schemas; an empty
+object is allowed. Patterns search field names without implicit anchors, and
+every matching schema checks the field's value. If an explicit property and
+several patterns all match, all their constraints apply. A pattern does not
+require any matching field to exist. `additionalProperties` only checks names
+covered by neither explicit properties nor patterns in the same schema object.
+
+For example, this object allows an integer id and string-valued tag fields:
+
+```sh
+cat > tags.schema.json <<'EOF'
+{
+  "type": "object",
+  "properties": {"id":{"type":"integer"}},
+  "patternProperties": {"^tag_":{"type":"string"}},
+  "minProperties": 1,
+  "additionalProperties": false
+}
+EOF
+printf '{"id":1,"tag_name":"a"}' | moon run cmd/main -- -v --schema tags.schema.json
+# <stdin>: valid JSON, and it matches the schema
+printf '{"tag_name":3}' | moon run cmd/main -- -v --schema tags.schema.json
+# error: <stdin> does not match the schema
+#   tag_name: it is a number where the schema expects a string
+printf '{"other":1}' | moon run cmd/main -- -v --schema tags.schema.json
+# error: <stdin> does not match the schema
+#   other: additional property is not allowed
+```
+
+Regex support is an explicit subset, rather than full ECMA-262 compatibility:
+literals, `.`, character classes and ranges, `^`/`$`, ordinary groups,
+alternation, and `*`, `+`, `?`, `{n}`, `{n,}` and `{n,m}` repetitions are supported.
+The supported escapes include `\d`, `\w`, `\s`, their uppercase complements,
+basic character escapes and nonsurrogate `\uXXXX`. Dot excludes LF, CR,
+U+2028 and U+2029. `\s` includes ECMAScript whitespace and line terminators,
+including NBSP, BOM and Unicode space separators; `\S` is the complement.
+U+200B is not whitespace. Word and digit sets remain ASCII, and matching counts
+Unicode characters rather than UTF-16 code units.
+
+Both `pattern` and `patternProperties` compile during schema preflight, once
+per distinct pattern text, and reuse that private cache for validation.
+Syntax errors such as an unclosed class are `InvalidSchema`; unsupported
+mechanisms such as lookaround, backreferences, word boundaries, property escapes
+and special groups are `UnsupportedFeature`. Both cause exit `2` before input
+is read. All entries are checked even for empty input objects or successful
+alternative branches. Schema locations escape pattern keys, for example
+`patternProperties["^x"].type`, while data violations use instance paths such
+as `data.x1`. Object members inside `const`, `enum`, `default` and `examples`
+remain ordinary data and are not collected as patterns.
+
 The allowed annotations are:
 
 | Annotation | Accepted value and behavior |
@@ -1024,13 +1091,13 @@ cat > unsupported.schema.json <<'EOF'
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "A person",
   "type": "object",
-  "patternProperties": {}
+  "unevaluatedProperties": false
 }
 EOF
 printf '{"id":1,"nickname":"Moon"}' \
   | moon run cmd/main -- -v --schema unsupported.schema.json
 # error: the schema unsupported.schema.json contains unsupported features
-#   patternProperties: keyword is not supported
+#   unevaluatedProperties: keyword is not supported
 # exit code: 2
 ```
 
@@ -1655,7 +1722,7 @@ so `moon test` is the same command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 370 tests
+moon test  --target native   # 387 tests
 moon fmt                     # format
 
 cd frontend

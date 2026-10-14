@@ -2005,3 +2005,120 @@ async test "JSONL duplicate arrays and batch tuple errors retain exit 1" {
   assert_true(batch.out.contains("Summary: 1 passed, 1 failed"))
   assert_false(batch.err.contains("matches the schema"))
 }
+
+///|
+async test "CLI object counts and pattern properties produce data verdicts" {
+  let schema = "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\"}},\"patternProperties\":{\"^tag_\":{\"type\":\"string\"}},\"minProperties\":1,\"additionalProperties\":false}"
+  for
+    index, (text, code, reason) in [
+      ("{\"id\":1,\"tag_name\":\"a\"}", 0, ""),
+      ("{}", 1, "it has 0 properties"),
+      (
+        "{\"tag_name\":3}", 1, "tag_name: it is a number where the schema expects a string",
+      ),
+      ("{\"other\":1}", 1, "other: additional property is not allowed"),
+    ] {
+    let result = run_against_schema(
+      Scratch::named("object_pattern_verdict_" + index.to_string()),
+      text,
+      schema,
+      ["--no-color"],
+      StubAnalyzer::new(Ok("unused")),
+    )
+    assert_eq(result.code, code)
+    if code == 0 {
+      assert_eq(result.err, "")
+      assert_true(result.out.contains("matches the schema"))
+    } else {
+      assert_eq(result.out, "")
+      assert_true(result.err.contains(reason))
+      assert_false(result.err.contains("matches the schema"))
+    }
+  }
+}
+
+///|
+async test "CLI object schema problems retain schema locations and exit 2" {
+  for
+    index, (schema, path) in [
+      ("{\"minProperties\":-1}", "minProperties"),
+      ("{\"maxProperties\":1000000001}", "maxProperties"),
+      ("{\"patternProperties\":{\"[\":true}}", "patternProperties[\"[\"]"),
+      (
+        "{\"patternProperties\":{\"(?=x)\":true}}", "patternProperties[\"(?=x)\"]",
+      ),
+      (
+        "{\"patternProperties\":{\"^x\":{\"type\":123}}}", "patternProperties[\"^x\"].type",
+      ),
+      (
+        "{\"patternProperties\":{\"^x\":{\"$ref\":\"#/missing\"}}}", "patternProperties[\"^x\"].$ref",
+      ),
+    ] {
+    let result = run_against_schema(
+      Scratch::named("object_pattern_preflight_" + index.to_string()),
+      "{}",
+      schema,
+      ["--no-color"],
+      StubAnalyzer::new(Ok("unused")),
+    )
+    assert_eq(result.code, 2)
+    assert_eq(result.out, "")
+    assert_true(result.err.contains("  " + path + ": "))
+    assert_false(result.err.contains("matches the schema"))
+  }
+}
+
+///|
+async test "invalid pattern is diagnosed before missing business input" {
+  let scratch = Scratch::named("object_pattern_missing")
+  discard(scratch.input)
+  @fs.write_file(scratch.schema, "{\"patternProperties\":{\"[\":true}}")
+  let result = run(
+    ["-v", "--no-color", "--schema", scratch.schema, "-f", scratch.input],
+    analyze=StubAnalyzer::new(Ok("unused")).analyzer(),
+  )
+  discard(scratch.schema)
+  assert_eq(result.code, 2)
+  assert_eq(result.out, "")
+  assert_true(result.err.contains("patternProperties[\"[\"]: "))
+  assert_true(result.err.contains("never closed"))
+  assert_false(result.err.contains("cannot read " + scratch.input))
+}
+
+///|
+async test "JSONL and batch share compiled property patterns and correct instance paths" {
+  let schema = "{\"properties\":{\"data\":{\"patternProperties\":{\"^x\":{\"type\":\"integer\"}},\"additionalProperties\":false}}}"
+  let jsonl = run_against_schema(
+    Scratch::named("object_pattern_jsonl"),
+    "{\"data\":{\"x1\":1}}\n{\"data\":{\"x1\":\"bad\"}}\n",
+    schema,
+    ["--jsonl", "--continue-on-error", "--no-color"],
+    StubAnalyzer::new(Ok("unused")),
+  )
+  assert_eq(jsonl.code, 1)
+  assert_true(jsonl.err.contains("line 2 does not match the schema"))
+  assert_true(
+    jsonl.err.contains(
+      "data.x1: it is a string where the schema expects an integer",
+    ),
+  )
+  assert_false(jsonl.out.contains("every record matches the schema"))
+  let scratch = Scratch::named("object_pattern_batch")
+  @fs.write_file(scratch.stats, "{\"data\":{\"x1\":\"bad\"}}")
+  let batch = run_against_schema(
+    scratch,
+    "{\"data\":{\"x1\":1}}",
+    schema,
+    ["-f", scratch.stats, "--continue-on-error", "--no-color"],
+    StubAnalyzer::new(Ok("unused")),
+  )
+  discard(scratch.stats)
+  assert_eq(batch.code, 1)
+  assert_true(batch.err.contains(scratch.stats + " does not match the schema"))
+  assert_true(
+    batch.err.contains(
+      "data.x1: it is a string where the schema expects an integer",
+    ),
+  )
+  assert_true(batch.out.contains("Summary: 1 passed, 1 failed"))
+}

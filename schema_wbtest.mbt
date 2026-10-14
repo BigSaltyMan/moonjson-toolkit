@@ -813,7 +813,7 @@ test "all branches are compiled even when their outcome is already decided" {
         "{\"not\":{\"unevaluatedProperties\":false}}", "not.unevaluatedProperties",
       ),
       (
-        "{\"additionalProperties\":{\"patternProperties\":{}}}", "additionalProperties.patternProperties",
+        "{\"additionalProperties\":{\"unevaluatedProperties\":false}}", "additionalProperties.unevaluatedProperties",
       ),
       (
         "{\"properties\":{\"missing\":{\"not\":{\"$ref\":\"#/x\"}}}}", "properties.missing.not.$ref",
@@ -1281,4 +1281,273 @@ test "all array subschemas are prechecked and ordinary const enum fields stay da
     }
     assert_eq(report(data, schema), "")
   }
+}
+
+///|
+test "object counts apply only to current object members" {
+  assert_eq(
+    report("{}", "{\"minProperties\":1}"),
+    "(root): it has 0 properties, but the schema requires at least 1",
+  )
+  assert_eq(report("{}", "{\"maxProperties\":0}"), "")
+  assert_eq(
+    report("{\"x\":null}", "{\"maxProperties\":0}"),
+    "(root): it has 1 property, but the schema allows at most 0",
+  )
+  assert_eq(report("{\"x\":{\"a\":1,\"b\":2}}", "{\"maxProperties\":1}"), "")
+  for raw in ["2", "2.0", "2e0"] {
+    assert_eq(
+      report(
+        "{\"x\":1,\"y\":2}",
+        "{\"minProperties\":" + raw + ",\"maxProperties\":" + raw + "}",
+      ),
+      "",
+    )
+  }
+  let contradictory = "{\"minProperties\":3,\"maxProperties\":1}"
+  assert_eq(problems(contradictory), "")
+  assert_eq(
+    report("{\"x\":1,\"y\":2}", contradictory),
+    "(root): it has 2 properties, but the schema requires at least 3\n(root): it has 2 properties, but the schema allows at most 1",
+  )
+  for value in ["null", "true", "1", "[]", "\"text\""] {
+    assert_eq(
+      report(
+        value, "{\"minProperties\":1,\"maxProperties\":0,\"patternProperties\":{\"\":false},\"additionalProperties\":false}",
+      ),
+      "",
+    )
+  }
+}
+
+///|
+test "patterns match names without implicit anchoring or required properties" {
+  assert_eq(report("{\"x\":1}", "{\"patternProperties\":{}}"), "")
+  assert_eq(
+    report("{\"prefix_x_suffix\":1}", "{\"patternProperties\":{\"x\":false}}"),
+    "prefix_x_suffix: it is rejected by the false schema",
+  )
+  assert_eq(
+    report("{\"\":1}", "{\"patternProperties\":{\"\":false}}"),
+    "(root): it is rejected by the false schema",
+  )
+  assert_eq(report("{\"y\":1}", "{\"patternProperties\":{\"^x\":false}}"), "")
+  assert_eq(report("{}", "{\"patternProperties\":{\"^x\":false}}"), "")
+  let schema = "{\"patternProperties\":{\"^x\":{\"type\":\"integer\"},\"x$\":{\"minimum\":0}}}"
+  assert_eq(report("{\"x\":1}", schema), "")
+  assert_eq(report("{\"x\":-1}", schema), "x: it is less than the minimum 0")
+  assert_eq(
+    report("{\"x\":\"a\"}", schema),
+    "x: it is a string where the schema expects an integer",
+  )
+}
+
+///|
+test "every overlapping property constraint runs without treating covered names as extra" {
+  let schema = "{\"properties\":{\"x\":{\"minimum\":0}},\"patternProperties\":{\"^x\":{\"maximum\":1},\"x$\":{\"multipleOf\":2}},\"additionalProperties\":false}"
+  assert_eq(
+    report("{\"x\":-3}", schema),
+    "x: it is less than the minimum 0\nx: it is not a multiple of 2",
+  )
+  assert_eq(
+    report("{\"x\":3}", schema),
+    "x: it is more than the maximum 1\nx: it is not a multiple of 2",
+  )
+  let patterned = "{\"patternProperties\":{\"^x\":{\"type\":\"integer\"}},\"additionalProperties\":false}"
+  assert_eq(report("{\"x1\":1}", patterned), "")
+  assert_eq(
+    report("{\"x1\":\"bad\"}", patterned),
+    "x1: it is a string where the schema expects an integer",
+  )
+  assert_eq(
+    report("{\"y\":1}", patterned),
+    "y: additional property is not allowed",
+  )
+  assert_eq(
+    report(
+      "{\"x1\":1}", "{\"patternProperties\":{\"^x\":false},\"additionalProperties\":false}",
+    ),
+    "x1: it is rejected by the false schema",
+  )
+  assert_eq(
+    report(
+      "{\"x\":\"text\",\"y\":1}", "{\"patternProperties\":{\"^x\":true},\"additionalProperties\":{\"type\":\"integer\"}}",
+    ),
+    "",
+  )
+}
+
+///|
+test "property pattern scope is local and independent of keyword order" {
+  for
+    schema in [
+      "{\"properties\":{\"id\":true},\"patternProperties\":{\"^x\":{\"type\":\"integer\"}},\"additionalProperties\":false}",
+      "{\"additionalProperties\":false,\"patternProperties\":{\"^x\":{\"type\":\"integer\"}},\"properties\":{\"id\":true}}",
+      "{\"patternProperties\":{\"^x\":{\"type\":\"integer\"}},\"additionalProperties\":false,\"properties\":{\"id\":true}}",
+      "{\"properties\":{\"id\":true},\"additionalProperties\":false,\"patternProperties\":{\"^x\":{\"type\":\"integer\"}}}",
+      "{\"additionalProperties\":false,\"properties\":{\"id\":true},\"patternProperties\":{\"^x\":{\"type\":\"integer\"}}}",
+      "{\"patternProperties\":{\"^x\":{\"type\":\"integer\"}},\"properties\":{\"id\":true},\"additionalProperties\":false}",
+    ] {
+    assert_eq(report("{\"id\":1,\"x1\":1}", schema), "")
+    assert_eq(
+      report("{\"x1\":\"bad\"}", schema),
+      "x1: it is a string where the schema expects an integer",
+    )
+    assert_eq(
+      report("{\"y\":1}", schema),
+      "y: additional property is not allowed",
+    )
+  }
+  assert_eq(
+    report(
+      "{\"x\":1}", "{\"allOf\":[{\"patternProperties\":{\"^x\":true}},{\"additionalProperties\":false}]}",
+    ),
+    "x: allOf[1]: additional property is not allowed",
+  )
+  assert_eq(
+    report(
+      "{\"x\":1}", "{\"allOf\":[{\"patternProperties\":{\"^x\":true}}],\"additionalProperties\":false}",
+    ),
+    "x: additional property is not allowed",
+  )
+  assert_eq(
+    report(
+      "{\"x\":1}", "{\"required\":[\"x\"],\"patternProperties\":{},\"additionalProperties\":false}",
+    ),
+    "x: additional property is not allowed",
+  )
+}
+
+///|
+test "property count and regex preflight retain categories and escaped locations" {
+  for keyword in ["minProperties", "maxProperties"] {
+    for
+      (raw, kind) in [
+        ("-1", InvalidSchema),
+        ("1e-400", InvalidSchema),
+        ("false", InvalidSchema),
+        ("1000000001", UnsupportedFeature),
+        ("1e400", UnsupportedFeature),
+      ] {
+      let issues = schema_problems(
+        parse_ok("{\"" + keyword + "\":" + raw + "}"),
+      )
+      assert_eq(issues.length(), 1)
+      assert_eq(issues[0].kind, kind)
+      assert_eq(issues[0].path, keyword)
+      assert_true(issues[0].message.contains("propert"))
+      assert_false(issues[0].message.contains("character"))
+      assert_false(issues[0].message.contains("items"))
+    }
+    for raw in ["0", "2.0", "2e0", "1000000000"] {
+      assert_eq(problems("{\"" + keyword + "\":" + raw + "}"), "")
+    }
+  }
+  for
+    (schema, path, kind) in [
+      ("{\"patternProperties\":[]}", "patternProperties", InvalidSchema),
+      (
+        "{\"patternProperties\":{\"^x\":null}}",
+        "patternProperties[\"^x\"]",
+        InvalidSchema,
+      ),
+      (
+        "{\"patternProperties\":{\"^x\":{\"type\":123}}}",
+        "patternProperties[\"^x\"].type",
+        InvalidSchema,
+      ),
+      (
+        "{\"patternProperties\":{\"[\":true}}",
+        "patternProperties[\"[\"]",
+        InvalidSchema,
+      ),
+      (
+        "{\"patternProperties\":{\"(?=x)\":true}}",
+        "patternProperties[\"(?=x)\"]",
+        UnsupportedFeature,
+      ),
+      (
+        "{\"patternProperties\":{\"^x\":{\"$ref\":\"#/missing\"}}}",
+        "patternProperties[\"^x\"].$ref",
+        UnsupportedFeature,
+      ),
+      (
+        "{\"anyOf\":[true,{\"patternProperties\":{\"[\":true}}]}",
+        "anyOf[1].patternProperties[\"[\"]",
+        InvalidSchema,
+      ),
+    ] {
+    let issues = schema_problems(parse_ok(schema))
+    assert_eq(issues.length(), 1)
+    assert_eq(issues[0].path, path)
+    assert_eq(issues[0].kind, kind)
+    assert_true(validate_schema(parse_ok("{}"), parse_ok(schema)) is Err(_))
+  }
+  let key = "a.b[\"x\"]\\\\"
+  let schema = @pjson.Object(members=[
+    (
+      "patternProperties",
+      @pjson.Object(members=[(key, parse_ok("{\"type\":123}"))]),
+    ),
+  ])
+  let issues = schema_problems(schema)
+  assert_eq(issues.length(), 1)
+  assert_eq(
+    issues[0].path,
+    "patternProperties[\"a.b[\\\"x\\\"]\\\\\\\\\"].type",
+  )
+}
+
+///|
+test "regex cache collects only real schema positions and reuses identical patterns" {
+  let schema = parse_ok(
+    (
+      #|{"pattern":"^x","properties":{"a":{"pattern":"^x"}},
+      #| "patternProperties":{"^x":{"pattern":"^x"}},
+      #| "prefixItems":[{"pattern":"^y"}],"items":{"not":{"pattern":"^x"}},
+      #| "additionalProperties":{"pattern":"^y"},
+      #| "const":{"pattern":"[","patternProperties":{"(":false}},
+      #| "enum":[{"pattern":"["}],"default":{"pattern":"["},"examples":[{"patternProperties":{"[":true}}]}
+    ),
+  )
+  let compiled = match compile_schema(schema) {
+    Ok(compiled) => compiled
+    Err(_) => abort("valid schema refused")
+  }
+  assert_eq(compiled.patterns.length(), 2)
+  assert_true(compiled.patterns.contains("^x"))
+  assert_true(compiled.patterns.contains("^y"))
+  let cache : Map[String, Result[Pattern, PatternProblem]] = Map([])
+  let issues = precheck_schema(
+    parse_ok("{\"pattern\":\"[\",\"properties\":{\"x\":{\"pattern\":\"[\"}}}"),
+    cache,
+  )
+  assert_eq(cache.length(), 1)
+  assert_eq(issues.length(), 2)
+  assert_eq(issues[0].path, "pattern")
+  assert_eq(issues[1].path, "properties.x.pattern")
+  assert_eq(issues[0].kind, InvalidSchema)
+  // Seed a parsed entry under an otherwise invalid raw key to prove cache hits
+  // never invoke the parser again. This context is accessible only to whitebox tests.
+  let parsed = match read_pattern("^x") {
+    Ok(pattern) => pattern
+    Err(_) => abort("valid pattern refused")
+  }
+  let seeded : Map[String, Result[Pattern, PatternProblem]] = Map([
+    ("[", Ok(parsed)),
+  ])
+  assert_eq(
+    precheck_schema(
+      parse_ok("{\"pattern\":\"[\",\"patternProperties\":{\"[\":true}}"),
+      seeded,
+    ).length(),
+    0,
+  )
+  let patterns : Map[String, Pattern] = Map([("[", parsed)])
+  let compiled : CompiledSchema = {
+    schema: parse_ok("{\"pattern\":\"[\"}"),
+    patterns,
+  }
+  assert_eq(validate_compiled_schema(parse_ok("\"x\""), compiled).length(), 0)
+  assert_eq(validate_compiled_schema(parse_ok("\"y\""), compiled).length(), 1)
 }

@@ -63,7 +63,7 @@ test "^ and $ are the two ends of the text" {
 }
 
 ///|
-test "a dot is any character but a line feed" {
+test "a dot matches characters and excludes line terminators" {
   assert_true(matches("a.c", "abc"))
   assert_true(matches("a.c", "a c"))
   assert_false(matches("a.c", "ac"))
@@ -80,8 +80,7 @@ test "a class holds the characters it lists" {
   assert_false(matches("^[abc]+$", "cad"))
   assert_true(matches("^[a-c]+$", "abc"))
   assert_false(matches("^[a-c]+$", "abd"))
-  // A negated class holds everything else, the line feed included: only `.`
-  // leaves one out.
+  // A negated class can include line terminators; dot excludes those characters.
   assert_true(matches("^[^a-c]+$", "xyz"))
   assert_false(matches("^[^a-c]+$", "xay"))
   assert_true(matches("^[^a]+$", "\n"))
@@ -270,4 +269,77 @@ test "an anchored pattern is looked for at one position" {
     ),
   )
   assert_true(matches_only("^[a-z]([a-z0-9-]*[a-z0-9])?$", "moon-json-2"))
+}
+
+///|
+test "compiled patterns can be matched repeatedly without retaining text state" {
+  for text in ["^x", "(a|b)+", "^[\\s\\S]$", "", "^[a-z]{1,3}$"] {
+    let pattern = match read_pattern(text) {
+      Ok(pattern) => pattern
+      Err(_) => abort("supported pattern refused")
+    }
+    for _ in 0..<3 {
+      for input in ["x1", "no", "ab", "a\n", "", "😀"] {
+        assert_eq(
+          pattern_matches(text, input),
+          Ok(match_compiled_pattern(pattern, input)),
+        )
+      }
+    }
+  }
+}
+
+///|
+test "dot excludes exactly the ECMAScript line terminators" {
+  for text in ["\n", "\r", "\u{2028}", "\u{2029}"] {
+    assert_false(matches("^.$", text))
+    assert_false(matches("a.c", "a" + text + "c"))
+    assert_true(matches("^[\\s\\S]$", text))
+  }
+  for text in ["\u{A0}", "\u{FEFF}", "\u{85}", "\u{200B}", "😀"] {
+    assert_true(matches("^.$", text))
+  }
+}
+
+///|
+test "space escapes include ECMAScript whitespace and exclude zero width space" {
+  for
+    ch in [
+      ' ', '\t', '\n', '\r', '\u{0B}', '\u{0C}', '\u{A0}', '\u{FEFF}', '\u{1680}',
+      '\u{2000}', '\u{2001}', '\u{2002}', '\u{2003}', '\u{2004}', '\u{2005}', '\u{2006}',
+      '\u{2007}', '\u{2008}', '\u{2009}', '\u{200A}', '\u{2028}', '\u{2029}', '\u{202F}',
+      '\u{205F}', '\u{3000}',
+    ] {
+    assert_true(matches("^\\s$", ch.to_string()))
+    assert_true(matches("^[\\s]$", ch.to_string()))
+    assert_false(matches("^\\S$", ch.to_string()))
+    assert_false(matches("^[^\\s]$", ch.to_string()))
+  }
+  for ch in ['\u{200B}', '\u{85}', '\u{180E}', 'x'] {
+    assert_false(matches("^\\s$", ch.to_string()))
+    assert_true(matches("^\\S$", ch.to_string()))
+  }
+}
+
+///|
+test "pattern parser distinguishes syntax mistakes from unsupported mechanisms" {
+  for text in ["[", "(", "a{3,2}", "[z-a]", "\\u12", "\\"] {
+    match read_pattern(text) {
+      Err(problem) => assert_eq(problem.kind(), InvalidSchema)
+      Ok(_) => abort("invalid pattern accepted")
+    }
+  }
+  for
+    text in [
+      "(?=x)", "(?!x)", "(?<=x)", "(?:x)", "\\1", "\\b", "\\p{L}", "\\u{41}", "\\uD83D",
+      "\\01",
+    ] {
+    match read_pattern(text) {
+      Err(problem) => {
+        assert_eq(problem.kind(), UnsupportedFeature)
+        assert_eq(pattern_matches(text, "x"), Err(problem.message()))
+      }
+      Ok(_) => abort("unsupported pattern accepted")
+    }
+  }
 }

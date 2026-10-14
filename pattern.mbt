@@ -33,7 +33,7 @@ priv struct Pattern {
 /// One element of a sequence.
 priv enum Piece {
   Literal(Char) // one character, written as itself or escaped
-  AnyChar // `.`: any character but a line feed
+  AnyChar // `.`: any character except the four ECMAScript line terminators
   CharSet(Bool, Array[ClassItem]) // `[...]`: the flag says the set is negated
   AnchorStart // `^`
   AnchorEnd // `$`
@@ -62,6 +62,27 @@ priv enum ClassItem {
 priv struct Cursor {
   text : Array[Char]
   mut pos : Int
+}
+
+///|
+priv enum PatternProblem {
+  InvalidPattern(String)
+  UnsupportedPattern(String)
+}
+
+///|
+fn PatternProblem::message(self : PatternProblem) -> String {
+  match self {
+    InvalidPattern(message) | UnsupportedPattern(message) => message
+  }
+}
+
+///|
+fn PatternProblem::kind(self : PatternProblem) -> SchemaProblemKind {
+  match self {
+    InvalidPattern(_) => InvalidSchema
+    UnsupportedPattern(_) => UnsupportedFeature
+  }
 }
 
 ///|
@@ -96,22 +117,28 @@ fn Cursor::advance(self : Cursor) -> Unit {
 pub fn pattern_matches(pattern : String, text : String) -> Result[Bool, String] {
   let parsed = match read_pattern(pattern) {
     Ok(parsed) => parsed
-    Err(message) => return Err(message)
+    Err(problem) => return Err(problem.message())
   }
+  Ok(match_compiled_pattern(parsed, text))
+}
+
+///|
+/// Each match keeps all its state locally, so a parsed pattern is reusable.
+fn match_compiled_pattern(parsed : Pattern, text : String) -> Bool {
   let chars = text.to_array()
   let mut start = 0
   while start <= chars.length() {
     if end_positions(parsed, chars, start).length() > 0 {
-      return Ok(true)
+      return true
     }
     start = start + 1
   }
-  Ok(false)
+  false
 }
 
 ///|
 /// Read a pattern from its text, from the beginning to the end of it.
-fn read_pattern(text : String) -> Result[Pattern, String] {
+fn read_pattern(text : String) -> Result[Pattern, PatternProblem] {
   let cursor : Cursor = { text: text.to_array(), pos: 0, }
   let pattern = match read_alternation(cursor) {
     Ok(pattern) => pattern
@@ -120,7 +147,7 @@ fn read_pattern(text : String) -> Result[Pattern, String] {
   if !cursor.done() {
     // The one character that stops a sequence without ending the pattern is
     // `)`, and it only ends one where a `(` opened it.
-    return Err("\")\" has no matching \"(\"")
+    return Err(InvalidPattern("\")\" has no matching \"(\""))
   }
   Ok(pattern)
 }
@@ -131,7 +158,7 @@ fn read_pattern(text : String) -> Result[Pattern, String] {
 ///
 /// A branch with nothing in it matches the empty string, which is what `a|` and
 /// `(|a)` say, so there is nothing to refuse here.
-fn read_alternation(cursor : Cursor) -> Result[Pattern, String] {
+fn read_alternation(cursor : Cursor) -> Result[Pattern, PatternProblem] {
   let branches = []
   while true {
     match read_sequence(cursor) {
@@ -150,7 +177,7 @@ fn read_alternation(cursor : Cursor) -> Result[Pattern, String] {
 ///|
 /// Read the pieces up to the end of a branch: the end of the pattern, a `)`, or
 /// the `|` that starts the next branch.
-fn read_sequence(cursor : Cursor) -> Result[Array[Piece], String] {
+fn read_sequence(cursor : Cursor) -> Result[Array[Piece], PatternProblem] {
   let pieces = []
   while !cursor.done() {
     let ch = cursor.peek()
@@ -172,7 +199,7 @@ fn read_sequence(cursor : Cursor) -> Result[Array[Piece], String] {
 /// Nothing here cares which of the two is found — the question asked is whether
 /// a match is there at all, and greediness is about which of several matches is
 /// reported — so it is read and then dropped.
-fn read_piece(cursor : Cursor) -> Result[Piece, String] {
+fn read_piece(cursor : Cursor) -> Result[Piece, PatternProblem] {
   let atom = match read_atom(cursor) {
     Ok(atom) => atom
     Err(message) => return Err(message)
@@ -214,16 +241,19 @@ fn read_piece(cursor : Cursor) -> Result[Piece, String] {
 /// and a schema writer who meant a literal brace can write `\{`: the other
 /// reading would mean a pattern that looks like a repetition and quietly is not
 /// one.
-fn read_braces(cursor : Cursor, atom : Piece) -> Result[Piece, String] {
+fn read_braces(cursor : Cursor, atom : Piece) -> Result[Piece, PatternProblem] {
   cursor.advance()
   let least = match read_number(cursor) {
     Some(number) => number
     // Written out rather than read as `0`: a `{` with no count in it is not a
     // repetition of nothing, and the pattern under it is not matched as one.
-    None => return Err("\"{\" must open a repetition like {2}, {2,} or {2,5}")
+    None =>
+      return Err(
+        InvalidPattern("\"{\" must open a repetition like {2}, {2,} or {2,5}"),
+      )
   }
   if cursor.done() {
-    return Err("\"{\" is never closed")
+    return Err(InvalidPattern("\"{\" is never closed"))
   }
   match cursor.peek() {
     '}' => {
@@ -234,17 +264,19 @@ fn read_braces(cursor : Cursor, atom : Piece) -> Result[Piece, String] {
       cursor.advance()
       let most = read_number(cursor) // none at all means no end
       if cursor.done() || cursor.peek() != '}' {
-        return Err("\"{\" is never closed")
+        return Err(InvalidPattern("\"{\" is never closed"))
       }
       cursor.advance()
       match most {
         Some(most) =>
           if most < least {
             return Err(
-              "a repetition cannot start at " +
-              least.to_string() +
-              " and end at " +
-              most.to_string(),
+              InvalidPattern(
+                "a repetition cannot start at " +
+                least.to_string() +
+                " and end at " +
+                most.to_string(),
+              ),
             )
           } else {
             Ok(Repeat(atom, least, most))
@@ -252,7 +284,10 @@ fn read_braces(cursor : Cursor, atom : Piece) -> Result[Piece, String] {
         None => Ok(Repeat(atom, least, -1))
       }
     }
-    _ => Err("\"{\" must open a repetition like {2}, {2,} or {2,5}")
+    _ =>
+      Err(
+        InvalidPattern("\"{\" must open a repetition like {2}, {2,} or {2,5}"),
+      )
   }
 }
 
@@ -285,17 +320,24 @@ fn read_number(cursor : Cursor) -> Int? {
 
 ///|
 /// Read one atom: the smallest thing a repetition can be put after.
-fn read_atom(cursor : Cursor) -> Result[Piece, String] {
+fn read_atom(cursor : Cursor) -> Result[Piece, PatternProblem] {
   let ch = cursor.peek()
   match ch {
     '(' => {
       cursor.advance()
+      if !cursor.done() && cursor.peek() == '?' {
+        return Err(
+          UnsupportedPattern(
+            "special groups such as lookaround are not supported",
+          ),
+        )
+      }
       let inner = match read_alternation(cursor) {
         Ok(inner) => inner
         Err(message) => return Err(message)
       }
       if cursor.done() || cursor.peek() != ')' {
-        return Err("\"(\" is never closed")
+        return Err(InvalidPattern("\"(\" is never closed"))
       }
       cursor.advance()
       Ok(Group(inner))
@@ -324,7 +366,8 @@ fn read_atom(cursor : Cursor) -> Result[Piece, String] {
         Ok(ClassItem::Range(_, _)) => Ok(Literal(ch))
         Err(message) => Err(message)
       }
-    '*' | '+' | '?' => Err("\"" + ch.to_string() + "\" has nothing to repeat")
+    '*' | '+' | '?' =>
+      Err(InvalidPattern("\"" + ch.to_string() + "\" has nothing to repeat"))
     _ => {
       cursor.advance()
       Ok(Literal(ch))
@@ -340,7 +383,7 @@ fn read_atom(cursor : Cursor) -> Result[Piece, String] {
 /// as an unterminated class would be reading it as something else. A `-` is a
 /// range only between two characters, so the one in `[a-]` is the character it
 /// looks like.
-fn read_class(cursor : Cursor) -> Result[Piece, String] {
+fn read_class(cursor : Cursor) -> Result[Piece, PatternProblem] {
   cursor.advance()
   let negated = if !cursor.done() && cursor.peek() == '^' {
     cursor.advance()
@@ -369,12 +412,23 @@ fn read_class(cursor : Cursor) -> Result[Piece, String] {
             Err(message) => return Err(message)
           }
           match second {
-            One(to) => items.push(Range(from, to))
+            One(to) => {
+              if from > to {
+                return Err(
+                  InvalidPattern(
+                    "a character range cannot end before it starts",
+                  ),
+                )
+              }
+              items.push(Range(from, to))
+            }
             Named(letter) =>
               return Err(
-                "\"-\" is a range between two characters, and \"" +
-                letter.to_string() +
-                "\" is a set of them",
+                InvalidPattern(
+                  "\"-\" is a range between two characters, and \"" +
+                  letter.to_string() +
+                  "\" is a set of them",
+                ),
               )
             // Unreachable: `read_class_item` answers a range for no item.
             Range(_, _) => items.push(One(from))
@@ -385,7 +439,7 @@ fn read_class(cursor : Cursor) -> Result[Piece, String] {
     }
   }
   if cursor.done() {
-    return Err("\"[\" is never closed")
+    return Err(InvalidPattern("\"[\" is never closed"))
   }
   cursor.advance()
   Ok(CharSet(negated, items))
@@ -393,7 +447,7 @@ fn read_class(cursor : Cursor) -> Result[Piece, String] {
 
 ///|
 /// Read one member of a character class.
-fn read_class_item(cursor : Cursor) -> Result[ClassItem, String] {
+fn read_class_item(cursor : Cursor) -> Result[ClassItem, PatternProblem] {
   if cursor.peek() == '\\' {
     read_escape(cursor)
   } else {
@@ -413,10 +467,10 @@ fn read_class_item(cursor : Cursor) -> Result[ClassItem, String] {
 /// this tool writes with a letter, is refused rather than read as `q`. Before
 /// anything else it is that character, which is how `.`, `[` and `\` are written
 /// as themselves.
-fn read_escape(cursor : Cursor) -> Result[ClassItem, String] {
+fn read_escape(cursor : Cursor) -> Result[ClassItem, PatternProblem] {
   cursor.advance()
   if cursor.done() {
-    return Err("\"\\\" is the last character of the pattern")
+    return Err(InvalidPattern("\"\\\" is the last character of the pattern"))
   }
   let ch = cursor.peek()
   cursor.advance()
@@ -427,11 +481,20 @@ fn read_escape(cursor : Cursor) -> Result[ClassItem, String] {
     't' => Ok(One('\t'))
     'f' => Ok(One('\u{0C}'))
     'v' => Ok(One('\u{0B}'))
-    '0' => Ok(One('\u{0}'))
+    '0' =>
+      if !cursor.done() && cursor.peek().is_ascii_digit() {
+        Err(UnsupportedPattern("legacy octal escapes are not supported"))
+      } else {
+        Ok(One('\u{0}'))
+      }
     'u' => read_code_point(cursor)
     _ =>
       if ch.is_ascii_alphabetic() || ch.is_ascii_digit() {
-        Err("\"\\" + ch.to_string() + "\" is not an escape this tool reads")
+        Err(
+          UnsupportedPattern(
+            "\"\\" + ch.to_string() + "\" is not an escape this tool reads",
+          ),
+        )
       } else {
         Ok(One(ch))
       }
@@ -444,12 +507,17 @@ fn read_escape(cursor : Cursor) -> Result[ClassItem, String] {
 /// One escape is one character, so an escape pair standing for a character
 /// outside the basic plane — `\uD83D\uDE00` for an emoji — is two characters
 /// here, and a pattern written that way will not match the character it names.
-fn read_code_point(cursor : Cursor) -> Result[ClassItem, String] {
+fn read_code_point(cursor : Cursor) -> Result[ClassItem, PatternProblem] {
+  if !cursor.done() && cursor.peek() == '{' {
+    return Err(UnsupportedPattern("braced Unicode escapes are not supported"))
+  }
   let digits = StringBuilder()
   let mut read = 0
   while read < 4 {
     if cursor.done() || !cursor.peek().is_ascii_hexdigit() {
-      return Err("\"\\u\" must be followed by four hexadecimal digits")
+      return Err(
+        InvalidPattern("\"\\u\" must be followed by four hexadecimal digits"),
+      )
     }
     digits.write_char(cursor.peek())
     cursor.advance()
@@ -464,7 +532,12 @@ fn read_code_point(cursor : Cursor) -> Result[ClassItem, String] {
     Some(ch) => Ok(One(ch))
     // A value in the surrogate range is half of a character rather than one:
     // `\uD83D` is the first half of an emoji and means nothing on its own.
-    None => Err("\"\\u" + digits.to_string() + "\" does not name a character")
+    None =>
+      Err(
+        UnsupportedPattern(
+          "\"\\u" + digits.to_string() + "\" does not name a character",
+        ),
+      )
   }
 }
 
@@ -527,7 +600,7 @@ fn piece_ends(piece : Piece, text : Array[Char], position : Int) -> Array[Int] {
         []
       }
     AnyChar =>
-      if position < length && text[position] != '\n' {
+      if position < length && !is_pattern_line_terminator(text[position]) {
         [position + 1]
       } else {
         []
@@ -615,17 +688,27 @@ fn class_item_matches(item : ClassItem, ch : Char) -> Bool {
 }
 
 ///|
-/// Whether a character is one of the six the schema dialect calls whitespace.
-///
-/// The six are the ones a JavaScript engine matches: the space, the tab, the
-/// line feed, the carriage return and the two that only exist as escapes.
+/// ECMAScript WhiteSpace (including Unicode Zs) and LineTerminator characters.
 fn is_space(ch : Char) -> Bool {
-  ch == ' ' ||
-  ch == '\t' ||
-  ch == '\n' ||
-  ch == '\r' ||
-  ch == '\u{0B}' ||
-  ch == '\u{0C}'
+  match ch {
+    ' '
+    | '\t'
+    | '\u{0B}'
+    | '\u{0C}'
+    | '\u{A0}'
+    | '\u{FEFF}'
+    | '\u{1680}'
+    | '\u{202F}'
+    | '\u{205F}'
+    | '\u{3000}' => true
+    _ =>
+      (ch >= '\u{2000}' && ch <= '\u{200A}') || is_pattern_line_terminator(ch)
+  }
+}
+
+///|
+fn is_pattern_line_terminator(ch : Char) -> Bool {
+  ch == '\n' || ch == '\r' || ch == '\u{2028}' || ch == '\u{2029}'
 }
 
 ///|

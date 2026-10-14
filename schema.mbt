@@ -33,7 +33,7 @@ pub fn validate_compiled_schema(
   compiled : CompiledSchema,
 ) -> Array[SchemaError] {
   let errors = []
-  check_value(json, compiled.schema, "", errors)
+  check_value(json, compiled.schema, "", errors, compiled.patterns)
   errors
 }
 
@@ -54,9 +54,7 @@ pub fn render_schema_error(error : SchemaError) -> String {
 /// this tool knows how to apply, and a schema that is not is answered with the
 /// place to fix rather than with a document that was never compared to it.
 pub fn schema_problems(schema : @pjson.Json) -> Array[SchemaProblem] {
-  let errors = []
-  check_schema(schema, "", errors)
-  errors
+  precheck_schema(schema, Map([]))
 }
 
 ///|
@@ -72,6 +70,7 @@ fn check_value(
   schema : @pjson.Json,
   path : String,
   errors : Array[SchemaError],
+  patterns : Map[String, Pattern],
 ) -> Unit {
   match schema {
     Object(members~) =>
@@ -80,25 +79,35 @@ fn check_value(
         match keyword {
           "type" => check_type(value, wanted, path, errors)
           "required" => check_required(value, wanted, path, errors)
-          "properties" => check_properties(value, wanted, path, errors)
-          "items" => check_items(value, wanted, members, path, errors)
-          "prefixItems" => check_prefix_items(value, wanted, path, errors)
+          "properties" =>
+            check_properties(value, wanted, path, errors, patterns)
+          "patternProperties" =>
+            check_pattern_properties(value, wanted, path, errors, patterns)
+          "minProperties" =>
+            check_property_count(value, wanted, path, errors, true)
+          "maxProperties" =>
+            check_property_count(value, wanted, path, errors, false)
+          "items" => check_items(value, wanted, members, path, errors, patterns)
+          "prefixItems" =>
+            check_prefix_items(value, wanted, path, errors, patterns)
           "minItems" => check_array_length(value, wanted, path, errors, true)
           "maxItems" => check_array_length(value, wanted, path, errors, false)
           "uniqueItems" => check_unique_items(value, wanted, path, errors)
           "enum" => check_enum(value, wanted, path, errors)
           "const" => check_const(value, wanted, path, errors)
           "allOf" | "anyOf" | "oneOf" =>
-            check_combination(value, wanted, keyword, path, errors)
+            check_combination(value, wanted, keyword, path, errors, patterns)
           "not" =>
-            if branch_errors(value, wanted, path).is_empty() {
+            if branch_errors(value, wanted, path, patterns).is_empty() {
               errors.push({
                 path,
                 message: "it matches the schema forbidden by not",
               })
             }
           "additionalProperties" =>
-            check_additional_properties(value, wanted, members, path, errors)
+            check_additional_properties(
+              value, wanted, members, path, errors, patterns,
+            )
           "minimum" =>
             check_bound(value, wanted, path, errors, InclusiveMinimum)
           "maximum" =>
@@ -110,7 +119,7 @@ fn check_value(
           "multipleOf" => check_multiple_of(value, wanted, path, errors)
           "minLength" => check_length(value, wanted, path, errors, true)
           "maxLength" => check_length(value, wanted, path, errors, false)
-          "pattern" => check_pattern(value, wanted, path, errors)
+          "pattern" => check_pattern(value, wanted, path, errors, patterns)
           _ => ()
         }
       }
@@ -129,9 +138,10 @@ fn branch_errors(
   value : @pjson.Json,
   schema : @pjson.Json,
   path : String,
+  patterns : Map[String, Pattern],
 ) -> Array[SchemaError] {
   let errors = []
-  check_value(value, schema, path, errors)
+  check_value(value, schema, path, errors, patterns)
   errors
 }
 
@@ -157,6 +167,7 @@ fn check_combination(
   keyword : String,
   path : String,
   errors : Array[SchemaError],
+  patterns : Map[String, Pattern],
 ) -> Unit {
   let branches = match wanted {
     Array(items~) => items
@@ -165,7 +176,7 @@ fn check_combination(
   }
   let mut matches = 0
   for index, schema in branches {
-    let violations = branch_errors(value, schema, path)
+    let violations = branch_errors(value, schema, path, patterns)
     if violations.is_empty() {
       matches = matches + 1
     } else if keyword == "allOf" {
@@ -191,23 +202,34 @@ fn check_combination(
 }
 
 ///|
-/// Only properties declared in this schema object count as declared. The
-/// keyword order, required names and declarations in other branches do not.
+/// Names declared explicitly or matched by a pattern in this object are covered,
+/// even when their values fail. Other branches and required names do not count.
 fn check_additional_properties(
   value : @pjson.Json,
   wanted : @pjson.Json,
   schema_members : Array[(String, @pjson.Json)],
   path : String,
   errors : Array[SchemaError],
+  patterns : Map[String, Pattern],
 ) -> Unit {
   let declared = match find_member(schema_members, "properties") {
+    Some(Object(members~)) => members
+    _ => []
+  }
+  let patterned = match find_member(schema_members, "patternProperties") {
     Some(Object(members~)) => members
     _ => []
   }
   match value {
     Object(members~) =>
       for (name, held) in members {
-        if !declared.any(fn(entry) { entry.0 == name }) {
+        if !declared.any(fn(entry) { entry.0 == name }) &&
+          !patterned.any(fn(entry) {
+            match_compiled_pattern(
+              compiled_schema_pattern(patterns, entry.0),
+              name,
+            )
+          }) {
           let here = child_path(path, name)
           match wanted {
             Bool(value=false) =>
@@ -215,10 +237,66 @@ fn check_additional_properties(
                 path: here,
                 message: "additional property is not allowed",
               })
-            _ => check_value(held, wanted, here, errors)
+            _ => check_value(held, wanted, here, errors, patterns)
           }
         }
       }
+    _ => ()
+  }
+}
+
+///|
+fn check_pattern_properties(
+  value : @pjson.Json,
+  wanted : @pjson.Json,
+  path : String,
+  errors : Array[SchemaError],
+  patterns : Map[String, Pattern],
+) -> Unit {
+  match (value, wanted) {
+    (Object(members~), Object(members=rules)) =>
+      for (text, schema) in rules {
+        let pattern = compiled_schema_pattern(patterns, text)
+        for (name, held) in members {
+          if match_compiled_pattern(pattern, name) {
+            check_value(held, schema, child_path(path, name), errors, patterns)
+          }
+        }
+      }
+    _ => ()
+  }
+}
+
+///|
+fn check_property_count(
+  value : @pjson.Json,
+  wanted : @pjson.Json,
+  path : String,
+  errors : Array[SchemaError],
+  least : Bool,
+) -> Unit {
+  let limit = match length_argument(wanted) {
+    Ok(limit) => limit
+    Err(_) => return
+  }
+  match value {
+    Object(members~) => {
+      let count = members.length()
+      if (least && count < limit) || (!least && count > limit) {
+        errors.push({
+          path,
+          message: "it has " +
+          count.to_string() +
+          (if count == 1 { " property" } else { " properties" }) +
+          (if least {
+            ", but the schema requires at least "
+          } else {
+            ", but the schema allows at most "
+          }) +
+          limit.to_string(),
+        })
+      }
+    }
     _ => ()
   }
 }
@@ -414,6 +492,7 @@ fn check_properties(
   wanted : @pjson.Json,
   path : String,
   errors : Array[SchemaError],
+  patterns : Map[String, Pattern],
 ) -> Unit {
   let subschemas = match wanted {
     Object(members~) => members
@@ -430,7 +509,7 @@ fn check_properties(
   for entry in subschemas {
     match find_member(members, entry.0) {
       Some(held) =>
-        check_value(held, entry.1, child_path(path, entry.0), errors)
+        check_value(held, entry.1, child_path(path, entry.0), errors, patterns)
       None => ()
     }
   }
@@ -445,6 +524,7 @@ fn check_items(
   schema_members : Array[(String, @pjson.Json)],
   path : String,
   errors : Array[SchemaError],
+  patterns : Map[String, Pattern],
 ) -> Unit {
   let start = match find_member(schema_members, "prefixItems") {
     Some(Array(items~)) => items.length()
@@ -459,6 +539,7 @@ fn check_items(
             wanted,
             path + "[" + index.to_string() + "]",
             errors,
+            patterns,
           )
         }
       }
@@ -472,6 +553,7 @@ fn check_prefix_items(
   wanted : @pjson.Json,
   path : String,
   errors : Array[SchemaError],
+  patterns : Map[String, Pattern],
 ) -> Unit {
   match (value, wanted) {
     (Array(items~), Array(items=schemas)) =>
@@ -481,6 +563,7 @@ fn check_prefix_items(
           schemas[index],
           path + "[" + index.to_string() + "]",
           errors,
+          patterns,
         )
       }
     _ => ()
@@ -719,6 +802,7 @@ fn check_pattern(
   wanted : @pjson.Json,
   path : String,
   errors : Array[SchemaError],
+  patterns : Map[String, Pattern],
 ) -> Unit {
   let pattern = match text_of(wanted) {
     Some(pattern) => pattern
@@ -727,14 +811,14 @@ fn check_pattern(
   }
   match text_of(value) {
     Some(text) =>
-      match pattern_matches(pattern, text) {
-        Ok(true) => ()
-        Ok(false) =>
-          errors.push({
-            path,
-            message: "it does not match the pattern \"" + pattern + "\"",
-          })
-        Err(_) => ()
+      if !match_compiled_pattern(
+          compiled_schema_pattern(patterns, pattern),
+          text,
+        ) {
+        errors.push({
+          path,
+          message: "it does not match the pattern \"" + pattern + "\"",
+        })
       }
     _ => ()
   }
@@ -745,13 +829,14 @@ fn check_pattern(
 /// keyword it is under.
 ///
 /// A schema is read the same way at every level, so this walks into the schemas
-/// inside properties, prefixItems, items, combinations, not and additionalProperties.
+/// inside properties, patternProperties, prefixItems, items and applicators.
 /// Only supported assertions and explicit annotations are accepted.
 /// Values inside const, enum, default and examples are data, not schemas.
 fn check_schema(
   schema : @pjson.Json,
   path : String,
   errors : Array[SchemaProblem],
+  cache : Map[String, Result[Pattern, PatternProblem]],
 ) -> Unit {
   match schema {
     Object(members~) =>
@@ -777,6 +862,7 @@ fn check_schema(
                     subschema,
                     here + "[" + index.to_string() + "]",
                     errors,
+                    cache,
                   )
                 }
               }
@@ -788,12 +874,34 @@ fn check_schema(
                   kind: InvalidSchema,
                 })
             }
-          "not" | "additionalProperties" => check_schema(wanted, here, errors)
+          "not" | "additionalProperties" =>
+            check_schema(wanted, here, errors, cache)
+          "patternProperties" =>
+            match wanted {
+              Object(members~) =>
+                for (text, subschema) in members {
+                  let location = here + "[\"" + escape_json_string(text) + "\"]"
+                  cache_schema_pattern(text, location, errors, cache)
+                  check_schema(subschema, location, errors, cache)
+                }
+              _ =>
+                errors.push({
+                  path: here,
+                  kind: InvalidSchema,
+                  message: "expected an object mapping patterns to schemas, but this is " +
+                  kind_name(wanted),
+                })
+            }
           "properties" =>
             match wanted {
               Object(members=subschemas) =>
                 for entry in subschemas {
-                  check_schema(entry.1, child_path(here, entry.0), errors)
+                  check_schema(
+                    entry.1,
+                    child_path(here, entry.0),
+                    errors,
+                    cache,
+                  )
                 }
               _ =>
                 errors.push({
@@ -805,7 +913,7 @@ fn check_schema(
             }
           "items" =>
             match wanted {
-              Object(_) | Bool(_) => check_schema(wanted, here, errors)
+              Object(_) | Bool(_) => check_schema(wanted, here, errors, cache)
               _ =>
                 errors.push({
                   kind: InvalidSchema,
@@ -877,6 +985,28 @@ fn check_schema(
                   },
                 })
             }
+          "minProperties" | "maxProperties" =>
+            match length_argument(wanted) {
+              Ok(_) => ()
+              Err(kind) =>
+                errors.push({
+                  path: here,
+                  kind,
+                  message: match wanted {
+                    Number(raw~) =>
+                      if kind == UnsupportedFeature {
+                        raw +
+                        " exceeds the supported property count limit of 1000000000"
+                      } else {
+                        raw +
+                        " is not a count of properties; a count must be a nonnegative integer"
+                      }
+                    _ =>
+                      "expected a count of properties, but this is " +
+                      kind_name(wanted)
+                  },
+                })
+            }
           "uniqueItems" =>
             match wanted {
               Bool(_) => ()
@@ -910,7 +1040,7 @@ fn check_schema(
                   },
                 })
             }
-          "pattern" => check_pattern_argument(wanted, here, errors)
+          "pattern" => check_pattern_argument(wanted, here, errors, cache)
           "title" | "description" | "$comment" | "format" =>
             match wanted {
               Text(_) => ()
@@ -1098,21 +1228,10 @@ fn check_pattern_argument(
   wanted : @pjson.Json,
   path : String,
   errors : Array[SchemaProblem],
+  cache : Map[String, Result[Pattern, PatternProblem]],
 ) -> Unit {
   match text_of(wanted) {
-    Some(pattern) =>
-      match pattern_matches(pattern, "") {
-        Ok(_) => ()
-        Err(reason) =>
-          errors.push({
-            kind: InvalidSchema,
-            path,
-            message: "\"" +
-            pattern +
-            "\" is not a pattern this tool reads: " +
-            reason,
-          })
-      }
+    Some(pattern) => cache_schema_pattern(pattern, path, errors, cache)
     _ =>
       errors.push({
         kind: InvalidSchema,
