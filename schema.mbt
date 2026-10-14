@@ -112,6 +112,7 @@ fn check_value(
           "minItems" => check_array_length(value, wanted, path, errors, true)
           "maxItems" => check_array_length(value, wanted, path, errors, false)
           "uniqueItems" => check_unique_items(value, wanted, path, errors)
+          "contains" => check_contains(value, members, path, errors, ctx)
           "enum" => check_enum(value, wanted, path, errors)
           "const" => check_const(value, wanted, path, errors)
           "allOf" | "anyOf" | "oneOf" =>
@@ -656,6 +657,77 @@ fn check_prefix_items(
 }
 
 ///|
+/// Only contains triggers traversal. Bounds belong to this same schema object;
+/// all positions count independently, including positions covered by prefixItems.
+fn check_contains(
+  value : @pjson.Json,
+  schema_members : Array[(String, @pjson.Json)],
+  path : String,
+  errors : Array[SchemaError],
+  ctx : SchemaEvaluationContext,
+) -> Unit {
+  let items = match value {
+    Array(items~) => items
+    _ => return
+  }
+  let minimum = match find_member(schema_members, "minContains") {
+    None => 1
+    Some(wanted) =>
+      match length_argument(wanted) {
+        Ok(n) => n
+        Err(_) => abort("invalid minContains in compiled schema")
+      }
+  }
+  let maximum = match find_member(schema_members, "maxContains") {
+    None => None
+    Some(wanted) =>
+      match length_argument(wanted) {
+        Ok(n) => Some(n)
+        Err(_) => abort("invalid maxContains in compiled schema")
+      }
+  }
+  let mut count = 0
+  for index, item in items {
+    let violations = []
+    evaluate_schema_child(
+      item,
+      ["contains"],
+      Some(index.to_string()),
+      path + "[" + index.to_string() + "]",
+      violations,
+      ctx,
+    )
+    // An execution error never becomes a nonmatching item. Do not stop after
+    // satisfying the minimum: later items may exhaust the shared budget/cycle.
+    if ctx.failure != None {
+      return
+    }
+    if violations.is_empty() {
+      count = count + 1
+    }
+  }
+  let prefix = "contains matched " +
+    count.to_string() +
+    (if count == 1 { " item" } else { " items" })
+  if count < minimum {
+    errors.push({
+      path,
+      message: prefix + "; expected at least " + minimum.to_string(),
+    })
+  }
+  match maximum {
+    Some(n) =>
+      if count > n {
+        errors.push({
+          path,
+          message: prefix + "; expected at most " + n.to_string(),
+        })
+      }
+    None => ()
+  }
+}
+
+///|
 fn check_array_length(
   value : @pjson.Json,
   wanted : @pjson.Json,
@@ -978,7 +1050,7 @@ fn check_schema(
                   kind: InvalidSchema,
                 })
             }
-          "not" | "additionalProperties" =>
+          "not" | "additionalProperties" | "contains" =>
             enqueue_schema_child(ctx, wanted, [keyword], here)
           "patternProperties" =>
             match wanted {
@@ -1073,7 +1145,7 @@ fn check_schema(
                   kind: InvalidSchema,
                 })
             }
-          "minItems" | "maxItems" =>
+          "minItems" | "maxItems" | "minContains" | "maxContains" =>
             match length_argument(wanted) {
               Ok(_) => ()
               Err(kind) =>

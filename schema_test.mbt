@@ -7,6 +7,133 @@ fn json(text : String) -> @pjson.Json {
 }
 
 ///|
+test "public contains APIs agree on match counts and schema problem locations" {
+  for
+    (raw, data, count) in [
+      (
+        "{\"contains\":{\"type\":\"integer\"},\"minContains\":2,\"maxContains\":3}",
+        "[1,\"x\",2]", 0,
+      ),
+      (
+        "{\"contains\":{\"type\":\"integer\"},\"minContains\":2,\"maxContains\":3}",
+        "[1,\"x\"]", 1,
+      ),
+      (
+        "{\"contains\":{\"type\":\"integer\"},\"minContains\":2,\"maxContains\":3}",
+        "[1,2,3,4]", 1,
+      ),
+      ("{\"contains\":true}", "[]", 1),
+      ("{\"contains\":false,\"minContains\":0}", "[1]", 0),
+      ("{\"minContains\":2,\"maxContains\":0}", "[]", 0),
+      (
+        "{\"contains\":{\"const\":9007199254740992},\"minContains\":2}", "[9007199254740992,9007199254740993]",
+        1,
+      ),
+    ] {
+    let schema = json(raw)
+    let compiled = match @moonjson-toolkit.compile_schema(schema) {
+      Ok(compiled) => compiled
+      Err(_) => abort("valid contains schema refused")
+    }
+    let direct = match @moonjson-toolkit.validate_schema(json(data), schema) {
+      Ok(errors) => errors
+      Err(_) => abort("unexpected failure")
+    }
+    let reused = match
+      @moonjson-toolkit.validate_compiled_schema(json(data), compiled) {
+      Ok(errors) => errors
+      Err(_) => abort("unexpected failure")
+    }
+    assert_eq(direct.length(), count)
+    assert_eq(
+      direct.map(@moonjson-toolkit.render_schema_error),
+      reused.map(@moonjson-toolkit.render_schema_error),
+    )
+  }
+  for
+    (raw, path, kind) in [
+      ("{\"contains\":1}", "contains", @moonjson-toolkit.InvalidSchema),
+      ("{\"minContains\":-1}", "minContains", @moonjson-toolkit.InvalidSchema),
+      (
+        "{\"maxContains\":1000000001}",
+        "maxContains",
+        @moonjson-toolkit.UnsupportedFeature,
+      ),
+      (
+        "{\"contains\":{\"$ref\":\"#/missing\"},\"minContains\":0}",
+        "contains.$ref",
+        @moonjson-toolkit.InvalidSchema,
+      ),
+    ] {
+    match @moonjson-toolkit.validate_schema(json("[]"), json(raw)) {
+      Err(@moonjson-toolkit.SchemaProblems(problems)) => {
+        assert_eq(problems[0].path, path)
+        assert_eq(problems[0].kind, kind)
+      }
+      _ => abort("contains precheck was bypassed")
+    }
+  }
+}
+
+///|
+test "contains snapshots and repeated validation do not retain mutations or failures" {
+  let child = [("const", json("1"))]
+  let members = [
+    ("contains", @pjson.Object(members=child)),
+    ("minContains", json("2")),
+  ]
+  let schema = @pjson.Object(members~)
+  let compiled = match @moonjson-toolkit.compile_schema(schema) {
+    Ok(compiled) => compiled
+    Err(_) => abort("valid contains schema refused")
+  }
+  child[0] = ("const", json("2"))
+  members[1] = ("minContains", json("0"))
+  members.clear()
+  for _ in 0..<3 {
+    assert_true(
+      @moonjson-toolkit.validate_compiled_schema(json("[1,1.0]"), compiled)
+      is Ok([]),
+    )
+    assert_true(
+      @moonjson-toolkit.validate_compiled_schema(json("[2,2]"), compiled)
+      is Ok([_]),
+    )
+  }
+  let recursive = match
+    @moonjson-toolkit.compile_schema(
+      json(
+        "{\"contains\":{\"properties\":{\"loop\":{\"$ref\":\"#/contains/properties/loop\"}}}}",
+      ),
+    ) {
+    Ok(compiled) => compiled
+    Err(_) => abort("recursive contains refused")
+  }
+  assert_true(
+    @moonjson-toolkit.validate_compiled_schema(
+      json("[{}, {\"loop\":1}]"),
+      recursive,
+    )
+    is Err(
+      { kind: @moonjson-toolkit.ReferenceCycle, instance_path: "/1/loop", .. }
+    ),
+  )
+  assert_true(
+    @moonjson-toolkit.validate_compiled_schema(json("[{}]"), recursive)
+    is Ok([]),
+  )
+  match
+    @moonjson-toolkit.validate_schema(
+      json("[1]"),
+      json("{\"contains\":{\"$ref\":\"#/contains\"}}"),
+    ) {
+    Err(@moonjson-toolkit.EvaluationFailed(error)) =>
+      assert_eq(error.instance_path, "/0")
+    _ => abort("contains cycle became an ordinary nonmatch")
+  }
+}
+
+///|
 fn rejected(text : String) -> Array[@moonjson-toolkit.SchemaProblem] {
   match @moonjson-toolkit.compile_schema(json(text)) {
     Err(problems) => problems

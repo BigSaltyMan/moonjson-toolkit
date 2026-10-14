@@ -17,6 +17,49 @@ fn cli_err(args : Array[String]) -> String {
 }
 
 ///|
+async test "contains CLI preserves success violation and schema execution exit codes" {
+  for
+    index, (schema, input, code, reason) in [
+      (
+        "{\"properties\":{\"orders\":{\"contains\":{\"type\":\"integer\"},\"minContains\":2,\"maxContains\":3}}}",
+        "{\"orders\":[1,\"x\",2]}", 0, "",
+      ),
+      (
+        "{\"properties\":{\"orders\":{\"contains\":{\"type\":\"integer\"},\"minContains\":2}}}",
+        "{\"orders\":[1,\"x\"]}", 1, "orders: contains matched 1 item; expected at least 2",
+      ),
+      (
+        "{\"contains\":true,\"maxContains\":3}", "[1,2,3,4]", 1, "(root): contains matched 4 items; expected at most 3",
+      ),
+      ("{\"minContains\":-1}", "[]", 2, "minContains"),
+      (
+        "{\"contains\":{\"unevaluatedItems\":true},\"minContains\":0}", "[]", 2,
+        "contains.unevaluatedItems",
+      ),
+      (
+        "{\"contains\":{\"$ref\":\"#/contains\"}}", "[1]", 2, "reference cycle at instance /0, schema /contains/$ref",
+      ),
+    ] {
+    let result = run_against_schema(
+      Scratch::named("contains_cli_" + index.to_string()),
+      input,
+      schema,
+      ["--no-color"],
+      StubAnalyzer::new(Ok("unused")),
+    )
+    assert_eq(result.code, code)
+    if code == 0 {
+      assert_eq(result.err, "")
+      assert_true(result.out.contains("matches the schema"))
+    } else {
+      assert_eq(result.out, "")
+      assert_true(result.err.contains(reason))
+      assert_false(result.err.contains("matches the schema"))
+    }
+  }
+}
+
+///|
 test "no arguments yields the documented defaults" {
   let options = cli_ok([])
   assert_eq(options.files, [])

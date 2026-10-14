@@ -193,7 +193,7 @@ way to it, and -v wins over it as it wins over the name lists.
 it, and is read with -v, which is the flag that asks for a verdict rather
 than a document. The supported JSON Schema Draft 2020-12 subset is: type,
 required, properties, patternProperties, minProperties, maxProperties,
-prefixItems, items, minItems, maxItems, uniqueItems,
+prefixItems, items, minItems, maxItems, uniqueItems, contains, minContains, maxContains,
 enum, const, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf,
 minLength, maxLength, pattern, allOf, anyOf, oneOf, not, additionalProperties, $defs and local JSON Pointer $ref.
 $defs contains reusable schemas; $ref supports # and #/ JSON Pointers.
@@ -207,6 +207,12 @@ prefixItems checks existing prefix positions; items checks remaining elements
 after the prefixItems declared in the same schema object.
 minItems/maxItems accept nonnegative integers up to 1000000000.
 uniqueItems uses exact JSON equality: 1 and 1.0 count as duplicates.
+contains checks every array position, including the prefix, and counts matches.
+minContains defaults to 1; maxContains has no default upper bound. Without
+a sibling contains they impose no constraint. Count parameters are capped at
+1000000000; all items share the evaluation budget and propagate execution errors.
+Example: {"type":"array","contains":{"type":"integer"},"minContains":2,"maxContains":3}
+accepts [1,"x",2], rejects [1,"x"] and rejects [1,2,3,4].
 patternProperties searches field names; every matching rule checks the value.
 additionalProperties excludes names declared explicitly or matched by patterns
 in the same schema object, even when their values fail validation.
@@ -791,7 +797,7 @@ printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
 
 当前支持 `type`、`required`、`properties`、`patternProperties`、`minProperties`、
 `maxProperties`、`prefixItems`、`items`、`minItems`、`maxItems`、
-`uniqueItems`、`enum`、`const`、`minimum`、
+`uniqueItems`、`contains`、`minContains`、`maxContains`、`enum`、`const`、`minimum`、
 `maximum`、`exclusiveMinimum`、`exclusiveMaximum`、`multipleOf`、`minLength`、
 `maxLength`、`pattern`、`allOf`、`anyOf`、`oneOf`、`not`、`additionalProperties`、`$defs` 和同文档 JSON Pointer `$ref`。也支持布尔 Schema：`true` 接受所有 JSON 值，`false` 拒绝所有值。
 `const` 只接受指定的常量，复用 `enum` 的精确相等逻辑；其内容作为普通数据处理。
@@ -881,7 +887,7 @@ printf '0' | moon run cmd/main -- -v --schema amount.schema.json
 非负整数判断，`2`、`2.0`、`2e0` 均接受。当前工具支持上限为 `1_000_000_000`，超过上限的
 合法整数属于 `UnsupportedFeature`；负数、非整数和非数字属于 `InvalidSchema`。
 该上限是实现限制，数组计数诊断会说明“元素数量”，不会使用字符计数文案。
-本次四个数组关键字仅对数组实例生效。
+这些数组关键字仅对数组实例生效。
 
 `prefixItems` 必须是非空 Schema 数组，按位置检查实际存在的前缀元素；它本身不要求这些
 位置存在，也不禁止更多元素。`items` 只检查同一个 Schema 对象中 `prefixItems` 之后的
@@ -918,7 +924,32 @@ printf '[1,"a",true]' | moon run cmd/main -- -v --schema tuple.schema.json
 # exit code: 1
 ```
 
-旧式数组形式的 `items` 属于非法参数。`additionalItems`、`contains`、`unevaluatedItems`
+`contains` 用对象或布尔子 Schema 检查数组的每个元素，统计符合要求的**元素位置数量**，
+重复值按位置分别计数，也包括 `prefixItems` 覆盖的位置。`minContains` 默认是 `1`；
+`maxContains` 默认没有上限。参数按精确非负整数判断，上限沿用 `1000000000`。
+没有同级 `contains` 时，合法的数量关键词不施加约束，但参数仍须通过预检查；
+数量条件不会跨 `allOf` 分支影响另一份 Schema。
+
+```json
+{
+  "type": "array",
+  "contains": {"type": "integer"},
+  "minContains": 2,
+  "maxContains": 3
+}
+```
+
+`[1,"x",2]` 通过；`[1,"x"]` 只有一个匹配，数量不足；`[1,2,3,4]` 匹配四个，超过上限。
+`contains: true` 匹配全部元素，`false` 匹配零个。`minContains: 0` 允许零个匹配；同时设置
+`maxContains: 0` 时要求零个匹配。只有 `maxContains: 0` 时，默认最小值仍为一，没有数组能通过。
+上下界倒置是合法 Schema，但数组无法满足；非数组不受约束，`items`、`prefixItems` 独立执行。
+
+不匹配元素的普通违规只参与计数，不直接加入最终报告。数量错误位于数组本身，例如
+`orders: contains matched 1 item; expected at least 2`。所有元素共享既有执行预算，达到
+最小匹配数后也继续检查；后续元素的引用循环或预算耗尽仍是执行错误，CLI 退出 `2`。
+即使输入为空、不是数组，或最小值是零，也完整预检查 `contains` 子 Schema。
+
+旧式数组形式的 `items` 属于非法参数。`additionalItems`、`unevaluatedItems`
 等仍未支持，出现时提前拒绝，继续按 Draft 2020-12 的明确子集描述能力。
 
 `minProperties`、`maxProperties` 只统计当前对象自身的属性，不累计嵌套对象的属性数量。
@@ -1095,8 +1126,8 @@ JSON 数组修改它。CLI 每轮只编译一次，供单文件、批量文件�
 标准测试命令使用仓库内的
 [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite/tree/55719286c33ae0d1823bfb65fea10338a19bc37c)
 固定版本 `55719286c33ae0d1823bfb65fea10338a19bc37c`，并用独立清单逐组声明范围。
-本次实际覆盖 **462 组、2354 条测试**：支持范围内 **执行 862 条、通过 862 条**，另有
-**602 条编译拒绝、890 条明确跳过**。拒绝和跳过不计作标准校验通过；误通过、误拒绝、
+本次实际覆盖 **462 组、2354 条测试**：支持范围内 **执行 923 条、通过 923 条**，另有
+**541 条编译拒绝、890 条明确跳过**。拒绝和跳过不计作标准校验通过；误通过、误拒绝、
 执行错误和范围错误均为零。这些结果只验证声明的子集，不代表完整 Draft 2020-12 支持。
 各能力统计和每项排除原因见生成的[兼容性报告](docs/schema-compatibility.md)，具体策略见
 `testdata/schema-suite-manifest.json`。
@@ -1642,7 +1673,7 @@ AI 响应处理都不需要联网，所以在任何机器上 `moon test` 都是�
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 414 tests
+moon test  --target native   # 424 tests
 moon fmt                     # format
 
 cd frontend

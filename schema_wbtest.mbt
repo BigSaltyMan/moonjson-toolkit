@@ -1266,7 +1266,7 @@ test "all array subschemas are prechecked and ordinary const enum fields stay da
         InvalidSchema,
       ),
       ("{\"additionalItems\":false}", "additionalItems", UnsupportedFeature),
-      ("{\"contains\":true}", "contains", UnsupportedFeature),
+      ("{\"unevaluatedItems\":true}", "unevaluatedItems", UnsupportedFeature),
       ("{\"unevaluatedItems\":false}", "unevaluatedItems", UnsupportedFeature),
     ] {
     let issues = schema_problems(parse_ok(schema))
@@ -1284,6 +1284,168 @@ test "all array subschemas are prechecked and ordinary const enum fields stay da
     }
     assert_eq(report(data, schema), "")
   }
+}
+
+///|
+test "contains counts matches with default and explicit bounds" {
+  for
+    (schema, data, count) in [
+      ("{\"contains\":{\"type\":\"integer\"}}", "[\"bad\",1]", 0),
+      ("{\"contains\":true}", "[]", 1),
+      ("{\"contains\":true}", "[1]", 0),
+      ("{\"contains\":false}", "[1,2]", 1),
+      ("{\"contains\":false,\"minContains\":0}", "[]", 0),
+      ("{\"contains\":false,\"minContains\":0}", "[1,2]", 0),
+      ("{\"contains\":true,\"maxContains\":0}", "[]", 1),
+      ("{\"contains\":true,\"maxContains\":0}", "[1]", 1),
+      (
+        "{\"contains\":{\"type\":\"integer\"},\"minContains\":0,\"maxContains\":0}",
+        "[\"a\",null]", 0,
+      ),
+      (
+        "{\"contains\":{\"type\":\"integer\"},\"minContains\":0,\"maxContains\":0}",
+        "[1]", 1,
+      ),
+      ("{\"contains\":true,\"minContains\":2,\"maxContains\":1}", "[1,2]", 1),
+      (
+        "{\"contains\":true,\"minContains\":2.0,\"maxContains\":2e0}", "[1,1]", 0,
+      ),
+      ("{\"contains\":true,\"minContains\":2,\"maxContains\":3}", "[1]", 1),
+      ("{\"contains\":true,\"minContains\":2,\"maxContains\":3}", "[1,2,3]", 0),
+      (
+        "{\"contains\":true,\"minContains\":2,\"maxContains\":3}", "[1,2,3,4]", 1,
+      ),
+    ] {
+    match validate_schema(parse_ok(data), parse_ok(schema)) {
+      Ok(errors) => assert_eq(errors.length(), count)
+      Err(_) => abort("supported contains schema refused or evaluation failed")
+    }
+  }
+  for data in ["null", "1", "\"x\"", "true", "{}"] {
+    assert_eq(
+      report(data, "{\"contains\":false,\"minContains\":3,\"maxContains\":0}"),
+      "",
+    )
+  }
+  assert_eq(report("[1,2]", "{\"minContains\":5,\"maxContains\":0}"), "")
+  assert_eq(report("[]", "{\"maxContains\":0}"), "")
+}
+
+///|
+test "contains counts repeated positions and exact numbers without leaking trial violations" {
+  assert_eq(
+    report(
+      "[1,1.0,1e0]", "{\"contains\":{\"const\":1},\"minContains\":3,\"maxContains\":3}",
+    ),
+    "",
+  )
+  assert_eq(
+    report(
+      "[9007199254740992,9007199254740993]", "{\"contains\":{\"const\":9007199254740992},\"minContains\":2}",
+    ),
+    "(root): contains matched 1 item; expected at least 2",
+  )
+  assert_eq(
+    report("[0,1e-400]", "{\"contains\":{\"const\":0},\"maxContains\":1}"),
+    "",
+  )
+  assert_eq(
+    report("[\"bad\",null]", "{\"contains\":{\"type\":\"integer\"}}"),
+    "(root): contains matched 0 items; expected at least 1",
+  )
+  assert_eq(
+    report(
+      "{\"orders\":[1,\"x\",2]}", "{\"properties\":{\"orders\":{\"contains\":{\"type\":\"integer\"},\"minContains\":3}}}",
+    ),
+    "orders: contains matched 2 items; expected at least 3",
+  )
+}
+
+///|
+test "contains siblings keyword order and applicator scopes are independent" {
+  let first = "{\"contains\":{\"type\":\"integer\"},\"minContains\":2,\"maxContains\":3}"
+  let last = "{\"maxContains\":3,\"minContains\":2,\"contains\":{\"type\":\"integer\"}}"
+  for data in ["[1,\"x\",2]", "[1,\"x\"]", "[1,2,3,4]"] {
+    assert_eq(report(data, first), report(data, last))
+  }
+  let tuple = "{\"prefixItems\":[true],\"items\":{\"type\":\"string\"},\"contains\":{\"type\":\"integer\"}}"
+  assert_eq(report("[1,\"a\"]", tuple), "")
+  assert_true(report("[1,2]", tuple).contains("[1]: it is a number"))
+  assert_eq(
+    report("[\"a\",\"b\"]", tuple),
+    "(root): contains matched 0 items; expected at least 1",
+  )
+  assert_eq(
+    report("[1,2]", "{\"allOf\":[{\"contains\":true},{\"maxContains\":0}]}"),
+    "",
+  )
+  assert_eq(
+    report("[]", "{\"allOf\":[{\"contains\":false},{\"minContains\":0}]}"),
+    "(root): allOf[0]: contains matched 0 items; expected at least 1",
+  )
+  assert_eq(report("[1]", "{\"not\":{\"contains\":{\"type\":\"string\"}}}"), "")
+  assert_eq(
+    report("[]", "{\"anyOf\":[{\"contains\":true},{\"maxItems\":0}]}"),
+    "",
+  )
+}
+
+///|
+test "contains precheck rejects invalid counts and unavailable children even without matches" {
+  for
+    (schema, path, kind) in [
+      ("{\"contains\":null}", "contains", InvalidSchema),
+      ("{\"contains\":[]}", "contains", InvalidSchema),
+      ("{\"minContains\":-1}", "minContains", InvalidSchema),
+      ("{\"maxContains\":0.1}", "maxContains", InvalidSchema),
+      ("{\"minContains\":1e-400}", "minContains", InvalidSchema),
+      ("{\"maxContains\":true}", "maxContains", InvalidSchema),
+      ("{\"minContains\":\"2\"}", "minContains", InvalidSchema),
+      ("{\"maxContains\":1000000001}", "maxContains", UnsupportedFeature),
+      (
+        "{\"contains\":{\"pattern\":\"[\"},\"minContains\":0}",
+        "contains.pattern",
+        InvalidSchema,
+      ),
+      (
+        "{\"contains\":{\"$ref\":\"#/missing\"}}",
+        "contains.$ref",
+        InvalidSchema,
+      ),
+      (
+        "{\"contains\":{\"unevaluatedItems\":true},\"minContains\":0}",
+        "contains.unevaluatedItems",
+        UnsupportedFeature,
+      ),
+      (
+        "{\"properties\":{\"orders\":{\"contains\":{\"minContains\":-1}}}}",
+        "properties.orders.contains.minContains",
+        InvalidSchema,
+      ),
+    ] {
+    let issues = schema_problems(parse_ok(schema))
+    assert_eq(issues.length(), 1)
+    assert_eq(issues[0].path, path)
+    assert_eq(issues[0].kind, kind)
+    for data in ["[]", "null"] {
+      assert_true(
+        validate_schema(parse_ok(data), parse_ok(schema))
+        is Err(SchemaProblems(_)),
+      )
+    }
+  }
+  assert_true(
+    compile_schema(parse_ok("{\"minContains\":1000000000,\"maxContains\":0}"))
+    is Ok(_),
+  )
+  assert_true(
+    compile_schema(
+      parse_ok(
+        "{\"const\":{\"contains\":null},\"default\":{\"minContains\":-1},\"enum\":[{\"contains\":123}]}",
+      ),
+    )
+    is Ok(_),
+  )
 }
 
 ///|

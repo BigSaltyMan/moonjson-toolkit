@@ -7,6 +7,93 @@ fn ref_compiled(text : String) -> CompiledSchema {
 }
 
 ///|
+test "contains references advance instance positions and finite recursion stays valid" {
+  let schema = ref_compiled(
+    "{\"$defs\":{\"number\":{\"type\":\"integer\"}},\"contains\":{\"$ref\":\"#/$defs/number\"},\"minContains\":2}",
+  )
+  assert_true(
+    validate_compiled_schema(parse_ok("[1,\"x\",2]"), schema) is Ok([]),
+  )
+  assert_true(
+    validate_compiled_schema(parse_ok("[1,\"x\"]"), schema) is Ok([_]),
+  )
+  let recursive = ref_compiled(
+    "{\"contains\":{\"$ref\":\"#\"},\"minContains\":0}",
+  )
+  assert_true(
+    validate_compiled_schema(parse_ok("[[[]],[],1]"), recursive) is Ok([]),
+  )
+  assert_true(
+    evaluate_schema_with_limits(parse_ok("[[]]"), recursive, 3, 3) is Ok([]),
+  )
+  match evaluate_schema_with_limits(parse_ok("[[]]"), recursive, 2, 3) {
+    Err(error) => {
+      assert_eq(error.kind, ResourceLimit)
+      assert_eq(error.instance_path, "/0")
+      assert_eq(error.schema_path, "")
+    }
+    _ => abort("contains recursion exceeded depth without execution failure")
+  }
+}
+
+///|
+test "contains evaluates later items after a match and propagates cycle locations" {
+  let schema = ref_compiled(
+    "{\"contains\":{\"properties\":{\"loop\":{\"$ref\":\"#/contains/properties/loop\"}}}}",
+  )
+  match validate_compiled_schema(parse_ok("[{}, {\"loop\":1}]"), schema) {
+    Err(error) => {
+      assert_eq(error.kind, ReferenceCycle)
+      assert_eq(error.instance_path, "/1/loop")
+      assert_eq(error.schema_path, "/contains/properties/loop/$ref")
+    }
+    _ => abort("first contains match swallowed a later execution error")
+  }
+  assert_true(validate_compiled_schema(parse_ok("[{}]"), schema) is Ok([]))
+  for applicator in ["not", "anyOf", "oneOf", "allOf"] {
+    let child = "{\"contains\":{\"$ref\":\"#/" +
+      applicator +
+      (if applicator == "not" { "" } else { "/0" }) +
+      "/contains\"}}"
+    let raw = "{\"" +
+      applicator +
+      "\":" +
+      (if applicator == "not" { child } else { "[" + child + ",true]" }) +
+      "}"
+    assert_true(
+      validate_compiled_schema(parse_ok("[1]"), ref_compiled(raw))
+      is Err({ kind: ReferenceCycle, .. }),
+    )
+  }
+}
+
+///|
+test "contains shares visit budgets across all elements even with zero minimum" {
+  let schema = ref_compiled("{\"contains\":true}")
+  assert_true(
+    evaluate_schema_with_limits(parse_ok("[null,null]"), schema, 2, 3) is Ok([]),
+  )
+  match evaluate_schema_with_limits(parse_ok("[null,null]"), schema, 2, 2) {
+    Err(error) => {
+      assert_eq(error.kind, ResourceLimit)
+      assert_eq(error.instance_path, "/1")
+      assert_eq(error.schema_path, "/contains")
+    }
+    _ =>
+      abort("matching first item reset or short-circuited the contains budget")
+  }
+  let zero = ref_compiled(
+    "{\"contains\":true,\"minContains\":0,\"maxContains\":0}",
+  )
+  assert_true(evaluate_schema_with_limits(parse_ok("[]"), zero, 1, 1) is Ok([]))
+  assert_true(
+    evaluate_schema_with_limits(parse_ok("[1]"), zero, 2, 1)
+    is Err({ kind: ResourceLimit, instance_path: "/0", .. }),
+  )
+  assert_true(validate_compiled_schema(parse_ok("[]"), zero) is Ok([]))
+}
+
+///|
 test "reference decoding is strict and applied once" {
   let root = parse_ok(
     (

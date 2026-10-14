@@ -214,7 +214,7 @@ way to it, and -v wins over it as it wins over the name lists.
 it, and is read with -v, which is the flag that asks for a verdict rather
 than a document. The supported JSON Schema Draft 2020-12 subset is: type,
 required, properties, patternProperties, minProperties, maxProperties,
-prefixItems, items, minItems, maxItems, uniqueItems,
+prefixItems, items, minItems, maxItems, uniqueItems, contains, minContains, maxContains,
 enum, const, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf,
 minLength, maxLength, pattern, allOf, anyOf, oneOf, not, additionalProperties, $defs and local JSON Pointer $ref.
 $defs contains reusable schemas; $ref supports # and #/ JSON Pointers.
@@ -228,6 +228,12 @@ prefixItems checks existing prefix positions; items checks remaining elements
 after the prefixItems declared in the same schema object.
 minItems/maxItems accept nonnegative integers up to 1000000000.
 uniqueItems uses exact JSON equality: 1 and 1.0 count as duplicates.
+contains checks every array position, including the prefix, and counts matches.
+minContains defaults to 1; maxContains has no default upper bound. Without
+a sibling contains they impose no constraint. Count parameters are capped at
+1000000000; all items share the evaluation budget and propagate execution errors.
+Example: {"type":"array","contains":{"type":"integer"},"minContains":2,"maxContains":3}
+accepts [1,"x",2], rejects [1,"x"] and rejects [1,2,3,4].
 patternProperties searches field names; every matching rule checks the value.
 additionalProperties excludes names declared explicitly or matched by patterns
 in the same schema object, even when their values fail validation.
@@ -866,7 +872,7 @@ with exit code `2`; this is not a full Draft 2020-12 implementation.
 
 The supported keywords are `type`, `required`, `properties`, `patternProperties`,
 `minProperties`, `maxProperties`, `prefixItems`,
-`items`, `minItems`, `maxItems`, `uniqueItems`, `enum`,
+`items`, `minItems`, `maxItems`, `uniqueItems`, `contains`, `minContains`, `maxContains`, `enum`,
 `const`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`,
 `multipleOf`, `minLength`, `maxLength`, `pattern`, `allOf`, `anyOf`, `oneOf`,
 `not`, `additionalProperties`, `$defs` and same-document JSON Pointer `$ref`. Boolean schemas are also
@@ -1013,7 +1019,38 @@ printf '[1,"a",true]' | moon run cmd/main -- -v --schema tuple.schema.json
 # exit code: 1
 ```
 
-Legacy array-valued `items` is invalid. `additionalItems`, `contains` and
+`contains` checks every array element against an object or boolean schema and
+counts matching **positions**, including repeated values and the `prefixItems`
+positions. `minContains` defaults to `1`; `maxContains` has no default upper
+bound. Both accept exact nonnegative integers up to `1000000000`. With no sibling
+`contains`, valid count keywords impose no constraint, but their parameters are
+still prechecked. They do not alter another `allOf` branch's bounds.
+
+```json
+{
+  "type": "array",
+  "contains": {"type": "integer"},
+  "minContains": 2,
+  "maxContains": 3
+}
+```
+
+`[1,"x",2]` passes; `[1,"x"]` has only one match and fails; `[1,2,3,4]` has four
+matches and fails. `contains: true` matches every element; `false` matches none.
+`minContains: 0` permits zero matches, and adding `maxContains: 0` requires zero.
+Setting only `maxContains: 0` leaves the default minimum of one, so no array
+matches. Inverted bounds are legal schemas with no satisfying array. Non-arrays
+are unaffected, and `items` and `prefixItems` still apply independently.
+
+Nonmatching elements' ordinary violations are used for counting rather than
+included in the final report. A count failure is reported at the array's path,
+for example `orders: contains matched 1 item; expected at least 2`. All elements
+share the existing evaluation budget; evaluation continues after the minimum
+is reached, and a later reference cycle or resource limit remains an execution
+error (CLI exit `2`). Every contains subschema is compiled, including when the
+input is empty, not an array, or the minimum is zero.
+
+Legacy array-valued `items` is invalid. `additionalItems` and
 `unevaluatedItems` remain unsupported and are rejected before validation.
 
 `minProperties` and `maxProperties` count only an object's own members, without
@@ -1222,8 +1259,8 @@ plus violating data is exit `1`, and compilation or evaluation failure is exit `
 The native standard-suite command uses the vendored
 [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite/tree/55719286c33ae0d1823bfb65fea10338a19bc37c)
 revision `55719286c33ae0d1823bfb65fea10338a19bc37c` and an independently reviewed
-manifest. The current run covers **462 groups / 2354 tests**: **862 executed and
-862 passed**, **602 compile rejected**, **890 explicitly skipped**. Rejections
+manifest. The current run covers **462 groups / 2354 tests**: **923 executed and
+923 passed**, **541 compile rejected**, **890 explicitly skipped**. Rejections
 and skips are not counted as standard-validation passes. False accepts, false
 rejects, execution errors and scope errors are zero. This establishes the stated
 subset, not full Draft 2020-12 conformance. See the generated
@@ -1827,7 +1864,7 @@ so `moon test` is the same command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 414 tests
+moon test  --target native   # 424 tests
 moon fmt                     # format
 
 cd frontend

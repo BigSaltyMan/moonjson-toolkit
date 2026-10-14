@@ -475,75 +475,35 @@
       "group": 0,
       "description": "contains keyword validation",
       "capability": "contains",
-      "action": "reject",
-      "reason": "Keyword/mechanism contains is not implemented",
-      "expected_problems": [
-        {
-          "path": "contains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/contains.json",
       "group": 1,
       "description": "contains keyword with const keyword",
       "capability": "contains",
-      "action": "reject",
-      "reason": "Keyword/mechanism contains is not implemented",
-      "expected_problems": [
-        {
-          "path": "contains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/contains.json",
       "group": 2,
       "description": "contains keyword with boolean schema true",
       "capability": "contains",
-      "action": "reject",
-      "reason": "Keyword/mechanism contains is not implemented",
-      "expected_problems": [
-        {
-          "path": "contains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/contains.json",
       "group": 3,
       "description": "contains keyword with boolean schema false",
       "capability": "contains",
-      "action": "reject",
-      "reason": "Keyword/mechanism contains is not implemented",
-      "expected_problems": [
-        {
-          "path": "contains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/contains.json",
       "group": 4,
       "description": "items + contains",
       "capability": "contains",
-      "action": "reject",
-      "reason": "Keyword/mechanism contains is not implemented",
-      "expected_problems": [
-        {
-          "path": "contains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/contains.json",
@@ -551,10 +511,15 @@
       "description": "contains with false if subschema",
       "capability": "contains",
       "action": "reject",
-      "reason": "Keyword/mechanism contains is not implemented",
+      "reason": "Keyword/mechanism if is not implemented; Keyword/mechanism else is not implemented",
       "expected_problems": [
         {
-          "path": "contains",
+          "path": "contains.if",
+          "kind": "UnsupportedFeature",
+          "message_contains": "keyword is not supported"
+        },
+        {
+          "path": "contains.else",
           "kind": "UnsupportedFeature",
           "message_contains": "keyword is not supported"
         }
@@ -565,15 +530,7 @@
       "group": 6,
       "description": "contains with null instance elements",
       "capability": "contains",
-      "action": "reject",
-      "reason": "Keyword/mechanism contains is not implemented",
-      "expected_problems": [
-        {
-          "path": "contains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/content.json",
@@ -2197,105 +2154,35 @@
       "group": 0,
       "description": "maxContains without contains is ignored",
       "capability": "maxContains",
-      "action": "reject",
-      "reason": "Keyword/mechanism maxContains is not implemented",
-      "expected_problems": [
-        {
-          "path": "maxContains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/maxContains.json",
       "group": 1,
       "description": "maxContains with contains",
       "capability": "maxContains",
-      "action": "reject",
-      "reason": "Keyword/mechanism contains is not implemented; Keyword/mechanism maxContains is not implemented",
-      "expected_problems": [
-        {
-          "path": "contains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "maxContains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/maxContains.json",
       "group": 2,
       "description": "maxContains with contains, value with a decimal",
       "capability": "maxContains",
-      "action": "reject",
-      "reason": "Keyword/mechanism contains is not implemented; Keyword/mechanism maxContains is not implemented",
-      "expected_problems": [
-        {
-          "path": "contains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "maxContains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/maxContains.json",
       "group": 3,
       "description": "minContains < maxContains",
       "capability": "maxContains",
-      "action": "reject",
-      "reason": "Keyword/mechanism contains is not implemented; Keyword/mechanism minContains is not implemented; Keyword/mechanism maxContains is not implemented",
-      "expected_problems": [
-        {
-          "path": "contains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "minContains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "maxContains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/maxContains.json",
       "group": 4,
       "description": "maxContains = 0 with minContains = 0",
       "capability": "maxContains",
-      "action": "reject",
-      "reason": "Keyword/mechanism contains is not implemented; Keyword/mechanism minContains is not implemented; Keyword/mechanism maxContains is not implemented",
-      "expected_problems": [
-        {
-          "path": "contains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "minContains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "maxContains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/maximum.json",
@@ -2365,170 +2252,56 @@
       "group": 0,
       "description": "minContains without contains is ignored",
       "capability": "minContains",
-      "action": "reject",
-      "reason": "Keyword/mechanism minContains is not implemented",
-      "expected_problems": [
-        {
-          "path": "minContains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/minContains.json",
       "group": 1,
       "description": "minContains=1 with contains",
       "capability": "minContains",
-      "action": "reject",
-      "reason": "Keyword/mechanism contains is not implemented; Keyword/mechanism minContains is not implemented",
-      "expected_problems": [
-        {
-          "path": "contains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "minContains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/minContains.json",
       "group": 2,
       "description": "minContains=2 with contains",
       "capability": "minContains",
-      "action": "reject",
-      "reason": "Keyword/mechanism contains is not implemented; Keyword/mechanism minContains is not implemented",
-      "expected_problems": [
-        {
-          "path": "contains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "minContains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/minContains.json",
       "group": 3,
       "description": "minContains=2 with contains with a decimal value",
       "capability": "minContains",
-      "action": "reject",
-      "reason": "Keyword/mechanism contains is not implemented; Keyword/mechanism minContains is not implemented",
-      "expected_problems": [
-        {
-          "path": "contains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "minContains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/minContains.json",
       "group": 4,
       "description": "maxContains = minContains",
       "capability": "minContains",
-      "action": "reject",
-      "reason": "Keyword/mechanism contains is not implemented; Keyword/mechanism maxContains is not implemented; Keyword/mechanism minContains is not implemented",
-      "expected_problems": [
-        {
-          "path": "contains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "maxContains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "minContains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/minContains.json",
       "group": 5,
       "description": "maxContains < minContains",
       "capability": "minContains",
-      "action": "reject",
-      "reason": "Keyword/mechanism contains is not implemented; Keyword/mechanism maxContains is not implemented; Keyword/mechanism minContains is not implemented",
-      "expected_problems": [
-        {
-          "path": "contains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "maxContains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "minContains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/minContains.json",
       "group": 6,
       "description": "minContains = 0",
       "capability": "minContains",
-      "action": "reject",
-      "reason": "Keyword/mechanism contains is not implemented; Keyword/mechanism minContains is not implemented",
-      "expected_problems": [
-        {
-          "path": "contains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "minContains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/minContains.json",
       "group": 7,
       "description": "minContains = 0 with maxContains",
       "capability": "minContains",
-      "action": "reject",
-      "reason": "Keyword/mechanism contains is not implemented; Keyword/mechanism minContains is not implemented; Keyword/mechanism maxContains is not implemented",
-      "expected_problems": [
-        {
-          "path": "contains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "minContains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "maxContains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/minimum.json",
@@ -5218,13 +4991,8 @@
       "description": "unevaluatedItems depends on adjacent contains",
       "capability": "unevaluatedItems",
       "action": "reject",
-      "reason": "Keyword/mechanism contains is not implemented; Keyword/mechanism unevaluatedItems is not implemented",
+      "reason": "Keyword/mechanism unevaluatedItems is not implemented",
       "expected_problems": [
-        {
-          "path": "contains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
         {
           "path": "unevaluatedItems",
           "kind": "UnsupportedFeature",
@@ -5238,20 +5006,10 @@
       "description": "unevaluatedItems depends on multiple nested contains",
       "capability": "unevaluatedItems",
       "action": "reject",
-      "reason": "Keyword/mechanism unevaluatedItems is not implemented; Keyword/mechanism contains is not implemented",
+      "reason": "Keyword/mechanism unevaluatedItems is not implemented",
       "expected_problems": [
         {
           "path": "unevaluatedItems",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "allOf[0].contains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "allOf[1].contains",
           "kind": "UnsupportedFeature",
           "message_contains": "keyword is not supported"
         }
@@ -5288,18 +5046,8 @@
       "description": "unevaluatedItems with minContains = 0",
       "capability": "unevaluatedItems",
       "action": "reject",
-      "reason": "Keyword/mechanism contains is not implemented; Keyword/mechanism minContains is not implemented; Keyword/mechanism unevaluatedItems is not implemented",
+      "reason": "Keyword/mechanism unevaluatedItems is not implemented",
       "expected_problems": [
-        {
-          "path": "contains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
-        {
-          "path": "minContains",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
         {
           "path": "unevaluatedItems",
           "kind": "UnsupportedFeature",
