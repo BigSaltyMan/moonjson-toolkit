@@ -21,6 +21,9 @@ jobs:
           mkdir -p _build/schema-suite
           moon version --all | tee _build/schema-suite/toolchain.txt
 
+      - name: Initialize dependency registry
+        run: moon update
+
       - name: Type-check
         run: moon check --target native --deny-warn
 
@@ -61,6 +64,9 @@ jobs:
 
       - name: Set up MoonBit
         run: bash ../scripts/install_pinned_moonbit.sh
+
+      - name: Initialize dependency registry
+        run: moon update
 
       - name: Type-check
         run: moon check --target js --deny-warn
