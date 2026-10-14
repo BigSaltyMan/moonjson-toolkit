@@ -1051,3 +1051,234 @@ test "numeric assertions compose using independent exact results" {
     "(root): it matches 2 oneOf branches; exactly one is required",
   )
 }
+
+///|
+test "array counts include boundaries and preserve independent constraints" {
+  assert_eq(
+    report("[1]", "{\"minItems\":2}"),
+    "(root): it has 1 item, but the schema requires at least 2",
+  )
+  for raw in ["2", "2.0", "2e0", "0.02e2"] {
+    assert_eq(
+      report("[1,2]", "{\"minItems\":" + raw + ",\"maxItems\":" + raw + "}"),
+      "",
+    )
+  }
+  assert_eq(report("[]", "{\"maxItems\":0}"), "")
+  assert_eq(
+    report("[null]", "{\"maxItems\":0}"),
+    "(root): it has 1 item, but the schema allows at most 0",
+  )
+  assert_eq(
+    report(
+      "{\"orders\":[1,2,3]}", "{\"properties\":{\"orders\":{\"maxItems\":2}}}",
+    ),
+    "orders: it has 3 items, but the schema allows at most 2",
+  )
+  let contradictory = "{\"minItems\":3,\"maxItems\":1}"
+  assert_eq(problems(contradictory), "")
+  assert_eq(
+    report("[1,2]", contradictory),
+    "(root): it has 2 items, but the schema requires at least 3\n(root): it has 2 items, but the schema allows at most 1",
+  )
+  for value in ["null", "true", "1", "\"text\"", "{}"] {
+    assert_eq(
+      report(
+        value, "{\"minItems\":2,\"maxItems\":0,\"uniqueItems\":true,\"prefixItems\":[false]}",
+      ),
+      "",
+    )
+  }
+}
+
+///|
+test "uniqueItems uses precise deep equality and reports only the first pair" {
+  for
+    value in [
+      "[1,1.0]", "[0,-0.0]", "[null,null]", "[{\"a\":1,\"b\":2},{\"b\":2,\"a\":1.0}]",
+      "[{\"x\":[1,1e400]},{\"x\":[1.0,10e399]}]", "[[1,2],[1.0,2]]",
+    ] {
+    assert_eq(
+      report(value, "{\"uniqueItems\":true}"),
+      "(root): items at indexes 0 and 1 are equal, but uniqueItems is true",
+    )
+  }
+  for
+    value in [
+      "[]", "[1]", "[true,1]", "[\"1\",1]", "[9007199254740992,9007199254740993]",
+      "[1e-400,0]", "[[1,2],[2,1]]", "[{\"n\":1e400},{\"n\":1e401}]",
+    ] {
+    assert_eq(report(value, "{\"uniqueItems\":true}"), "")
+  }
+  assert_eq(report("[1,1]", "{\"uniqueItems\":false}"), "")
+  assert_eq(report("[1,1]", "{}"), "")
+  assert_eq(
+    report("[1,2,1,2]", "{\"uniqueItems\":true,\"maxItems\":2}"),
+    "(root): items at indexes 0 and 2 are equal, but uniqueItems is true\n(root): it has 4 items, but the schema allows at most 2",
+  )
+}
+
+///|
+test "prefixItems validates existing positions and items validates the suffix" {
+  let schema = "{\"prefixItems\":[{\"type\":\"integer\"}],\"items\":{\"type\":\"string\"}}"
+  for value in ["[]", "[1]", "[1,\"a\"]"] {
+    assert_eq(report(value, schema), "")
+  }
+  assert_eq(
+    report("[1,2]", schema),
+    "[1]: it is a number where the schema expects a string",
+  )
+  assert_eq(
+    report("[\"bad\",\"a\"]", schema),
+    "[0]: it is a string where the schema expects an integer",
+  )
+  assert_eq(report("[]", "{\"prefixItems\":[false]}"), "")
+  assert_eq(
+    report("[1]", "{\"prefixItems\":[false]}"),
+    "[0]: it is rejected by the false schema",
+  )
+  assert_eq(report("[1,2,3]", "{\"prefixItems\":[true,true]}"), "")
+  assert_eq(report("[1]", "{\"prefixItems\":[true,false],\"items\":false}"), "")
+  assert_eq(report("[1]", "{\"prefixItems\":[true],\"items\":false}"), "")
+  assert_eq(
+    report("[1,2]", "{\"prefixItems\":[true],\"items\":false}"),
+    "[1]: it is rejected by the false schema",
+  )
+  assert_eq(
+    report("[1]", "{\"items\":false}"),
+    "[0]: it is rejected by the false schema",
+  )
+}
+
+///|
+test "tuple keyword order and composition do not change suffix scope" {
+  for
+    schema in [
+      "{\"prefixItems\":[false,true],\"items\":false}", "{\"items\":false,\"prefixItems\":[false,true]}",
+    ] {
+    // Reports retain keyword order; both orders must identify the same two
+    // instance violations, and the failed prefix must not move the suffix start.
+    let violations = match
+      validate_schema(parse_ok("[1,2,3]"), parse_ok(schema)) {
+      Ok(violations) => violations
+      Err(_) => abort("valid tuple schema rejected")
+    }
+    assert_eq(violations.length(), 2)
+    for path in ["[0]", "[2]"] {
+      assert_true(
+        violations.any(fn(error) {
+          error.path == path &&
+          error.message == "it is rejected by the false schema"
+        }),
+      )
+    }
+  }
+  assert_eq(
+    report("[1]", "{\"allOf\":[{\"prefixItems\":[true]}],\"items\":false}"),
+    "[0]: it is rejected by the false schema",
+  )
+  assert_eq(
+    report("[1]", "{\"prefixItems\":[true],\"allOf\":[{\"items\":false}]}"),
+    "[0]: allOf[0]: it is rejected by the false schema",
+  )
+}
+
+///|
+test "nested array errors use instance paths for tuple and suffix elements" {
+  let schema = "{\"properties\":{\"orders\":{\"prefixItems\":[true,{\"prefixItems\":[{\"type\":\"integer\"}],\"items\":false}],\"items\":false}}}"
+  assert_eq(
+    report("{\"orders\":[0,[\"bad\",2],3]}", schema),
+    "orders[1][0]: it is a string where the schema expects an integer\norders[1][1]: it is rejected by the false schema\norders[2]: it is rejected by the false schema",
+  )
+}
+
+///|
+test "array parameters use exact counts and schema error categories" {
+  for keyword in ["minItems", "maxItems"] {
+    for
+      (raw, kind) in [
+        ("-1", InvalidSchema),
+        ("0.1", InvalidSchema),
+        ("1e-400", InvalidSchema),
+        ("true", InvalidSchema),
+        ("1000000001", UnsupportedFeature),
+        ("1e400", UnsupportedFeature),
+      ] {
+      let issues = schema_problems(
+        parse_ok(
+          "{\"properties\":{\"orders\":{\"" + keyword + "\":" + raw + "}}}",
+        ),
+      )
+      assert_eq(issues.length(), 1)
+      assert_eq(issues[0].kind, kind)
+      assert_eq(issues[0].path, "properties.orders." + keyword)
+      assert_true(
+        issues[0].message.contains("items") ||
+        issues[0].message.contains("item count"),
+      )
+      assert_false(issues[0].message.contains("characters"))
+    }
+    for raw in ["0", "-0", "2.0", "2e0", "1000000000", "1e9"] {
+      assert_eq(problems("{\"" + keyword + "\":" + raw + "}"), "")
+    }
+  }
+  assert_eq(report("[]", "{\"maxItems\":1000000000}"), "")
+  for
+    (schema, path) in [
+      ("{\"prefixItems\":[]}", "prefixItems"),
+      ("{\"prefixItems\":false}", "prefixItems"),
+      ("{\"prefixItems\":[null]}", "prefixItems[0]"),
+      ("{\"uniqueItems\":1}", "uniqueItems"),
+      ("{\"items\":[]}", "items"),
+    ] {
+    let issues = schema_problems(parse_ok(schema))
+    assert_eq(issues.length(), 1)
+    assert_eq(issues[0].kind, InvalidSchema)
+    assert_eq(issues[0].path, path)
+  }
+}
+
+///|
+test "all array subschemas are prechecked and ordinary const enum fields stay data" {
+  for
+    (schema, path, kind) in [
+      (
+        "{\"maxItems\":0,\"prefixItems\":[true,{\"$ref\":\"#/missing\"}]}",
+        "prefixItems[1].$ref",
+        UnsupportedFeature,
+      ),
+      (
+        "{\"prefixItems\":[true,{\"multipleOf\":0}]}",
+        "prefixItems[1].multipleOf",
+        InvalidSchema,
+      ),
+      (
+        "{\"prefixItems\":[true],\"items\":{\"$ref\":\"#/missing\"}}",
+        "items.$ref",
+        UnsupportedFeature,
+      ),
+      (
+        "{\"prefixItems\":[true],\"items\":{\"minItems\":-1}}",
+        "items.minItems",
+        InvalidSchema,
+      ),
+      ("{\"additionalItems\":false}", "additionalItems", UnsupportedFeature),
+      ("{\"contains\":true}", "contains", UnsupportedFeature),
+      ("{\"unevaluatedItems\":false}", "unevaluatedItems", UnsupportedFeature),
+    ] {
+    let issues = schema_problems(parse_ok(schema))
+    assert_eq(issues.length(), 1)
+    assert_eq(issues[0].path, path)
+    assert_eq(issues[0].kind, kind)
+    assert_true(validate_schema(parse_ok("[]"), parse_ok(schema)) is Err(_))
+  }
+  for keyword in ["const", "enum"] {
+    let data = "{\"prefixItems\":[],\"uniqueItems\":123}"
+    let schema = if keyword == "const" {
+      "{\"const\":" + data + "}"
+    } else {
+      "{\"enum\":[" + data + "]}"
+    }
+    assert_eq(report(data, schema), "")
+  }
+}

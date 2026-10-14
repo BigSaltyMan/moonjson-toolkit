@@ -1886,3 +1886,122 @@ async test "JSONL and mixed batch inputs preserve exact multipleOf failures" {
   assert_false(batch.err.contains("matches the schema"))
   assert_true(batch.out.contains("Summary: 1 passed, 1 failed"))
 }
+
+///|
+async test "CLI array validation distinguishes matches and data violations" {
+  for
+    index, (schema, value, code, reason) in [
+      ("{\"minItems\":2}", "[1,2]", 0, ""),
+      ("{\"minItems\":2}", "[1]", 1, "requires at least 2"),
+      ("{\"uniqueItems\":true}", "[1,1.0]", 1, "items at indexes 0 and 1"),
+      (
+        "{\"prefixItems\":[{\"type\":\"integer\"}],\"items\":false}", "[1]", 0, "",
+      ),
+      (
+        "{\"prefixItems\":[{\"type\":\"integer\"}],\"items\":false}", "[\"bad\"]",
+        1, "[0]:",
+      ),
+      (
+        "{\"prefixItems\":[{\"type\":\"integer\"}],\"items\":false}", "[1,2]", 1,
+        "[1]:",
+      ),
+    ] {
+    let result = run_against_schema(
+      Scratch::named("array_verdict_" + index.to_string()),
+      value,
+      schema,
+      ["--no-color"],
+      StubAnalyzer::new(Ok("unused")),
+    )
+    assert_eq(result.code, code)
+    if code == 0 {
+      assert_eq(result.err, "")
+      assert_true(result.out.contains("matches the schema"))
+    } else {
+      assert_eq(result.out, "")
+      assert_true(result.err.contains(reason))
+      assert_false(result.err.contains("matches the schema"))
+    }
+  }
+}
+
+///|
+async test "CLI array schema problems have exit 2 and no business verdict" {
+  for
+    index, (schema, path) in [
+      ("{\"minItems\":-1}", "minItems"),
+      ("{\"maxItems\":1000000001}", "maxItems"),
+      ("{\"uniqueItems\":1}", "uniqueItems"),
+      ("{\"prefixItems\":[]}", "prefixItems"),
+      (
+        "{\"prefixItems\":[true,{\"$ref\":\"#/missing\"}]}", "prefixItems[1].$ref",
+      ),
+    ] {
+    let result = run_against_schema(
+      Scratch::named("array_preflight_" + index.to_string()),
+      "[]",
+      schema,
+      ["--no-color"],
+      StubAnalyzer::new(Ok("unused")),
+    )
+    assert_eq(result.code, 2)
+    assert_eq(result.out, "")
+    assert_true(result.err.contains("  " + path + ": "))
+    assert_false(result.err.contains("matches the schema"))
+  }
+}
+
+///|
+async test "unused prefix schema is rejected before a missing input is read" {
+  let scratch = Scratch::named("array_prefix_missing")
+  discard(scratch.input)
+  @fs.write_file(
+    scratch.schema,
+    "{\"prefixItems\":[true,{\"$ref\":\"#/missing\"}]}",
+  )
+  let result = run(
+    ["-v", "--no-color", "--schema", scratch.schema, "-f", scratch.input],
+    analyze=StubAnalyzer::new(Ok("unused")).analyzer(),
+  )
+  discard(scratch.schema)
+  assert_eq(result.code, 2)
+  assert_eq(result.out, "")
+  assert_true(
+    result.err.contains("prefixItems[1].$ref: keyword is not supported"),
+  )
+  assert_false(result.err.contains("cannot read " + scratch.input))
+}
+
+///|
+async test "JSONL duplicate arrays and batch tuple errors retain exit 1" {
+  let jsonl = run_against_schema(
+    Scratch::named("array_jsonl"),
+    "[1,2]\n[1,1.0]\n",
+    "{\"uniqueItems\":true}",
+    ["--jsonl", "--continue-on-error", "--no-color"],
+    StubAnalyzer::new(Ok("unused")),
+  )
+  assert_eq(jsonl.code, 1)
+  assert_true(jsonl.err.contains("line 2 does not match the schema"))
+  assert_true(jsonl.err.contains("items at indexes 0 and 1"))
+  assert_false(jsonl.out.contains("every record matches the schema"))
+  let scratch = Scratch::named("array_batch")
+  @fs.write_file(scratch.stats, "[\"bad\",\"a\"]")
+  let batch = run_against_schema(
+    scratch,
+    "[1,\"a\"]",
+    "{\"prefixItems\":[{\"type\":\"integer\"},{\"type\":\"string\"}],\"minItems\":2,\"items\":false}",
+    ["-f", scratch.stats, "--continue-on-error", "--no-color"],
+    StubAnalyzer::new(Ok("unused")),
+  )
+  discard(scratch.stats)
+  assert_eq(batch.code, 1)
+  assert_true(batch.err.contains(scratch.stats + " does not match the schema"))
+  assert_true(
+    batch.err.contains(
+      "[0]: it is a string where the schema expects an integer",
+    ),
+  )
+  assert_true(batch.out.contains("Summary: 1 passed, 1 failed"))
+  assert_false(batch.err.contains("matches the schema"))
+}

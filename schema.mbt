@@ -81,7 +81,11 @@ fn check_value(
           "type" => check_type(value, wanted, path, errors)
           "required" => check_required(value, wanted, path, errors)
           "properties" => check_properties(value, wanted, path, errors)
-          "items" => check_items(value, wanted, path, errors)
+          "items" => check_items(value, wanted, members, path, errors)
+          "prefixItems" => check_prefix_items(value, wanted, path, errors)
+          "minItems" => check_array_length(value, wanted, path, errors, true)
+          "maxItems" => check_array_length(value, wanted, path, errors, false)
+          "uniqueItems" => check_unique_items(value, wanted, path, errors)
           "enum" => check_enum(value, wanted, path, errors)
           "const" => check_const(value, wanted, path, errors)
           "allOf" | "anyOf" | "oneOf" =>
@@ -433,17 +437,116 @@ fn check_properties(
 }
 
 ///|
-/// `items`: every element of the array is checked against the schema.
+/// Only the suffix after this schema object's prefixItems is checked by items.
+/// Declarations in other objects and prefix validation outcomes do not affect it.
 fn check_items(
+  value : @pjson.Json,
+  wanted : @pjson.Json,
+  schema_members : Array[(String, @pjson.Json)],
+  path : String,
+  errors : Array[SchemaError],
+) -> Unit {
+  let start = match find_member(schema_members, "prefixItems") {
+    Some(Array(items~)) => items.length()
+    _ => 0
+  }
+  match value {
+    Array(items~) =>
+      for index, item in items {
+        if index >= start {
+          check_value(
+            item,
+            wanted,
+            path + "[" + index.to_string() + "]",
+            errors,
+          )
+        }
+      }
+    _ => ()
+  }
+}
+
+///|
+fn check_prefix_items(
   value : @pjson.Json,
   wanted : @pjson.Json,
   path : String,
   errors : Array[SchemaError],
 ) -> Unit {
+  match (value, wanted) {
+    (Array(items~), Array(items=schemas)) =>
+      for index in 0..<Int::min(items.length(), schemas.length()) {
+        check_value(
+          items[index],
+          schemas[index],
+          path + "[" + index.to_string() + "]",
+          errors,
+        )
+      }
+    _ => ()
+  }
+}
+
+///|
+fn check_array_length(
+  value : @pjson.Json,
+  wanted : @pjson.Json,
+  path : String,
+  errors : Array[SchemaError],
+  least : Bool,
+) -> Unit {
+  let limit = match length_argument(wanted) {
+    Ok(limit) => limit
+    // Compilation rejects invalid or unsupported counts.
+    Err(_) => return
+  }
   match value {
-    Array(items~) =>
-      for index, item in items {
-        check_value(item, wanted, path + "[" + index.to_string() + "]", errors)
+    Array(items~) => {
+      let count = items.length()
+      if (least && count < limit) || (!least && count > limit) {
+        errors.push({
+          path,
+          message: "it has " +
+          count.to_string() +
+          (if count == 1 { " item" } else { " items" }) +
+          (if least {
+            ", but the schema requires at least "
+          } else {
+            ", but the schema allows at most "
+          }) +
+          limit.to_string(),
+        })
+      }
+    }
+    _ => ()
+  }
+}
+
+///|
+/// Pairwise deep equality requires O(n^2) element comparisons in the worst
+/// case. Report only the first equal pair without rewriting any input values.
+fn check_unique_items(
+  value : @pjson.Json,
+  wanted : @pjson.Json,
+  path : String,
+  errors : Array[SchemaError],
+) -> Unit {
+  match (value, wanted) {
+    (Array(items~), Bool(value=true)) =>
+      for first in 0..<items.length() {
+        for second in (first + 1)..<items.length() {
+          if same_value(items[first], items[second]) {
+            errors.push({
+              path,
+              message: "items at indexes " +
+              first.to_string() +
+              " and " +
+              second.to_string() +
+              " are equal, but uniqueItems is true",
+            })
+            return
+          }
+        }
       }
     _ => ()
   }
@@ -642,7 +745,7 @@ fn check_pattern(
 /// keyword it is under.
 ///
 /// A schema is read the same way at every level, so this walks into the schemas
-/// inside properties, items, combinations, not and additionalProperties.
+/// inside properties, prefixItems, items, combinations, not and additionalProperties.
 /// Only supported assertions and explicit annotations are accepted.
 /// Values inside const, enum, default and examples are data, not schemas.
 fn check_schema(
@@ -659,7 +762,7 @@ fn check_schema(
           "type" => check_type_argument(wanted, here, errors)
           "required" => check_name_list(wanted, here, errors)
           "const" => ()
-          "allOf" | "anyOf" | "oneOf" =>
+          "allOf" | "anyOf" | "oneOf" | "prefixItems" =>
             match wanted {
               Array(items~) => {
                 if items.is_empty() {
@@ -750,6 +853,39 @@ fn check_schema(
                   message: "expected a strictly positive number, but this is " +
                   kind_name(wanted),
                   kind: InvalidSchema,
+                })
+            }
+          "minItems" | "maxItems" =>
+            match length_argument(wanted) {
+              Ok(_) => ()
+              Err(kind) =>
+                errors.push({
+                  path: here,
+                  kind,
+                  message: match wanted {
+                    Number(raw~) =>
+                      if kind == UnsupportedFeature {
+                        raw +
+                        " exceeds the supported item count limit of 1000000000"
+                      } else {
+                        raw +
+                        " is not a count of items; a count must be a nonnegative integer"
+                      }
+                    _ =>
+                      "expected a count of items, but this is " +
+                      kind_name(wanted)
+                  },
+                })
+            }
+          "uniqueItems" =>
+            match wanted {
+              Bool(_) => ()
+              _ =>
+                errors.push({
+                  path: here,
+                  kind: InvalidSchema,
+                  message: "expected a boolean, but this is " +
+                  kind_name(wanted),
                 })
             }
           "minLength" | "maxLength" =>
@@ -945,7 +1081,8 @@ fn check_name_list(
 }
 
 ///|
-/// Exact nonnegative integer length, distinguishing invalid parameters from
+/// Exact nonnegative integer count for strings and arrays, distinguishing
+/// invalid parameters from
 /// mathematically valid counts exceeding the current implementation limit.
 fn length_argument(wanted : @pjson.Json) -> Result[Int, SchemaProblemKind] {
   match wanted {

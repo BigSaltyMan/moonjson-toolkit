@@ -191,9 +191,13 @@ way to it, and -v wins over it as it wins over the name lists.
 --schema <path> checks the input against a JSON Schema instead of printing
 it, and is read with -v, which is the flag that asks for a verdict rather
 than a document. The supported JSON Schema Draft 2020-12 subset is: type,
-required, properties, items, enum, const, minimum, maximum, exclusiveMinimum,
-exclusiveMaximum, multipleOf, minLength, maxLength, pattern, allOf, anyOf,
-oneOf, not and additionalProperties.
+required, properties, prefixItems, items, minItems, maxItems, uniqueItems,
+enum, const, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf,
+minLength, maxLength, pattern, allOf, anyOf, oneOf, not and additionalProperties.
+prefixItems checks existing prefix positions; items checks remaining elements
+after the prefixItems declared in the same schema object.
+minItems/maxItems accept nonnegative integers up to 1000000000.
+uniqueItems uses exact JSON equality: 1 and 1.0 count as duplicates.
 Exclusive bounds exclude equality. multipleOf uses exact decimal divisibility
 with a strictly positive divisor.
 Boolean schemas are supported: true accepts every value; false rejects it.
@@ -768,7 +772,8 @@ printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
 本工具支持明确列出的 JSON Schema Draft 2020-12 子集。未支持的关键字、版本或机制会在
 校验前报错，退出码为 `2`。本工具尚未完整实现 Draft 2020-12。
 
-当前支持 `type`、`required`、`properties`、`items`、`enum`、`const`、`minimum`、
+当前支持 `type`、`required`、`properties`、`prefixItems`、`items`、`minItems`、`maxItems`、
+`uniqueItems`、`enum`、`const`、`minimum`、
 `maximum`、`exclusiveMinimum`、`exclusiveMaximum`、`multipleOf`、`minLength`、
 `maxLength`、`pattern`、`allOf`、`anyOf`、`oneOf`、`not` 和
 `additionalProperties`。也支持布尔 Schema：`true` 接受所有 JSON 值，`false` 拒绝所有值。
@@ -850,10 +855,54 @@ printf '0' | moon run cmd/main -- -v --schema amount.schema.json
 # exit code: 1
 ```
 
-长度参数必须是非负整数，当前支持上限为 `1_000_000_000`。负数、非整数属于
+字符串长度参数必须是非负整数，当前支持上限为 `1_000_000_000`。负数、非整数属于
 `InvalidSchema`；数学上合法但超过上限的非负整数属于 `UnsupportedFeature`。两种情况
 都会在校验输入前报错，包含关键字在 schema 中的位置，CLI 退出码为 `2`。
 例如 `maxLength: 1.2e1` 等价于长度上限十二，`minLength: 1e-400` 会报参数错误，不能下溢为零。
+
+数组的 `minItems`、`maxItems` 分别限制元素数量的下限和上限，包含边界值。参数复用精确的
+非负整数判断，`2`、`2.0`、`2e0` 均接受。当前工具支持上限为 `1_000_000_000`，超过上限的
+合法整数属于 `UnsupportedFeature`；负数、非整数和非数字属于 `InvalidSchema`。
+该上限是实现限制，数组计数诊断会说明“元素数量”，不会使用字符计数文案。
+本次四个数组关键字仅对数组实例生效。
+
+`prefixItems` 必须是非空 Schema 数组，按位置检查实际存在的前缀元素；它本身不要求这些
+位置存在，也不禁止更多元素。`items` 只检查同一个 Schema 对象中 `prefixItems` 之后的
+剩余元素；没有同级 `prefixItems` 时检查全部元素。起点不依赖关键字顺序、前缀校验成功
+的项数或其他 `allOf` 分支的前缀声明。即使实例为空，所有前缀和剩余元素子 Schema
+也都会预检查。
+
+`uniqueItems: true` 要求 JSON 值两两不同：`1` 与 `1.0`、`0` 与 `-0.0` 都算重复。
+深层相等忽略对象成员顺序，保留数组顺序，并精确比较数字。校验不修改实例内容和顺序。
+当前采用两两比较，最坏需要 O(n²) 次深层元素比较；发现首对重复后报告一条违规。
+省略 `uniqueItems` 或设为 `false` 时允许重复。
+
+以下元组要求恰好两项，先是整数，再是字符串：
+
+```sh
+cat > tuple.schema.json <<'EOF'
+{
+  "type": "array",
+  "prefixItems": [{"type":"integer"}, {"type":"string"}],
+  "minItems": 2,
+  "items": false
+}
+EOF
+printf '[1,"a"]' | moon run cmd/main -- -v --schema tuple.schema.json
+# <stdin>: valid JSON, and it matches the schema
+# exit code: 0
+printf '[1]' | moon run cmd/main -- -v --schema tuple.schema.json
+# error: <stdin> does not match the schema
+#   (root): it has 1 item, but the schema requires at least 2
+# exit code: 1
+printf '[1,"a",true]' | moon run cmd/main -- -v --schema tuple.schema.json
+# error: <stdin> does not match the schema
+#   [2]: it is rejected by the false schema
+# exit code: 1
+```
+
+旧式数组形式的 `items` 属于非法参数。`additionalItems`、`contains`、`unevaluatedItems`
+等仍未支持，出现时提前拒绝，继续按 Draft 2020-12 的明确子集描述能力。
 
 允许的注解为：
 
@@ -1451,7 +1500,7 @@ AI 响应处理都不需要联网，所以在任何机器上 `moon test` 都是�
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 356 tests
+moon test  --target native   # 370 tests
 moon fmt                     # format
 
 cd frontend

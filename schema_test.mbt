@@ -549,3 +549,181 @@ test "compiled numeric assertions retain their private snapshot" {
     assert_eq(violations[0].message, reason)
   }
 }
+
+///|
+test "public validators agree on array counts uniqueness and tuple suffixes" {
+  for
+    (schema_text, value_text, count, path) in [
+      ("{\"minItems\":2}", "[1]", 1, ""),
+      ("{\"minItems\":2.0}", "[1,2]", 0, ""),
+      ("{\"maxItems\":0}", "[]", 0, ""),
+      ("{\"maxItems\":0}", "[null]", 1, ""),
+      ("{\"uniqueItems\":true}", "[1,1.0]", 1, ""),
+      ("{\"uniqueItems\":false}", "[1,1]", 0, ""),
+      ("{\"uniqueItems\":true}", "[true,1]", 0, ""),
+      ("{\"uniqueItems\":true}", "[9007199254740992,9007199254740993]", 0, ""),
+      (
+        "{\"uniqueItems\":true}", "[{\"a\":1,\"b\":2},{\"b\":2,\"a\":1.0}]", 1, "",
+      ),
+      ("{\"prefixItems\":[false]}", "[]", 0, ""),
+      ("{\"prefixItems\":[false]}", "[1]", 1, "[0]"),
+      ("{\"prefixItems\":[true],\"items\":false}", "[1]", 0, ""),
+      ("{\"prefixItems\":[true],\"items\":false}", "[1,2]", 1, "[1]"),
+      ("{\"items\":false}", "[1]", 1, "[0]"),
+      (
+        "{\"prefixItems\":[{\"type\":\"integer\"}],\"items\":{\"type\":\"string\"}}",
+        "[1,\"a\"]", 0, "",
+      ),
+      (
+        "{\"items\":{\"type\":\"string\"},\"prefixItems\":[{\"type\":\"integer\"}]}",
+        "[1,2]", 1, "[1]",
+      ),
+      (
+        "{\"allOf\":[{\"prefixItems\":[true]}],\"items\":false}", "[1]", 1, "[0]",
+      ),
+      (
+        "{\"minItems\":1,\"maxItems\":0,\"uniqueItems\":true,\"prefixItems\":[false]}",
+        "null", 0, "",
+      ),
+    ] {
+    let schema = json(schema_text)
+    let value = json(value_text)
+    let compiled = match @moonjson-toolkit.compile_schema(schema) {
+      Ok(compiled) => compiled
+      Err(_) => abort("valid array schema rejected")
+    }
+    let direct = match @moonjson-toolkit.validate_schema(value, schema) {
+      Ok(violations) => violations
+      Err(_) => abort("valid array schema rejected")
+    }
+    assert_eq(direct.length(), count)
+    assert_eq(
+      direct.map(@moonjson-toolkit.render_schema_error),
+      @moonjson-toolkit.validate_compiled_schema(value, compiled).map(
+        @moonjson-toolkit.render_schema_error,
+      ),
+    )
+    if count > 0 {
+      assert_eq(direct[0].path, path)
+    }
+  }
+}
+
+///|
+test "public array preflight preserves categories and precise schema locations" {
+  for
+    (text, kind, path) in [
+      ("{\"minItems\":-1}", @moonjson-toolkit.InvalidSchema, "minItems"),
+      ("{\"maxItems\":1e-400}", @moonjson-toolkit.InvalidSchema, "maxItems"),
+      (
+        "{\"maxItems\":1000000001}",
+        @moonjson-toolkit.UnsupportedFeature,
+        "maxItems",
+      ),
+      (
+        "{\"uniqueItems\":\"true\"}",
+        @moonjson-toolkit.InvalidSchema,
+        "uniqueItems",
+      ),
+      ("{\"prefixItems\":[]}", @moonjson-toolkit.InvalidSchema, "prefixItems"),
+      (
+        "{\"prefixItems\":false}",
+        @moonjson-toolkit.InvalidSchema,
+        "prefixItems",
+      ),
+      (
+        "{\"prefixItems\":[null]}",
+        @moonjson-toolkit.InvalidSchema,
+        "prefixItems[0]",
+      ),
+      (
+        "{\"maxItems\":0,\"prefixItems\":[true,{\"$ref\":\"#/missing\"}]}",
+        @moonjson-toolkit.UnsupportedFeature,
+        "prefixItems[1].$ref",
+      ),
+      (
+        "{\"prefixItems\":[true],\"items\":{\"multipleOf\":0}}",
+        @moonjson-toolkit.InvalidSchema,
+        "items.multipleOf",
+      ),
+      ("{\"items\":[]}", @moonjson-toolkit.InvalidSchema, "items"),
+      (
+        "{\"additionalItems\":false}",
+        @moonjson-toolkit.UnsupportedFeature,
+        "additionalItems",
+      ),
+    ] {
+    let issues = rejected(text)
+    assert_eq(issues.length(), 1)
+    assert_eq(issues[0].kind, kind)
+    assert_eq(issues[0].path, path)
+    match @moonjson-toolkit.validate_schema(json("[]"), json(text)) {
+      Err(problems) => assert_eq(problems, issues)
+      Ok(_) => abort("array preflight was bypassed")
+    }
+  }
+}
+
+///|
+test "compiled tuple snapshots are isolated and unique validation never rewrites arrays" {
+  let inner = [("type", json("\"integer\""))]
+  let schemas = [
+    @pjson.Object(members=[
+      (
+        "properties",
+        @pjson.Object(members=[("id", @pjson.Object(members=inner))]),
+      ),
+    ]),
+    json("{\"type\":\"string\"}"),
+  ]
+  let compiled = match
+    @moonjson-toolkit.compile_schema(
+      @pjson.Object(members=[
+        ("prefixItems", @pjson.Array(items=schemas)),
+        ("items", json("false")),
+      ]),
+    ) {
+    Ok(compiled) => compiled
+    Err(_) => abort("valid tuple schema rejected")
+  }
+  inner[0] = ("type", json("\"string\""))
+  schemas.push(json("true"))
+  schemas.clear()
+  assert_eq(
+    @moonjson-toolkit.validate_compiled_schema(
+      json("[{\"id\":1},\"a\"]"),
+      compiled,
+    ).length(),
+    0,
+  )
+  for
+    (text, path) in [
+      ("[{\"id\":\"bad\"},\"a\"]", "[0].id"),
+      ("[{\"id\":1},2]", "[1]"),
+      ("[{\"id\":1},\"a\",true]", "[2]"),
+    ] {
+    let violations = @moonjson-toolkit.validate_compiled_schema(
+      json(text),
+      compiled,
+    )
+    assert_eq(violations.length(), 1)
+    assert_eq(violations[0].path, path)
+  }
+  for
+    text in [
+      "[1,2,1.0]", "[[1,2],[2,1]]", "[{\"a\":1,\"b\":2},{\"b\":2,\"a\":1.0}]",
+    ] {
+    let value = json(text)
+    let before = @moonjson-toolkit.format_compact(value)
+    let schema = json("{\"uniqueItems\":true}")
+    let checked = match @moonjson-toolkit.compile_schema(schema) {
+      Ok(compiled) => compiled
+      Err(_) => abort("valid schema rejected")
+    }
+    let direct = @moonjson-toolkit.validate_schema(value, schema)
+    assert_true(direct is Ok(_))
+    assert_eq(@moonjson-toolkit.format_compact(value), before)
+    let _ = @moonjson-toolkit.validate_compiled_schema(value, checked)
+    assert_eq(@moonjson-toolkit.format_compact(value), before)
+  }
+}

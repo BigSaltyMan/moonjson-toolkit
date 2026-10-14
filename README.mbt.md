@@ -212,9 +212,13 @@ way to it, and -v wins over it as it wins over the name lists.
 --schema <path> checks the input against a JSON Schema instead of printing
 it, and is read with -v, which is the flag that asks for a verdict rather
 than a document. The supported JSON Schema Draft 2020-12 subset is: type,
-required, properties, items, enum, const, minimum, maximum, exclusiveMinimum,
-exclusiveMaximum, multipleOf, minLength, maxLength, pattern, allOf, anyOf,
-oneOf, not and additionalProperties.
+required, properties, prefixItems, items, minItems, maxItems, uniqueItems,
+enum, const, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf,
+minLength, maxLength, pattern, allOf, anyOf, oneOf, not and additionalProperties.
+prefixItems checks existing prefix positions; items checks remaining elements
+after the prefixItems declared in the same schema object.
+minItems/maxItems accept nonnegative integers up to 1000000000.
+uniqueItems uses exact JSON equality: 1 and 1.0 count as duplicates.
 Exclusive bounds exclude equality. multipleOf uses exact decimal divisibility
 with a strictly positive divisor.
 Boolean schemas are supported: true accepts every value; false rejects it.
@@ -842,7 +846,8 @@ This tool supports an explicitly listed JSON Schema Draft 2020-12 subset.
 Unsupported keywords, versions or mechanisms are rejected before validation
 with exit code `2`; this is not a full Draft 2020-12 implementation.
 
-The supported keywords are `type`, `required`, `properties`, `items`, `enum`,
+The supported keywords are `type`, `required`, `properties`, `prefixItems`,
+`items`, `minItems`, `maxItems`, `uniqueItems`, `enum`,
 `const`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`,
 `multipleOf`, `minLength`, `maxLength`, `pattern`, `allOf`, `anyOf`, `oneOf`,
 `not` and `additionalProperties`. Boolean schemas are also
@@ -934,12 +939,62 @@ printf '0' | moon run cmd/main -- -v --schema amount.schema.json
 # exit code: 1
 ```
 
-Length parameters must be nonnegative integers. The current implementation
+String length parameters must be nonnegative integers. The current implementation
 supports counts up to `1_000_000_000`: negative or fractional values are
 `InvalidSchema`, and larger nonnegative integers are `UnsupportedFeature`.
 Both are rejected before data validation with exit `2` and the keyword's
 schema location. For example, `maxLength: 1.2e1` means twelve characters,
 while `minLength: 1e-400` is invalid rather than rounded down to zero.
+
+For arrays, `minItems` and `maxItems` constrain the element count and include
+the specified boundary. Their parameters use the same exact nonnegative integer
+logic: `2`, `2.0` and `2e0` are accepted. The tool currently supports counts
+up to `1_000_000_000`; larger valid integers are `UnsupportedFeature`, while
+negative, fractional and nonnumeric parameters are `InvalidSchema`. This cap
+is an implementation limit. Diagnostics refer to item counts rather than
+character counts. All four array keywords only constrain array instances.
+
+`prefixItems` must be a nonempty array of schemas and checks existing positions
+by index. It does not require those positions to exist or forbid more elements.
+`items` checks only the remaining elements after the same schema object's
+`prefixItems`; without that sibling keyword it checks all elements. This is
+independent of keyword order and prefix validation success. Prefixes in other
+`allOf` branches do not affect the starting index. Every prefix and suffix
+subschema is prechecked, even for an empty instance.
+
+`uniqueItems: true` requires pairwise distinct JSON values: `1` and `1.0`,
+or `0` and `-0.0`, are duplicates. Deep equality ignores object member order,
+preserves array order and compares numbers exactly. The input array is never
+rewritten. The current pairwise implementation requires O(n²) deep element
+comparisons in the worst case and reports only the first equal pair.
+Omitting `uniqueItems`, or setting it to `false`, permits duplicates.
+
+This tuple requires exactly two elements, an integer followed by a string:
+
+```sh
+cat > tuple.schema.json <<'EOF'
+{
+  "type": "array",
+  "prefixItems": [{"type":"integer"}, {"type":"string"}],
+  "minItems": 2,
+  "items": false
+}
+EOF
+printf '[1,"a"]' | moon run cmd/main -- -v --schema tuple.schema.json
+# <stdin>: valid JSON, and it matches the schema
+# exit code: 0
+printf '[1]' | moon run cmd/main -- -v --schema tuple.schema.json
+# error: <stdin> does not match the schema
+#   (root): it has 1 item, but the schema requires at least 2
+# exit code: 1
+printf '[1,"a",true]' | moon run cmd/main -- -v --schema tuple.schema.json
+# error: <stdin> does not match the schema
+#   [2]: it is rejected by the false schema
+# exit code: 1
+```
+
+Legacy array-valued `items` is invalid. `additionalItems`, `contains` and
+`unevaluatedItems` remain unsupported and are rejected before validation.
 
 The allowed annotations are:
 
@@ -1600,7 +1655,7 @@ so `moon test` is the same command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 356 tests
+moon test  --target native   # 370 tests
 moon fmt                     # format
 
 cd frontend
