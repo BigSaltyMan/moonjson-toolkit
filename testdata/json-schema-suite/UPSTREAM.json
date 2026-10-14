@@ -1,0 +1,335 @@
+{
+  "repository": "https://github.com/json-schema-org/JSON-Schema-Test-Suite",
+  "commit": "55719286c33ae0d1823bfb65fea10338a19bc37c",
+  "scope": [
+    "LICENSE",
+    "tests/draft2020-12/**"
+  ],
+  "files": [
+    {
+      "path": "LICENSE",
+      "sha256": "837402bd25fad9b704265801ca3f92566a98157c1f9a7acd6f446299ba1c305a"
+    },
+    {
+      "path": "tests/draft2020-12/additionalProperties.json",
+      "sha256": "b96bd533416386ac6421737b48c5c072870ab5dbea910585e9e8fa6305c7ca91"
+    },
+    {
+      "path": "tests/draft2020-12/allOf.json",
+      "sha256": "81045b06706a28f6aa337b485b41a764098e10ac73bb1d346ba0a4285a63e970"
+    },
+    {
+      "path": "tests/draft2020-12/anchor.json",
+      "sha256": "6f60e0782be6072733701459684cadf3741ddd60d96b14698b4d9a19075e9f1e"
+    },
+    {
+      "path": "tests/draft2020-12/anyOf.json",
+      "sha256": "7a6fe41602496c256334ffa3e6fb457b26ac23b97ca03cb16b724ad21a7d216d"
+    },
+    {
+      "path": "tests/draft2020-12/boolean_schema.json",
+      "sha256": "9c8828d325b88a0c632fca22405d5481548b49fb0f9f5536ee401e4d66aa8582"
+    },
+    {
+      "path": "tests/draft2020-12/const.json",
+      "sha256": "83a148d2589cbd211e7e64b31763290f8869d763f513de4658e8d25f0fcc025e"
+    },
+    {
+      "path": "tests/draft2020-12/contains.json",
+      "sha256": "086782fc8b54ac77a4a2afe8b84f8cc7fc9ca7b22473ebd8db3480f2eb8d0ab6"
+    },
+    {
+      "path": "tests/draft2020-12/content.json",
+      "sha256": "9b08c408d32cf64f1966aa300cc246355799d883ed278a61d720493f61711bab"
+    },
+    {
+      "path": "tests/draft2020-12/default.json",
+      "sha256": "db4a8382727f6c687a0fc7bb24347e010c3fcfabd1207150ce025e1a763f6094"
+    },
+    {
+      "path": "tests/draft2020-12/defs.json",
+      "sha256": "5a352f0b1ad9aa906758fa4d363a77c4c4b29cfc193e8d6f7ab1e184be2a75d5"
+    },
+    {
+      "path": "tests/draft2020-12/dependentRequired.json",
+      "sha256": "0824c393115498ac1a62551c3174a3ccd54ee4ef323d5eb9de0dfe3a185ad666"
+    },
+    {
+      "path": "tests/draft2020-12/dependentSchemas.json",
+      "sha256": "f77df8d5243c0f58e04053a14a30706f5a6d5a9e7eccbfd17f8d6445841f8752"
+    },
+    {
+      "path": "tests/draft2020-12/dynamicRef.json",
+      "sha256": "dd763124c3d1432977b9c276bf682fa746f82a69b1d9bbc1d79fbdb2a3dda5e4"
+    },
+    {
+      "path": "tests/draft2020-12/enum.json",
+      "sha256": "1abe7eb883bde4a78c62f08e484e16f32b72ca5c1be725aa54d85cc4546b5031"
+    },
+    {
+      "path": "tests/draft2020-12/exclusiveMaximum.json",
+      "sha256": "e37fc110c48e2a9de564579ceba3e8ab098a36f904dcc1ef02f8cf7b59dc0473"
+    },
+    {
+      "path": "tests/draft2020-12/exclusiveMinimum.json",
+      "sha256": "0395a2423606d07943d3d355d1c9c4a474cc7cb544d3c8f266ceab801c5f0a6d"
+    },
+    {
+      "path": "tests/draft2020-12/format.json",
+      "sha256": "3baf934e2aeace523012f92994e3c9f4b6142d68ba9ece0c12becaffa52eaf5f"
+    },
+    {
+      "path": "tests/draft2020-12/if-then-else.json",
+      "sha256": "c7bf0da8432427d9da38b11ccccd84473137893d4a93109e63751118402fef09"
+    },
+    {
+      "path": "tests/draft2020-12/infinite-loop-detection.json",
+      "sha256": "9fffe850049048a0e411133f7e5fec347f97c077bde65b34c67dadf96e046bcc"
+    },
+    {
+      "path": "tests/draft2020-12/items.json",
+      "sha256": "d924a8171f1f1d04ff026a4e3491d1376297145563158543005b7073b69ab913"
+    },
+    {
+      "path": "tests/draft2020-12/maxContains.json",
+      "sha256": "2d7cf7557b87b15a08457badc66905593834bbdda98f325a22d136dfdefe81ed"
+    },
+    {
+      "path": "tests/draft2020-12/maxItems.json",
+      "sha256": "59fa6236c0766aaac5fb7c9ef82e205c230efa94271485f614218291be7cbc5c"
+    },
+    {
+      "path": "tests/draft2020-12/maxLength.json",
+      "sha256": "ac43a3991586f2d2d1e7e37cad01bb1a7b1c5d9ad7b558d6029d24b41a04d1a9"
+    },
+    {
+      "path": "tests/draft2020-12/maxProperties.json",
+      "sha256": "4f1d14ac74862f134e6769884a7e72d47328daf91e2c6b475ae5f99891e3477d"
+    },
+    {
+      "path": "tests/draft2020-12/maximum.json",
+      "sha256": "dfbc88ef4ede2966250fb2ad44076856d51481ea01ce679cca70efe47606ee90"
+    },
+    {
+      "path": "tests/draft2020-12/minContains.json",
+      "sha256": "2aca05e48dbdf605fe14c775f5470061cf4c8b679e3e6a955a18334ea97d3c23"
+    },
+    {
+      "path": "tests/draft2020-12/minItems.json",
+      "sha256": "9792cedc446be654836b42d0312eca12051e9e2f24cd5d95dcd3f3fc9adccd0a"
+    },
+    {
+      "path": "tests/draft2020-12/minLength.json",
+      "sha256": "999e9731c57a1296e06e8b9b36b0531614ab7a6ac3c20db6fed50badbf3850ab"
+    },
+    {
+      "path": "tests/draft2020-12/minProperties.json",
+      "sha256": "00f641408d1dc3ff81743e0c730eb430ff818e3bbe37007a64138bd513ade05a"
+    },
+    {
+      "path": "tests/draft2020-12/minimum.json",
+      "sha256": "f6a29cb574b76621da23636a636cf12cb31b01646b89543e6ce1a813376439a3"
+    },
+    {
+      "path": "tests/draft2020-12/multipleOf.json",
+      "sha256": "ada35b586efe55186d35d8888a4e4954724c313253b59bd47ec03637a44cb4ad"
+    },
+    {
+      "path": "tests/draft2020-12/not.json",
+      "sha256": "1fd6ef263efd365680c6aaf8f23aa5430d7b9f80b84f46b1208b1ed8353c28b4"
+    },
+    {
+      "path": "tests/draft2020-12/oneOf.json",
+      "sha256": "a8d80a786d07769cb9b8b9a8903ca4f7aa564446ae6b781c7f7f6ffea11ed363"
+    },
+    {
+      "path": "tests/draft2020-12/optional/anchor.json",
+      "sha256": "5489247c9d8e1a6513137cf0f979cf0fc7b391d4e4e65db0c9833afe30f0a1fa"
+    },
+    {
+      "path": "tests/draft2020-12/optional/bignum.json",
+      "sha256": "52608148c500b3c4eeab2066317939cee5901991c38a234f4cc6179289cd8bf4"
+    },
+    {
+      "path": "tests/draft2020-12/optional/cross-draft.json",
+      "sha256": "de66c92876b3ba15ca43f2018ba6cd2451d4a5c8867aae5e7e660a31b3dba0cd"
+    },
+    {
+      "path": "tests/draft2020-12/optional/dependencies-compatibility.json",
+      "sha256": "309878857448fb606bb0809c88c8756100a16bc5fbb976ffbb26721468ccd1d2"
+    },
+    {
+      "path": "tests/draft2020-12/optional/dynamicRef.json",
+      "sha256": "eb6e0dfc35dc5d6cc075cbdfd79f96206d827b249017ab4a2c442255985a5384"
+    },
+    {
+      "path": "tests/draft2020-12/optional/ecmascript-regex.json",
+      "sha256": "8ee6227f32327b5debb30a78088636f5eef3968840f685c615d4be636fd90c92"
+    },
+    {
+      "path": "tests/draft2020-12/optional/float-overflow.json",
+      "sha256": "bfccb3bf6e4eb6f15a572dccc0e7ad93e6ff24911991355fd9ba2d75deae02e1"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format-assertion.json",
+      "sha256": "5ddc556bc2e991b36070aa116ee19d347ef778eb1b7f00efc70da0bae90005be"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/date-time.json",
+      "sha256": "8373dc33291aa26f3539f4c9df298f2ec3ee9827f3b18f2e58417e894cdb08f6"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/date.json",
+      "sha256": "db4a534a3deb8c760eb589c70141573b710f7d7511d68212a636b4c2663c9da2"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/duration.json",
+      "sha256": "254422a74b8733228892f1b2c5f15bb23ead539345d9e47cf09d82661a702e4e"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/ecmascript-regex.json",
+      "sha256": "7604353236f9873e84ae854cc0782be39878dff6f1e93c520ef37c86dbbe8841"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/email.json",
+      "sha256": "2d0d8295bd24a445434d016aa8edde7650c0432a83c9106fcf3fbf232b45c79a"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/hostname.json",
+      "sha256": "5f4b23d1715e77a59fbed2a203e8ea79a4502b296291ea64fd1784b3c75147fb"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/idn-email.json",
+      "sha256": "800790e2d8122c05d2fbb5ebcd2d84c80979ceefb03c0f8dc7e307c35a975672"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/idn-hostname.json",
+      "sha256": "557f834ac06bd3d89e73d32b8beeebe639c62d7683963e3b86649f244a13f2d5"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/ipv4.json",
+      "sha256": "bb519c507d351de09bbb8284a8ab06da4e115b5c2115f2f2525d516be34169c5"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/ipv6.json",
+      "sha256": "39c66aa91e6d764f0a5e94a9b36c4e1a2db11f388c5ff32d5439bafe32072533"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/iri-reference.json",
+      "sha256": "c9807eba7de6833ce3c3b21d434926cadba5d1b1ed51607df68d300ea3c54680"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/iri.json",
+      "sha256": "2936dfa842668eef76a0077d8cc10b17df692a662f83af9880ef7011f1fdc5f7"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/json-pointer.json",
+      "sha256": "0388151d9484b9dd10b734431a8dd742b52c2495b3ba9377c941d03faf099bc1"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/regex.json",
+      "sha256": "9afae3c2fa67bc1fad234dad211cb4172bd7aa10a9b527536822907c2dfe38bd"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/relative-json-pointer.json",
+      "sha256": "8bbe1d6bd8a355435fdfafccf143ca338b2530fa486315ce696f109d8e1fb869"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/time.json",
+      "sha256": "053320b46f1dd2ff52faecbf04e3222daf81ab0cf908336a474edb7024a2c091"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/unknown.json",
+      "sha256": "34278f85cf5648d5bb054fa83ee022dd6603e63eefc79bb118d9c72130acc67e"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/uri-reference.json",
+      "sha256": "3a9913d43edd31650d3c4f8cc75b2b701bd6670c514cc759f4586245f72c59cb"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/uri-template.json",
+      "sha256": "9aab180ff02f8648ad080d26d0ce2cced4e379eef2babd8fc2f289c7fb8e3641"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/uri.json",
+      "sha256": "47954ee6aef87c20a045ad2182fecd9c7eec53b6c8151ee88cba50381b2850a4"
+    },
+    {
+      "path": "tests/draft2020-12/optional/format/uuid.json",
+      "sha256": "d62b676e83a346a6fe4ad1812a4e8da1e7b99a15c5cfb9e9faa3168c37b9365e"
+    },
+    {
+      "path": "tests/draft2020-12/optional/id.json",
+      "sha256": "4d0a3082a630b5a2dcc605000f0129f481da400019b8346f0b3cf77192f0acc8"
+    },
+    {
+      "path": "tests/draft2020-12/optional/no-schema.json",
+      "sha256": "8ddd0dc73d767875606b19732b63537b6e00ccfe2aa7e18bdc274a8b934a30c5"
+    },
+    {
+      "path": "tests/draft2020-12/optional/non-bmp-regex.json",
+      "sha256": "b01f24ba860f74baad227988571d44edd6461f51dc5319e418802f2f789721f1"
+    },
+    {
+      "path": "tests/draft2020-12/optional/refOfUnknownKeyword.json",
+      "sha256": "deb7915d8926158fbc5b4a6c12383486c31adedbe025620af8b466bcb09b743c"
+    },
+    {
+      "path": "tests/draft2020-12/optional/unknownKeyword.json",
+      "sha256": "dc66418e962824759cbf5eb6c5a655de320ffeecbb77fd42d50b6e95f9bccecb"
+    },
+    {
+      "path": "tests/draft2020-12/pattern.json",
+      "sha256": "60713a3b01957fad54f00ab30b378463b3e07b35242c945a9325f8d6ae7080fc"
+    },
+    {
+      "path": "tests/draft2020-12/patternProperties.json",
+      "sha256": "aa73ad1e6eac3cee42bc79628f86d813ec80a88c432f62bfca8add91326dd924"
+    },
+    {
+      "path": "tests/draft2020-12/prefixItems.json",
+      "sha256": "5b2006fb0d99f9df8e25e384d665edc57427e7849ac0f963f541626fd82bb522"
+    },
+    {
+      "path": "tests/draft2020-12/properties.json",
+      "sha256": "58f01566cfe3e1fc4fb851d3b2eab13768d65ba5dbc4e9f9387ceaf4244a0522"
+    },
+    {
+      "path": "tests/draft2020-12/propertyNames.json",
+      "sha256": "54469f831102465060d0db9a9611e827fb7e87df38179d8a28ac45c10576ef83"
+    },
+    {
+      "path": "tests/draft2020-12/ref.json",
+      "sha256": "ae53f3f57c220879729225eb416cecac909f06b5adaf15f799b4f3e7c0612998"
+    },
+    {
+      "path": "tests/draft2020-12/refRemote.json",
+      "sha256": "8fcb97acb2b76308cab9d82eccd7388dd7d6ca59cf68f6d03281bc40adc9c7ee"
+    },
+    {
+      "path": "tests/draft2020-12/required.json",
+      "sha256": "3e3900dd0e546c1cb4aaab6b24ea0e06a8f7f8c05b272dcc87e85332501ed42e"
+    },
+    {
+      "path": "tests/draft2020-12/type.json",
+      "sha256": "4c5cbe6cbcd28af73761091367b20e07d0403847e236c06c31fc27061bd81192"
+    },
+    {
+      "path": "tests/draft2020-12/unevaluatedItems.json",
+      "sha256": "477e7e734ba86a76fc605d34afa6867ab25081b072792c2d853cbe666e42b7da"
+    },
+    {
+      "path": "tests/draft2020-12/unevaluatedProperties.json",
+      "sha256": "dbd5b401b09de49215f33ed7b30f4b9cd4a27e439624ad2a6aeb3a3879cac1dd"
+    },
+    {
+      "path": "tests/draft2020-12/uniqueItems.json",
+      "sha256": "ed84ef6ddc827659e257ba64cbe9679f06932b6320bea5c07622bf3d2cc4daa5"
+    },
+    {
+      "path": "tests/draft2020-12/vocabulary.json",
+      "sha256": "7c753d28de2d551fe0329b5a0ac939de921ffe1dfd1c82336e8d4a78d904ce8a"
+    }
+  ],
+  "update": "Download https://codeload.github.com/json-schema-org/JSON-Schema-Test-Suite/tar.gz/55719286c33ae0d1823bfb65fea10338a19bc37c; run python scripts/vendor_schema_suite.py <archive>. Review all manifest policies before accepting a new version; never use results to infer policies."
+}

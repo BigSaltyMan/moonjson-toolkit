@@ -1,0 +1,26 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "BigSaltyMan/moonjson-toolkit/cmd/schema_suite"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+
+// Errors
+type RunnerError derive(@debug.Debug)
+
+// Types and methods
+type CapabilityCounts derive(ToJson)
+
+type Counts derive(ToJson)
+
+type Policy
+
+type Record derive(ToJson)
+
+type SuiteReport derive(ToJson)
+
+// Type aliases
+
+// Traits

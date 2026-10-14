@@ -14,18 +14,44 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up MoonBit
-        run: |
-          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
-          echo "$HOME/.moon/bin" >> $GITHUB_PATH
+        run: bash scripts/install_pinned_moonbit.sh
 
       - name: Show the toolchain version
-        run: moon version --all
+        run: |
+          mkdir -p _build/schema-suite
+          moon version --all | tee _build/schema-suite/toolchain.txt
+
+      - name: Initialize dependency registry
+        run: moon update
 
       - name: Type-check
         run: moon check --target native --deny-warn
 
       - name: Test
         run: moon test --target native
+
+      - name: Build
+        run: moon build --target native
+
+      - name: JSON Schema standard suite (strict, offline data)
+        run: |
+          moon run --target native cmd/schema_suite -- \
+            --manifest testdata/schema-suite-manifest.json \
+            --report-json _build/schema-suite/report.json \
+            --report-md docs/schema-compatibility.md \
+            --strict
+          python3 scripts/check_schema_suite_report.py
+
+      - name: Preserve Schema reports even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-suite-reports
+          path: |
+            _build/schema-suite/report.json
+            _build/schema-suite/toolchain.txt
+            docs/schema-compatibility.md
+          if-no-files-found: warn
 
   frontend:
     runs-on: ubuntu-latest
@@ -37,9 +63,10 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up MoonBit
-        run: |
-          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
-          echo "$HOME/.moon/bin" >> $GITHUB_PATH
+        run: bash ../scripts/install_pinned_moonbit.sh
+
+      - name: Initialize dependency registry
+        run: moon update
 
       - name: Type-check
         run: moon check --target js --deny-warn

@@ -1219,6 +1219,41 @@ The CLI compiles once per run and shares that result across files and JSONL
 records: supported schema plus matching data is exit `0`, supported schema
 plus violating data is exit `1`, and compilation or evaluation failure is exit `2`.
 
+The native standard-suite command uses the vendored
+[JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite/tree/55719286c33ae0d1823bfb65fea10338a19bc37c)
+revision `55719286c33ae0d1823bfb65fea10338a19bc37c` and an independently reviewed
+manifest. The current run covers **462 groups / 2354 tests**: **862 executed and
+862 passed**, **602 compile rejected**, **890 explicitly skipped**. Rejections
+and skips are not counted as standard-validation passes. False accepts, false
+rejects, execution errors and scope errors are zero. This establishes the stated
+subset, not full Draft 2020-12 conformance. See the generated
+[compatibility report](docs/schema-compatibility.md) for capability counts and
+every exclusion, and `testdata/schema-suite-manifest.json` for exact policies.
+
+From repository root in Git Bash or Linux:
+
+```sh
+moon run --target native cmd/schema_suite -- \
+  --manifest testdata/schema-suite-manifest.json \
+  --report-json _build/schema-suite/report.json \
+  --report-md docs/schema-compatibility.md \
+  --strict
+python scripts/check_schema_suite_report.py
+```
+
+The runner hashes original bytes, validates the complete inventory and each
+file/group/index/description, preserves numeric lexemes with `@pjson`, and
+compiles each executed group once. Its own exit codes are `0` for full scope
+acceptance, `1` for discrepancies or unexpected scope behavior, and `2` for
+runner/data/manifest/report errors. No network access occurs during validation.
+CI pins the official `0.10.13+cbb11c36f` compiler and core archives by SHA-256,
+verifies the expected `moon 0.1.20260915` version, and uploads reports even on
+failure. Linux must match the reviewed portable classification and diagnostic
+baseline; it never downloads suite data or silently updates policies. To update
+data, follow `UPSTREAM.json` and `scripts/vendor_schema_suite.py`, review every
+policy from capabilities before execution, and explicitly review any baseline
+change. The product library API is unchanged by the suite runner.
+
 `--schema` describes the input rather than what the run makes of it, so it is
 applied as the document was read, before `--flatten`, `--select` and the
 prunings have had their say: a schema was written about the document you have,
@@ -1792,7 +1827,7 @@ so `moon test` is the same command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 405 tests
+moon test  --target native   # 414 tests
 moon fmt                     # format
 
 cd frontend
