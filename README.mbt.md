@@ -211,12 +211,12 @@ way to it, and -v wins over it as it wins over the name lists.
 
 --schema <path> checks the input against a JSON Schema instead of printing
 it, and is read with -v, which is the flag that asks for a verdict rather
-than a document. The dialect read is the part of the one at json-schema.org
-that a document of data is described with: type, required, properties, items,
-enum, minimum, maximum, minLength, maxLength and pattern. Every other keyword
-is passed over rather than refused, so a schema written for a full validator
-can be handed to this one and the part of it this tool does not read is
-simply not enforced.
+than a document. The supported JSON Schema Draft 2020-12 subset is: type,
+required, properties, items, enum, minimum, maximum, minLength, maxLength
+and pattern. Unsupported keywords, versions and mechanisms are rejected
+before validation with exit 2. Allowed annotations are title, description,
+$comment, default, examples and format. format is annotation only and does
+not assert formats such as email. Boolean schemas are not supported yet.
 
 A document that does not match is reported with every place it disagrees,
 one to a line, and the run exits 1. A schema this tool cannot read is a
@@ -436,7 +436,7 @@ has stopped being the document the schema was written about.
 | ---- | ------- |
 | `0`  | the input was formatted, or validated successfully |
 | `1`  | the input could not be read, is not valid JSON, or does not match the schema |
-| `2`  | the command line itself was invalid |
+| `2`  | the command line or schema was invalid, or the schema uses unsupported keywords, versions or mechanisms |
 | `3`  | the input was valid, but the AI review could not be produced |
 
 A run that fails writes nothing to standard output for the document that failed.
@@ -828,36 +828,51 @@ printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
 #   lines[1].qty: it is a string where the schema expects an integer
 ```
 
-The dialect read is the part of the one at
-[json-schema.org](https://json-schema.org/) that a document of data is
-described with: `type`, `required`, `properties`, `items`, `enum`, `minimum`,
-`maximum`, `minLength`, `maxLength` and `pattern`. Every other keyword is passed
-over rather than refused, so a schema written for a full validator —
-`$schema`, `title`, `additionalProperties`, `anyOf` — can be handed to this one,
-and the part of it this tool does not read is simply not enforced:
+This tool supports an explicitly listed JSON Schema Draft 2020-12 subset.
+Unsupported keywords, versions or mechanisms are rejected before validation
+with exit code `2`; this is not a full Draft 2020-12 implementation.
+
+The ten supported constraint keywords are `type`, `required`, `properties`,
+`items`, `enum`, `minimum`, `maximum`, `minLength`, `maxLength` and `pattern`.
+Subschemas in `properties` and `items` are checked recursively, including
+properties that are absent from the input. The allowed annotations are:
+
+| Annotation | Accepted value and behavior |
+| ---------- | --------------------------- |
+| `title`, `description`, `$comment` | strings |
+| `default` | any JSON value; never inserts or changes input values |
+| `examples` | an array of ordinary JSON values |
+| `format` | a string; annotation only, so email and other formats are not checked |
+
+`$schema`, when present, must be the string
+`https://json-schema.org/draft/2020-12/schema`. Without it, the same project
+subset applies. Other versions are rejected. Boolean schemas and mechanisms
+such as `$ref`, `$defs`, `$id`, `$anchor`, `$dynamicRef` and `$vocabulary` are
+not supported yet. Object members inside `enum`, `default` and `examples`
+are data, and property names under `properties` are names rather than keywords.
+
+A schema with an unsupported constraint fails before any business input is
+read. Its diagnostics go to standard error, standard output is empty, and
+the exit code is `2`:
 
 ```sh
-cat > loose.schema.json <<'EOF'
+cat > unsupported.schema.json <<'EOF'
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "A person",
   "type": "object",
-  "additionalProperties": false,
-  "anyOf": [{ "required": ["id"] }, { "required": ["name"] }]
+  "additionalProperties": false
 }
 EOF
 printf '{"id":1,"nickname":"Moon"}' \
-  | moon run cmd/main -- -v --schema loose.schema.json
-# <stdin>: valid JSON, and it matches the schema
+  | moon run cmd/main -- -v --schema unsupported.schema.json
+# error: the schema unsupported.schema.json contains unsupported features
+#   additionalProperties: keyword is not supported
+# exit code: 2
 ```
 
-The four keywords above are read and skipped; the `type` is the one this tool
-enforces, and `id` is an integer, so the document passes. A member no property
-names is left as it is, whatever `additionalProperties` says about it.
-
-A schema this tool cannot *read* is another matter: it is a mistake in what the
-run was told rather than in the document, so it is refused with exit code `2`
-before any input is looked at, and the keyword to fix is named with the reason:
+Invalid schema parameters also produce exit code `2`, with the schema location
+and reason:
 
 ```sh
 printf '{"type":"object","properties":{"id":{"type":"int"}}}' > broken.schema.json
@@ -871,6 +886,38 @@ from the command line — a `pattern` this tool cannot read, a `minLength` that 
 not a whole number, a `required` that is not a list of names — is code `2` with
 the schema named; a document that fails a schema this tool can read is code `1`
 with the document named.
+
+The library API has changed: `validate_schema(json, schema)` now returns
+`Result[Array[SchemaError], Array[SchemaProblem]]`, rather than a bare error
+array. Callers no longer need to call `schema_problems` first. Each schema
+problem has `path`, `message` and `kind` (`InvalidSchema`, `UnsupportedFeature`
+or `UnsupportedVersion`). `schema_problems` also returns `Array[SchemaProblem]`;
+use `render_schema_problem` for its diagnostics.
+
+With this module imported as `@toolkit`, and parsed `document` and `schema`:
+
+```moonbit nocheck
+match @toolkit.validate_schema(document, schema) {
+  Err(problems) =>
+    for problem in problems {
+      println(@toolkit.render_schema_problem(problem))
+    }
+  Ok([]) => println("matches the schema")
+  Ok(violations) =>
+    for violation in violations {
+      println(@toolkit.render_schema_error(violation))
+    }
+}
+```
+
+For repeated validation, call `compile_schema(schema)` once and pass the
+successful `CompiledSchema` to `validate_compiled_schema(document, compiled)`.
+Its result is an array of data violations; an empty array means a match.
+`CompiledSchema` has private storage and owns a snapshot of the schema, so
+callers cannot construct it or change it through the original JSON arrays.
+The CLI compiles once per run and shares that result across files and JSONL
+records: supported schema plus matching data is exit `0`, supported schema
+plus violating data is exit `1`, and schema compilation failure is exit `2`.
 
 `--schema` describes the input rather than what the run makes of it, so it is
 applied as the document was read, before `--flatten`, `--select` and the
@@ -1417,6 +1464,7 @@ moonjson-toolkit/
 ├── transform.mbt         selecting, sorting and deduplicating
 ├── emit.mbt              a MoonBit type read off the shape of a document
 ├── schema.mbt            checking a document against a JSON Schema
+├── schema_compile.mbt    safe schema compilation and structured problems
 ├── pattern.mbt           the regular expressions a schema pattern is read with
 ├── jsonl.mbt             splitting a JSON Lines input into records
 ├── diagnostics.mbt       offsets to line/column, rendered error snippets
@@ -1443,7 +1491,7 @@ so `moon test` is the same command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 305 tests
+moon test  --target native   # 314 tests
 moon fmt                     # format
 
 cd frontend
@@ -1526,7 +1574,7 @@ the same shape: fallbacks for a schema this tool refuses to read rather than for
 any document — a schema that is not an object, a type name it does not know, an
 empty list of names being joined into a phrase — each written out so that a walk
 can never fall through to nothing, and none of them reachable while
-`schema_problems` answers first. The point inside `is_whole_number` guards
+schema compilation succeeds first. The point inside `is_whole_number` guards
 against a numeral holding something that is not a digit, which the parser does
 not write, and the one in `raw_of` is that same guard for a value that is not a
 number, which its caller has read already.

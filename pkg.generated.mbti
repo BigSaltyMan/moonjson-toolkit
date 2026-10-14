@@ -4,6 +4,7 @@ package "BigSaltyMan/moonjson-toolkit"
 import {
   "Nanaloveyuki/parsec",
   "Nanaloveyuki/parsec/json",
+  "moonbitlang/core/debug",
 }
 
 // Values
@@ -22,6 +23,8 @@ pub fn collect_key_paths(@json.Json) -> Array[String]
 pub fn collect_paths(@json.Json) -> Array[String]
 
 pub fn color_allowed(String?, String?, Bool?) -> Bool
+
+pub fn compile_schema(@json.Json) -> Result[CompiledSchema, Array[SchemaProblem]]
 
 pub let deepseek_endpoint : String
 
@@ -109,6 +112,10 @@ pub fn red(String) -> String
 
 pub fn render_dep_tree(DepNode) -> String
 
+pub fn render_schema_error(SchemaError) -> String
+
+pub fn render_schema_problem(SchemaProblem) -> String
+
 pub let request_timeout_ms : Int
 
 pub fn resolve_api_key(String?, String?) -> Result[String, String]
@@ -118,6 +125,8 @@ pub fn resolve_endpoint(String?, String?) -> String
 pub fn resolve_model(String?, String?) -> String
 
 pub async fn run(Array[String], analyze~ : async (String, String, String, String) -> Result[String, String]) -> RunResult
+
+pub fn schema_problems(@json.Json) -> Array[SchemaProblem]
 
 pub fn set_color_enabled(Bool) -> Unit
 
@@ -132,6 +141,10 @@ pub fn trim_strings(@json.Json) -> @json.Json
 pub fn unflatten(@json.Json) -> Result[@json.Json, String]
 
 pub fn usage() -> String
+
+pub fn validate_compiled_schema(@json.Json, CompiledSchema) -> Array[SchemaError]
+
+pub fn validate_schema(@json.Json, @json.Json) -> Result[Array[SchemaError], Array[SchemaProblem]]
 
 pub let version : String
 
@@ -179,6 +192,10 @@ pub(all) struct CliOptions {
 }
 pub fn CliOptions::default() -> Self
 pub fn CliOptions::parse(Array[String]) -> Result[Self, String]
+
+pub struct CompiledSchema {
+  // private fields
+}
 
 pub(all) struct DepNode {
   info : ModuleInfo
@@ -234,6 +251,23 @@ pub(all) struct RunResult {
   err : String
   code : Int
 }
+
+pub(all) struct SchemaError {
+  path : String
+  message : String
+}
+
+pub(all) struct SchemaProblem {
+  path : String
+  message : String
+  kind : SchemaProblemKind
+} derive(Eq, @debug.Debug)
+
+pub(all) enum SchemaProblemKind {
+  InvalidSchema
+  UnsupportedFeature
+  UnsupportedVersion
+} derive(Eq, @debug.Debug)
 
 pub(all) struct TypeCount {
   kind : String

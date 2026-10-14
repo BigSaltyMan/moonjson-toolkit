@@ -1096,6 +1096,89 @@ async fn run_against_schema(
 }
 
 ///|
+async test "unsupported schema features exit 2 without a success verdict" {
+  for
+    (name, schema, path) in [
+      ("additional", "{\"additionalProperties\":false}", "additionalProperties"),
+      (
+        "mixed", "{\"type\":\"object\",\"additionalProperties\":false}", "additionalProperties",
+      ),
+      (
+        "nested", "{\"properties\":{\"id\":{\"minimum\":0,\"multipleOf\":2}}}", "properties.id.multipleOf",
+      ),
+    ] {
+    let result = run_against_schema(
+      Scratch::named("schema_unsupported_" + name),
+      "{\"id\":1}",
+      schema,
+      ["--no-color"],
+      StubAnalyzer::new(Ok("unused")),
+    )
+    assert_eq(result.code, 2)
+    assert_eq(result.out, "")
+    assert_true(result.err.contains("contains unsupported features"))
+    assert_true(result.err.contains("  " + path + ": keyword is not supported"))
+    assert_false(result.err.contains("matches the schema"))
+  }
+}
+
+///|
+async test "schema compilation precedes missing input for single batch and JSONL" {
+  for
+    (name, extra) in [
+      ("single", []),
+      (
+        "batch",
+        ["-f", "runner_scratch_missing_second.json", "--continue-on-error"],
+      ),
+      ("jsonl", ["--jsonl"]),
+    ] {
+    let scratch = Scratch::named("schema_preflight_" + name)
+    discard(scratch.input)
+    @fs.write_file(
+      scratch.schema,
+      "{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"number\"}]}",
+    )
+    let result = run(
+      ["-v", "--no-color", "--schema", scratch.schema, "-f", scratch.input] +
+      extra,
+      analyze=StubAnalyzer::new(Ok("unused")).analyzer(),
+    )
+    discard(scratch.schema)
+    assert_eq(result.code, 2)
+    assert_eq(result.out, "")
+    assert_true(result.err.contains("anyOf: keyword is not supported"))
+    assert_false(result.err.contains("cannot read " + scratch.input))
+    assert_false(result.err.contains("matches the schema"))
+  }
+}
+
+///|
+async test "JSONL and batch reject unsupported schemas even with valid inputs" {
+  for
+    (name, text, extra) in [
+      ("jsonl", "{\"id\":1}\n{\"id\":2}\n", ["--jsonl"]),
+      ("batch", "{\"id\":1}", ["--continue-on-error"]),
+    ] {
+    let scratch = Scratch::named("schema_unsupported_inputs_" + name)
+    @fs.write_file(scratch.stats, "{\"id\":2}")
+    let files = if name == "batch" { ["-f", scratch.stats] } else { [] }
+    let result = run_against_schema(
+      scratch,
+      text,
+      "{\"type\":\"object\",\"$ref\":\"#/$defs/person\"}",
+      ["--no-color"] + extra + files,
+      StubAnalyzer::new(Ok("unused")),
+    )
+    discard(scratch.stats)
+    assert_eq(result.code, 2)
+    assert_eq(result.out, "")
+    assert_true(result.err.contains("$ref: keyword is not supported"))
+    assert_false(result.err.contains("matches the schema"))
+  }
+}
+
+///|
 async test "-v --schema answers with both verdicts" {
   let scratch = Scratch::named("schema_ok")
   let analyzer = StubAnalyzer::new(Ok("unused"))

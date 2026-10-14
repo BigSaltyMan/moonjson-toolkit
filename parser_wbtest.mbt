@@ -158,8 +158,20 @@ async test "read_file tells a missing file from a path through a file" {
   let missing = parser_scratch("missing")
   discard(missing)
   assert_eq(read_error(missing), "no such file or directory")
-  // `moon.mod` is a regular file, so nothing can sit underneath it.
-  assert_eq(read_error("moon.mod/nested.json"), "not a directory")
+  assert_eq(read_error("moon.mod/nested.json"), nested_file_error())
+}
+
+///|
+// Windows reports ERROR_PATH_NOT_FOUND for a path through a regular file.
+#cfg(platform="windows")
+fn nested_file_error() -> String {
+  "no such file or directory"
+}
+
+///|
+#cfg(not(platform="windows"))
+fn nested_file_error() -> String {
+  "not a directory"
 }
 
 ///|
@@ -169,6 +181,7 @@ async test "read_file tells a missing file from a path through a file" {
 ///
 /// Permissions do not apply to a process running as root, and this suite can run
 /// anywhere, so a read that unexpectedly succeeds leaves nothing to assert.
+#cfg(not(platform="windows"))
 async test "read_file reports a file it may not read as permission denied" {
   let locked = parser_scratch("locked")
   @fs.write_file(locked, "{}")
@@ -179,6 +192,17 @@ async test "read_file reports a file it may not read as permission denied" {
     Err(message) => assert_eq(message, "permission denied")
     Ok(_) => ()
   }
+}
+
+///|
+// Windows permissions use ACLs, and @fs.chmod is unsupported there. Check the
+// Windows access-denied error directly instead of pretending POSIX mode bits work.
+#cfg(platform="windows")
+test "Windows access denied is reported as permission denied" {
+  assert_eq(
+    describe_io_error(@os_error.OSError(5, context="test access denied")),
+    "permission denied",
+  )
 }
 
 ///|

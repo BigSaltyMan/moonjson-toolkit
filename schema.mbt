@@ -1,29 +1,6 @@
 ///|
-/// Checking a JSON document against a JSON Schema.
-///
-/// The dialect read here is the part of the one at json-schema.org that a
-/// document of data is described with: `type`, `required`, `properties`,
-/// `items`, `enum`, `minimum`, `maximum`, `minLength`, `maxLength` and
-/// `pattern`. Every other keyword is left alone rather than refused, so a schema
-/// written for a full validator can be handed to this one — the part of it this
-/// tool does not read is simply not enforced, and a keyword that is not read
-/// cannot be reported as a document that does not match.
-///
-/// Two questions are asked here, and they are asked separately because they have
-/// two different answers. `schema_problems` reads the schema itself: whether
-/// every keyword it uses holds a value this tool can do anything with. A schema
-/// that fails it is a mistake in what the run was told, not a document that is
-/// wrong, and the caller can say so before the document is looked at.
-/// `validate_schema` then checks a document against a schema that has been read,
-/// and answers with every place the two disagree rather than the first one: a
-/// reader fixing a document wants the list, not a walk through the same command
-/// ten times.
-///
-/// Both answer with `SchemaError`, whose `path` is the path of the value that
-/// was being looked at. For `validate_schema` that is a path in the document —
-/// the paths `--paths` prints, where the root is the empty path and a member is
-/// joined to its object with a dot. For `schema_problems` it is a path in the
-/// schema, to the keyword or to the value under it that cannot be read.
+/// Validate the supported JSON Schema Draft 2020-12 subset.
+/// Compilation rejects unsupported features before any data is checked.
 
 ///|
 /// One place where a schema and something else disagree.
@@ -38,18 +15,25 @@ pub(all) struct SchemaError {
 }
 
 ///|
-/// Every place `json` and `schema` disagree.
-///
-/// The schema is expected to have been through `schema_problems`: a keyword
-/// holding something this tool cannot read is passed over here rather than
-/// reported, since what is wrong with it is a fact about the schema, which is
-/// the other question.
+/// Compile first, then return data violations. Only Ok([]) means a match.
 pub fn validate_schema(
   json : @pjson.Json,
   schema : @pjson.Json,
+) -> Result[Array[SchemaError], Array[SchemaProblem]] {
+  match compile_schema(schema) {
+    Ok(compiled) => Ok(validate_compiled_schema(json, compiled))
+    Err(problems) => Err(problems)
+  }
+}
+
+///|
+/// Validate data against an opaque schema that has passed compilation.
+pub fn validate_compiled_schema(
+  json : @pjson.Json,
+  compiled : CompiledSchema,
 ) -> Array[SchemaError] {
   let errors = []
-  check_value(json, schema, "", errors)
+  check_value(json, compiled.schema, "", errors)
   errors
 }
 
@@ -69,7 +53,7 @@ pub fn render_schema_error(error : SchemaError) -> String {
 /// Read before a document is: what is being checked is that the schema is one
 /// this tool knows how to apply, and a schema that is not is answered with the
 /// place to fix rather than with a document that was never compared to it.
-pub fn schema_problems(schema : @pjson.Json) -> Array[SchemaError] {
+pub fn schema_problems(schema : @pjson.Json) -> Array[SchemaProblem] {
   let errors = []
   check_schema(schema, "", errors)
   errors
@@ -544,12 +528,12 @@ fn check_pattern(
 ///
 /// A schema is read the same way at every level, so this walks into the schemas
 /// inside it: `properties` for the members it names and `items` for the elements
-/// of an array. A keyword that is not one of the ten this tool reads is passed
-/// over without being looked at, whatever it holds.
+/// of an array. Only supported assertions and explicit annotations are accepted.
+/// Values inside enum, default and examples are data, not schemas.
 fn check_schema(
   schema : @pjson.Json,
   path : String,
-  errors : Array[SchemaError],
+  errors : Array[SchemaProblem],
 ) -> Unit {
   match schema {
     Object(members~) =>
@@ -567,6 +551,7 @@ fn check_schema(
                 }
               _ =>
                 errors.push({
+                  kind: InvalidSchema,
                   path: here,
                   message: "expected an object naming the members it is about, but this is " +
                   kind_name(wanted),
@@ -574,9 +559,10 @@ fn check_schema(
             }
           "items" =>
             match wanted {
-              Object(_) => check_schema(wanted, here, errors)
+              Object(_) | Bool(_) => check_schema(wanted, here, errors)
               _ =>
                 errors.push({
+                  kind: InvalidSchema,
                   path: here,
                   message: "expected one schema for the items, but this is " +
                   kind_name(wanted) +
@@ -588,6 +574,7 @@ fn check_schema(
               Array(_) => ()
               _ =>
                 errors.push({
+                  kind: InvalidSchema,
                   path: here,
                   message: "expected a list of values, but this is " +
                   kind_name(wanted),
@@ -598,6 +585,7 @@ fn check_schema(
               Number(_) => ()
               _ =>
                 errors.push({
+                  kind: InvalidSchema,
                   path: here,
                   message: "expected a number, but this is " + kind_name(wanted),
                 })
@@ -607,6 +595,7 @@ fn check_schema(
               Some(_) => ()
               None =>
                 errors.push({
+                  kind: InvalidSchema,
                   path: here,
                   message: match wanted {
                     // A number that is not a count is a number with a point in
@@ -623,14 +612,62 @@ fn check_schema(
                 })
             }
           "pattern" => check_pattern_argument(wanted, here, errors)
-          // Every other keyword is a part of the dialect this tool does not
-          // read, and a schema is not refused for holding one: it says nothing
-          // about the document here, and nothing about it is wrong.
-          _ => ()
+          "title" | "description" | "$comment" | "format" =>
+            match wanted {
+              Text(_) => ()
+              _ =>
+                errors.push({
+                  path: here,
+                  message: "expected a string, but this is " + kind_name(wanted),
+                  kind: InvalidSchema,
+                })
+            }
+          "default" => ()
+          "examples" =>
+            match wanted {
+              Array(_) => ()
+              _ =>
+                errors.push({
+                  path: here,
+                  message: "expected an array, but this is " + kind_name(wanted),
+                  kind: InvalidSchema,
+                })
+            }
+          "$schema" =>
+            match wanted {
+              Text(value~) =>
+                if value != "https://json-schema.org/draft/2020-12/schema" {
+                  errors.push({
+                    path: here,
+                    message: "unsupported schema version: " + value,
+                    kind: UnsupportedVersion,
+                  })
+                }
+              _ =>
+                errors.push({
+                  path: here,
+                  message: "expected a schema version URI string, but this is " +
+                  kind_name(wanted),
+                  kind: InvalidSchema,
+                })
+            }
+          _ =>
+            errors.push({
+              path: here,
+              message: "keyword is not supported",
+              kind: UnsupportedFeature,
+            })
         }
       }
+    Bool(_) =>
+      errors.push({
+        path,
+        message: "boolean schemas are not supported yet",
+        kind: UnsupportedFeature,
+      })
     _ =>
       errors.push({
+        kind: InvalidSchema,
         path,
         message: "a schema is an object of keywords, but this is " +
         kind_name(schema),
@@ -643,25 +680,45 @@ fn check_schema(
 fn check_type_argument(
   wanted : @pjson.Json,
   path : String,
-  errors : Array[SchemaError],
+  errors : Array[SchemaProblem],
 ) -> Unit {
   match wanted {
     Text(value~) => check_type_name(value, path, errors)
-    Array(items~) =>
+    Array(items~) => {
+      if items.is_empty() {
+        errors.push({
+          path,
+          message: "expected at least one JSON type name",
+          kind: InvalidSchema,
+        })
+      }
       for index, item in items {
         match item {
-          Text(value~) =>
+          Text(value~) => {
             check_type_name(value, path + "[" + index.to_string() + "]", errors)
+            if items[:index].any(fn(previous) {
+                text_of(previous) == Some(value)
+              }) {
+              errors.push({
+                path: path + "[" + index.to_string() + "]",
+                message: "duplicate JSON type name: " + value,
+                kind: InvalidSchema,
+              })
+            }
+          }
           _ =>
             errors.push({
+              kind: InvalidSchema,
               path: path + "[" + index.to_string() + "]",
               message: "expected a JSON type name, but this is " +
               kind_name(item),
             })
         }
       }
+    }
     _ =>
       errors.push({
+        kind: InvalidSchema,
         path,
         message: "expected a JSON type name or a list of them, but this is " +
         kind_name(wanted),
@@ -674,13 +731,14 @@ fn check_type_argument(
 fn check_type_name(
   name : String,
   path : String,
-  errors : Array[SchemaError],
+  errors : Array[SchemaProblem],
 ) -> Unit {
   match name {
     "object" | "array" | "string" | "number" | "integer" | "boolean" | "null" =>
       ()
     _ =>
       errors.push({
+        kind: InvalidSchema,
         path,
         message: "\"" +
         name +
@@ -694,15 +752,25 @@ fn check_type_name(
 fn check_name_list(
   wanted : @pjson.Json,
   path : String,
-  errors : Array[SchemaError],
+  errors : Array[SchemaProblem],
 ) -> Unit {
   match wanted {
     Array(items~) =>
       for index, item in items {
         match item {
-          Text(_) => ()
+          Text(value~) =>
+            if items[:index].any(fn(previous) {
+                text_of(previous) == Some(value)
+              }) {
+              errors.push({
+                path: path + "[" + index.to_string() + "]",
+                message: "duplicate required member name: " + value,
+                kind: InvalidSchema,
+              })
+            }
           _ =>
             errors.push({
+              kind: InvalidSchema,
               path: path + "[" + index.to_string() + "]",
               message: "expected a member name, but this is " + kind_name(item),
             })
@@ -710,6 +778,7 @@ fn check_name_list(
       }
     _ =>
       errors.push({
+        kind: InvalidSchema,
         path,
         message: "expected a list of member names, but this is " +
         kind_name(wanted),
@@ -750,7 +819,7 @@ fn length_argument(wanted : @pjson.Json) -> Int? {
 fn check_pattern_argument(
   wanted : @pjson.Json,
   path : String,
-  errors : Array[SchemaError],
+  errors : Array[SchemaProblem],
 ) -> Unit {
   match text_of(wanted) {
     Some(pattern) =>
@@ -758,6 +827,7 @@ fn check_pattern_argument(
         Ok(_) => ()
         Err(reason) =>
           errors.push({
+            kind: InvalidSchema,
             path,
             message: "\"" +
             pattern +
@@ -767,6 +837,7 @@ fn check_pattern_argument(
       }
     _ =>
       errors.push({
+        kind: InvalidSchema,
         path,
         message: "expected a pattern, but this is " + kind_name(wanted),
       })

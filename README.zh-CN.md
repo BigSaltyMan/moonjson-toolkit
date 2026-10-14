@@ -190,12 +190,12 @@ way to it, and -v wins over it as it wins over the name lists.
 
 --schema <path> checks the input against a JSON Schema instead of printing
 it, and is read with -v, which is the flag that asks for a verdict rather
-than a document. The dialect read is the part of the one at json-schema.org
-that a document of data is described with: type, required, properties, items,
-enum, minimum, maximum, minLength, maxLength and pattern. Every other keyword
-is passed over rather than refused, so a schema written for a full validator
-can be handed to this one and the part of it this tool does not read is
-simply not enforced.
+than a document. The supported JSON Schema Draft 2020-12 subset is: type,
+required, properties, items, enum, minimum, maximum, minLength, maxLength
+and pattern. Unsupported keywords, versions and mechanisms are rejected
+before validation with exit 2. Allowed annotations are title, description,
+$comment, default, examples and format. format is annotation only and does
+not assert formats such as email. Boolean schemas are not supported yet.
 
 A document that does not match is reported with every place it disagrees,
 one to a line, and the run exits 1. A schema this tool cannot read is a
@@ -389,7 +389,7 @@ conflicting keys: "a" and "a.b"
 | ---- | ------- |
 | `0`  | 输入已格式化，或校验通过 |
 | `1`  | 输入读不出来、不是合法 JSON，或者不符合 schema |
-| `2`  | 命令行本身有误 |
+| `2`  | 命令行或 schema 参数有误，或者 schema 含未支持的关键字、版本或机制 |
 | `3`  | 输入是合法的，但 AI 评审没能产出 |
 
 运行失败时，对于出错的那份文档，标准输出上什么都不会写。单份文档所有可能失败的步骤都
@@ -755,32 +755,44 @@ printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
 #   lines[1].qty: it is a string where the schema expects an integer
 ```
 
-本工具读的方言，是 [json-schema.org](https://json-schema.org/) 那份里用来描述一份数据文档
-的那部分：`type`、`required`、`properties`、`items`、`enum`、`minimum`、`maximum`、
-`minLength`、`maxLength` 和 `pattern`。其它关键字一律跳过而不是拒绝，所以一份为完整校验
-器写的 schema —— `$schema`、`title`、`additionalProperties`、`anyOf` —— 可以直接交给它，
-而其中本工具不读的那部分只是不生效而已：
+本工具支持明确列出的 JSON Schema Draft 2020-12 子集。未支持的关键字、版本或机制会在
+校验前报错，退出码为 `2`。本工具尚未完整实现 Draft 2020-12。
+
+当前支持的十个约束关键字是 `type`、`required`、`properties`、`items`、`enum`、
+`minimum`、`maximum`、`minLength`、`maxLength` 和 `pattern`。`properties` 和 `items`
+中的子 schema 会递归预检查，包括业务输入中没有出现的字段。允许的注解为：
+
+| 注解 | 参数要求与行为 |
+| ---- | -------------- |
+| `title`、`description`、`$comment` | 字符串 |
+| `default` | 任意 JSON 值，不补充或修改输入 |
+| `examples` | 数组，元素作为普通数据处理 |
+| `format` | 字符串，仅作为注解，不校验邮箱等格式 |
+
+`$schema` 若存在，只接受字符串 `https://json-schema.org/draft/2020-12/schema`；缺省时
+使用项目的同一子集，其它版本会被拒绝。布尔 schema，以及 `$ref`、`$defs`、`$id`、
+`$anchor`、`$dynamicRef`、`$vocabulary` 等机制暂不支持。`enum`、`default`、`examples`
+中的对象是数据；`properties` 下的字段名也不会被当作关键字检查。
+
+含未支持约束的 schema 会在读取业务输入前失败，原因写入标准错误，标准输出为空，退出码为 `2`：
 
 ```sh
-cat > loose.schema.json <<'EOF'
+cat > unsupported.schema.json <<'EOF'
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "A person",
   "type": "object",
-  "additionalProperties": false,
-  "anyOf": [{ "required": ["id"] }, { "required": ["name"] }]
+  "additionalProperties": false
 }
 EOF
 printf '{"id":1,"nickname":"Moon"}' \
-  | moon run cmd/main -- -v --schema loose.schema.json
-# <stdin>: valid JSON, and it matches the schema
+  | moon run cmd/main -- -v --schema unsupported.schema.json
+# error: the schema unsupported.schema.json contains unsupported features
+#   additionalProperties: keyword is not supported
+# exit code: 2
 ```
 
-上面这四个关键字被读出来后就跳过；`type` 是本工具真正执行的那个，而 `id` 是整数，所以文
-档通过。没有被 property 点名的成员原样保留，不管 `additionalProperties` 说了什么。
-
-一份本工具「读不懂」的 schema 是另一回事：这是运行被告知的东西有误，而不是文档有误，所以
-它在任何输入被读到之前就以退出码 `2` 拒绝，并点名需要修改的那个关键字以及原因：
+schema 参数错误同样以退出码 `2` 拒绝，并报告 schema 中的位置和原因：
 
 ```sh
 printf '{"type":"object","properties":{"id":{"type":"int"}}}' > broken.schema.json
@@ -792,6 +804,35 @@ printf '{"id":1}' | moon run cmd/main -- -v --schema broken.schema.json
 这跟工具其余部分的划分是一样的。schema 自己的取值有问题 —— 一个读不懂的 `pattern`、一个
 不是整数的 `minLength`、一个不是名字列表的 `required` —— 是码 `2` 并点名 schema；而一份
 没通过「本工具读得懂的 schema」的文档是码 `1` 并点名文档。
+
+库接口有破坏性变化：`validate_schema(json, schema)` 现在返回
+`Result[Array[SchemaError], Array[SchemaProblem]]`，不再直接返回错误数组，也不需要调用者
+先调用 `schema_problems`。`SchemaProblem` 包含 `path`、`message` 和 `kind`，分别定位问题、
+说明原因、区分 `InvalidSchema`（参数错误）、`UnsupportedFeature`（未支持功能）和
+`UnsupportedVersion`（未支持版本）。`schema_problems` 也改为返回 `Array[SchemaProblem]`，
+用 `render_schema_problem` 格式化诊断。
+
+将模块导入为 `@toolkit`，并解析得到 `document` 和 `schema` 后：
+
+```moonbit
+match @toolkit.validate_schema(document, schema) {
+  Err(problems) =>
+    for problem in problems {
+      println(@toolkit.render_schema_problem(problem))
+    }
+  Ok([]) => println("matches the schema")
+  Ok(violations) =>
+    for violation in violations {
+      println(@toolkit.render_schema_error(violation))
+    }
+}
+```
+
+重复校验时，先调用一次 `compile_schema(schema)`，再将成功得到的 `CompiledSchema` 传给
+`validate_compiled_schema(document, compiled)`。后者返回数据违规列表，空列表才表示符合约束。
+`CompiledSchema` 的存储私有，并保存 schema 的独立副本，外部不能自行构造，也不能通过原始
+JSON 数组修改它。CLI 每轮只编译一次，供单文件、批量文件和 JSONL 共用：合法 schema 配合
+合法数据返回 `0`，合法 schema 配合违规数据返回 `1`，schema 编译失败返回 `2`。
 
 `--schema` 描述的是输入，而不是这一轮对输入做了什么，所以它作用于文档刚被读进来的样子，
 早于 `--flatten`、`--select` 和各种修剪发挥作用：schema 是为你手上这份文档写的，而被压平
@@ -1288,6 +1329,7 @@ moonjson-toolkit/
 ├── transform.mbt         selecting, sorting and deduplicating
 ├── emit.mbt              a MoonBit type read off the shape of a document
 ├── schema.mbt            checking a document against a JSON Schema
+├── schema_compile.mbt    safe schema compilation and structured problems
 ├── pattern.mbt           the regular expressions a schema pattern is read with
 ├── jsonl.mbt             splitting a JSON Lines input into records
 ├── diagnostics.mbt       offsets to line/column, rendered error snippets
@@ -1312,7 +1354,7 @@ AI 响应处理都不需要联网，所以在任何机器上 `moon test` 都是�
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 305 tests
+moon test  --target native   # 314 tests
 moon fmt                     # format
 
 cd frontend
@@ -1363,7 +1405,7 @@ Total: 2558/2667
 
 `cmd/main/main.mbt` 是唯一一个有意为之的零：它是进程入口，而 `moon test` 从不运行 `main`。它做的事只是把真实的命令行和两个真实的数据流交给 `run`，而 `run` 本身由测试直接覆盖。
 
-其余没覆盖到的，都是需要进程之外的东西才能触发的分支。`ai.mbt` 里的 `analyze`——唯一与服务商通信的函数——从未被调用，因为任何测试都不允许访问真实 API；`parser.mbt` 和 `runner.mbt` 的标准输入路径没有被触及，因为每个测试都指定了文件；`color.mbt` 剩下的两个点都是内核针对一个测试套件选不了的标准输出给出的回答：管道解析不出路径，所以把路径读回来的那一支不会走到；而管道是内核描述得很清楚的一种类型，所以探测失败时的那一支也不会走到；`diagnostics.mbt` 则留着测试套件无法构造出来的那些解析错误分支和限制类型；`transform.mbt` 剩下的两个点在同一行上，是逐成员重建一个装着数组的对象时走的那一支，它到不了，因为被重建的那个成员正是名字的来源。这一行写出来而不是省掉，是为了万一哪天它不再成立，也不至于悄悄丢掉一个成员；`emit.mbt` 剩下的那个点也是同一类东西：两种都被留作可选的形状的合并，它不会发生，因为只有被前面某条记录落下的成员才是可选的，而合并进去的东西是从一条有该成员的记录上读出来的。这一行同样写出来，而不是留给它下面那个兜底分支，后者会对一对说不定哪天就会相遇的形状答 `Json`。`schema.mbt` 剩下的六个点也是同一类东西：它们是为「本工具读不懂的 schema」准备的兜底分支，而不是为任何一份文档准备的——一份不是对象的 schema、一个不认识的类型名、一个空的名字列表被连成短语——每一个都写出来，是为了让遍历不会一路落空，而在 `schema_problems` 先行作答的前提下，它们一个都到不了。`is_whole_number` 里的那个点防的是数字字面量里出现非数字字符，而解析器写不出这样的字面量；`raw_of` 里的那个点防的是同一个东西，只是对象换成了「不是数字的值」，而它的调用方已经先读过了。
+其余没覆盖到的，都是需要进程之外的东西才能触发的分支。`ai.mbt` 里的 `analyze`——唯一与服务商通信的函数——从未被调用，因为任何测试都不允许访问真实 API；`parser.mbt` 和 `runner.mbt` 的标准输入路径没有被触及，因为每个测试都指定了文件；`color.mbt` 剩下的两个点都是内核针对一个测试套件选不了的标准输出给出的回答：管道解析不出路径，所以把路径读回来的那一支不会走到；而管道是内核描述得很清楚的一种类型，所以探测失败时的那一支也不会走到；`diagnostics.mbt` 则留着测试套件无法构造出来的那些解析错误分支和限制类型；`transform.mbt` 剩下的两个点在同一行上，是逐成员重建一个装着数组的对象时走的那一支，它到不了，因为被重建的那个成员正是名字的来源。这一行写出来而不是省掉，是为了万一哪天它不再成立，也不至于悄悄丢掉一个成员；`emit.mbt` 剩下的那个点也是同一类东西：两种都被留作可选的形状的合并，它不会发生，因为只有被前面某条记录落下的成员才是可选的，而合并进去的东西是从一条有该成员的记录上读出来的。这一行同样写出来，而不是留给它下面那个兜底分支，后者会对一对说不定哪天就会相遇的形状答 `Json`。`schema.mbt` 剩下的六个点也是同一类东西：它们是为「本工具读不懂的 schema」准备的兜底分支，而不是为任何一份文档准备的——一份不是对象的 schema、一个不认识的类型名、一个空的名字列表被连成短语——每一个都写出来，是为了让遍历不会一路落空，而在 schema 编译通过的前提下，它们一个都到不了。`is_whole_number` 里的那个点防的是数字字面量里出现非数字字符，而解析器写不出这样的字面量；`raw_of` 里的那个点防的是同一个东西，只是对象换成了「不是数字的值」，而它的调用方已经先读过了。
 
 `pattern.mbt` 剩下的七个点是读取器自己写出来的分支：本该从转义序列或字符类成员里读出区间、而那两处都不会产出区间的分支，两处「不可能失败的」数字解析下面的兜底，以及 `class_item_matches` 对转义读取器从不写出的集合字母回答 `false` 的那一支。每一个说的都是「如果它上面的读法变了会怎样」，而在它没变的时候，一个都不会发生。
 

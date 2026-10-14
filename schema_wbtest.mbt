@@ -3,15 +3,16 @@
 /// reads: one line per error, in the order they were found, and nothing at all
 /// when the document matches.
 fn report(document : String, schema : String) -> String {
-  validate_schema(parse_ok(document), parse_ok(schema))
-  .map(render_schema_error)
-  .join("\n")
+  match validate_schema(parse_ok(document), parse_ok(schema)) {
+    Ok(errors) => errors.map(render_schema_error).join("\n")
+    Err(_) => abort("expected a supported schema")
+  }
 }
 
 ///|
 /// The report of reading a schema itself, written the same way.
 fn problems(schema : String) -> String {
-  schema_problems(parse_ok(schema)).map(render_schema_error).join("\n")
+  schema_problems(parse_ok(schema)).map(render_schema_problem).join("\n")
 }
 
 ///|
@@ -352,10 +353,7 @@ test "every violation is reported rather than the first" {
 }
 
 ///|
-test "a keyword this tool does not read is passed over" {
-  // A schema written for a full validator can be handed to this one: the part of
-  // it this tool does not read is not enforced, and a keyword it does not read
-  // cannot make a document that was never compared to it look wrong.
+test "unsupported keywords refuse the entire schema" {
   let schema =
     #|{
     #|  "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -368,15 +366,18 @@ test "a keyword this tool does not read is passed over" {
     #|    "id": { "type": "integer", "exclusiveMinimum": 0, "format": 7 }
     #|  }
     #|}
-  assert_eq(problems(schema), "")
-  assert_eq(report("{\"id\":1}", schema), "")
-  assert_eq(
-    report("{\"id\":\"x\"}", schema),
-    "id: it is a string where the schema expects an integer",
+  assert_true(compile_schema(parse_ok(schema)) is Err(_))
+  assert_true(
+    problems(schema).contains("additionalProperties: keyword is not supported"),
   )
-  // A keyword holding something no comparison could use is still passed over
-  // when it is not one this tool reads.
-  assert_eq(report("1", "{\"anyOf\":3}"), "")
+  assert_true(
+    problems(schema).contains(
+      "properties.id.exclusiveMinimum: keyword is not supported",
+    ),
+  )
+  assert_true(
+    validate_schema(parse_ok("{\"id\":1}"), parse_ok(schema)) is Err(_),
+  )
 }
 
 ///|
@@ -475,10 +476,7 @@ test "a schema has the same keywords inside it" {
 
 ///|
 test "a schema written the way this tool reads it has nothing to report" {
-  // `schema_problems` walks the keywords this tool reads and asks whether each
-  // is in a form it can use, so a schema written entirely in those forms is read
-  // without a word — and a schema holding keywords it does not read at all is
-  // not a schema with anything wrong with it.
+  // All supported constraints and annotations compile before validation.
   let schema =
     #|{
     #|  "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -492,9 +490,7 @@ test "a schema written the way this tool reads it has nothing to report" {
     #|  "maximum": 10,
     #|  "minLength": 0,
     #|  "maxLength": 10,
-    #|  "pattern": "^a+$",
-    #|  "additionalProperties": false,
-    #|  "anyOf": [{ "type": "object" }]
+    #|  "pattern": "^a+$"
     #|}
   assert_eq(problems(schema), "")
   // The keywords it does read are the ones the check applies: an object missing
@@ -509,29 +505,15 @@ test "a schema written the way this tool reads it has nothing to report" {
 }
 
 ///|
-test "a keyword this tool cannot read is not a document that does not match" {
-  // The two questions are separate, and the answer to one is not the answer to
-  // the other: a `type` holding a number says nothing about any document, so no
-  // document is reported against it — the schema is what is reported.
-  assert_eq(report("{\"a\":1}", "{\"type\":3}"), "")
-  assert_true(problems("{\"type\":3}").contains("expected a JSON type name"))
-  assert_eq(report("1", "{\"enum\":\"nope\"}"), "")
-  assert_eq(report("1", "{\"minimum\":null}"), "")
-  assert_eq(report("\"a\"", "{\"minLength\":\"2\"}"), "")
-  assert_eq(report("\"a\"", "{\"pattern\":\"(\"}"), "")
-  assert_eq(report("1", "{\"type\":[3]}"), "")
-  assert_eq(report("{}", "{\"required\":\"id\"}"), "")
-  // A name this tool cannot read in a list of them is passed over the same way,
-  // so the names around it are still asked for.
-  assert_eq(
-    report("{}", "{\"required\":[\"id\",3]}"),
-    "(root): required member \"id\" is missing",
-  )
-  assert_eq(report("{}", "{\"properties\":[]}"), "")
-  assert_eq(report("\"a\"", "{\"pattern\":3}"), "")
-  // A keyword this tool does read is read wherever it is written, even inside a
-  // schema that another keyword makes no use of.
-  assert_true(problems("{\"items\":{\"type\":3}}").contains("type:"))
+test "invalid schema arguments fail before document validation" {
+  for
+    schema in [
+      "{\"type\":3}", "{\"enum\":\"nope\"}", "{\"minimum\":null}", "{\"minLength\":\"2\"}",
+      "{\"pattern\":\"(\"}", "{\"type\":[3]}", "{\"required\":\"id\"}", "{\"required\":[\"id\",3]}",
+      "{\"properties\":[]}", "{\"pattern\":3}", "{\"items\":{\"type\":3}}",
+    ] {
+    assert_true(validate_schema(parse_ok("{}"), parse_ok(schema)) is Err(_))
+  }
   assert_eq(problems("{\"items\":{\"type\":\"number\"}}"), "")
 }
 

@@ -86,7 +86,7 @@ async fn read_input(input : String?) -> Result[String, String] {
 /// The depth limit is not applied to the schema: `--max-depth` says how deep a
 /// document this run reads, and the schema is what the documents are read
 /// against rather than one of them.
-async fn read_schema(path : String) -> Result[@pjson.Json, RunResult] {
+async fn read_schema(path : String) -> Result[CompiledSchema, RunResult] {
   let text = match read_file(path) {
     Ok(text) => text
     Err(message) =>
@@ -111,20 +111,29 @@ async fn read_schema(path : String) -> Result[@pjson.Json, RunResult] {
         ),
       )
   }
-  let problems = schema_problems(schema)
-  if problems.length() > 0 {
-    return Err(
-      failure(
-        error_prefix() +
-        "the schema " +
-        path +
-        " is not one this tool can read\n" +
-        schema_report(problems),
-        exit_usage_error,
-      ),
-    )
+  match compile_schema(schema) {
+    Ok(compiled) => Ok(compiled)
+    Err(problems) => {
+      let reason = if problems.any(fn(problem) { problem.kind != InvalidSchema }) {
+        " contains unsupported features"
+      } else {
+        " is not one this tool can read"
+      }
+      Err(
+        failure(
+          error_prefix() +
+          "the schema " +
+          path +
+          reason +
+          "\n" +
+          problems
+          .map(fn(problem) { "  " + render_schema_problem(problem) })
+          .join("\n"),
+          exit_usage_error,
+        ),
+      )
+    }
   }
-  Ok(schema)
 }
 
 ///|
@@ -609,7 +618,7 @@ let max_parallel_inputs : Int = 4
 /// `all`, down to the deferred release.
 async fn run_batch(
   options : CliOptions,
-  schema : @pjson.Json?,
+  schema : CompiledSchema?,
   inputs : Array[String?],
   analyze : async (String, String, String, String) -> Result[String, String],
 ) -> Array[InputOutcome] {
@@ -687,7 +696,7 @@ priv struct InputOutcome {
 /// neither of them is a special case here.
 async fn handle_input(
   options : CliOptions,
-  schema : @pjson.Json?,
+  schema : CompiledSchema?,
   input : String?,
   analyze : async (String, String, String, String) -> Result[String, String],
 ) -> InputOutcome {
@@ -754,7 +763,7 @@ fn append_summary(
 /// run.
 async fn run_document(
   options : CliOptions,
-  schema : @pjson.Json?,
+  schema : CompiledSchema?,
   source : String,
   text : String,
   analyze : async (String, String, String, String) -> Result[String, String],
@@ -783,7 +792,7 @@ async fn run_document(
   // in the input, which is what code 1 means here.
   match schema {
     Some(schema) => {
-      let violations = validate_schema(json, schema)
+      let violations = validate_compiled_schema(json, schema)
       if violations.length() > 0 {
         return failure(
           error_prefix() +
@@ -945,7 +954,7 @@ async fn render_document(
 /// run where one did not is answered by that record's report alone.
 fn run_jsonl(
   options : CliOptions,
-  schema : @pjson.Json?,
+  schema : CompiledSchema?,
   source : String,
   text : String,
 ) -> RunResult {
@@ -983,7 +992,7 @@ fn run_jsonl(
         // that does not match is reported with its line and skipped, the rest of
         // the file still being read.
         let violations = match schema {
-          Some(schema) => validate_schema(json, schema)
+          Some(schema) => validate_compiled_schema(json, schema)
           None => []
         }
         if violations.length() > 0 {
