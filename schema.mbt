@@ -100,6 +100,7 @@ fn check_value(
           }
           "type" => check_type(value, wanted, path, errors)
           "required" => check_required(value, wanted, path, errors)
+          "propertyNames" => check_property_names(value, path, errors, ctx)
           "dependentRequired" =>
             check_dependent_required(value, wanted, path, errors)
           "dependentSchemas" =>
@@ -206,6 +207,47 @@ fn check_conditional(
     }
   } else if has_else {
     evaluate_schema_child(value, ["else"], None, path, errors, ctx)
+  }
+}
+
+///|
+/// Check synthetic name strings without treating their diagnostics as value errors.
+fn check_property_names(
+  value : @pjson.Json,
+  path : String,
+  errors : Array[SchemaError],
+  ctx : SchemaEvaluationContext,
+) -> Unit {
+  if value is Object(members~) {
+    for (name, _) in members {
+      if ctx.failure != None {
+        break
+      }
+      let previous_kind = ctx.instance_kind
+      ctx.instance_kind = PropertyName(name)
+      let violations = []
+      evaluate_schema_child(
+        @pjson.Text(value=name),
+        ["propertyNames"],
+        None,
+        path,
+        violations,
+        ctx,
+      )
+      ctx.instance_kind = previous_kind
+      if ctx.failure != None {
+        return
+      }
+      for violation in violations {
+        errors.push({
+          path,
+          message: "property name \"" +
+          escape_json_string(name) +
+          "\": " +
+          violation.message,
+        })
+      }
+    }
   }
 }
 
@@ -1165,6 +1207,7 @@ fn check_schema(
                 })
             }
           "not"
+          | "propertyNames"
           | "additionalProperties"
           | "contains"
           | "if"

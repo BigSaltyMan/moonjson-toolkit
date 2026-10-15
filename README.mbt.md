@@ -213,7 +213,7 @@ way to it, and -v wins over it as it wins over the name lists.
 --schema <path> checks the input against a JSON Schema instead of printing
 it, and is read with -v, which is the flag that asks for a verdict rather
 than a document. The supported JSON Schema Draft 2020-12 subset is: type,
-required, dependentRequired, dependentSchemas, properties, patternProperties, minProperties, maxProperties,
+required, dependentRequired, dependentSchemas, propertyNames, properties, patternProperties, minProperties, maxProperties,
 prefixItems, items, minItems, maxItems, uniqueItems, contains, minContains, maxContains,
 enum, const, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf,
 minLength, maxLength, pattern, allOf, anyOf, oneOf, not, if, then, else, additionalProperties, $defs and local JSON Pointer $ref.
@@ -247,6 +247,13 @@ Dependencies: {"type":"object","dependentRequired":{"creditCard":["billingAddres
 accepts {} and {"creditCard":"1234","billingAddress":"Shanghai"}; rejects
 {"creditCard":"1234"} and {"creditCard":"1234","billingAddress":""}.
 The older dependencies keyword remains unsupported.
+propertyNames checks each name as a string, independently of its member value.
+It neither requires members nor declares them for additionalProperties.
+Every name schema is prechecked, including unused and unselected branches.
+Name evaluations have separate cycle identities and share the normal budgets;
+diagnostics identify the property name at the containing object pointer.
+Names: {"type":"object","propertyNames":{"pattern":"^[a-z][a-z0-9_]*$"}}
+accepts {"user_id":1} and {}; rejects {"User-ID":1} because of its name.
 Regex subset: literals, dot, classes, groups, alternation, repetitions, ^ and $.
 Dot excludes LF, CR, U+2028 and U+2029. \s uses ECMAScript whitespace;
 \S is its complement. Patterns compile once per schema and are reused.
@@ -888,7 +895,7 @@ This tool supports an explicitly listed JSON Schema Draft 2020-12 subset.
 Unsupported keywords, versions or mechanisms are rejected before validation
 with exit code `2`; this is not a full Draft 2020-12 implementation.
 
-The supported keywords are `type`, `required`, `dependentRequired`, `dependentSchemas`,
+The supported keywords are `type`, `required`, `dependentRequired`, `dependentSchemas`, `propertyNames`,
 `properties`, `patternProperties`,
 `minProperties`, `maxProperties`, `prefixItems`,
 `items`, `minItems`, `maxItems`, `uniqueItems`, `contains`, `minContains`, `maxContains`, `enum`,
@@ -977,7 +984,35 @@ using shared reference-cycle guards and evaluation budgets.
 because `billingAddress` is missing; `{"creditCard":"1234","billingAddress":""}`
 fails because the address is empty. `{"creditCard":"1234","billingAddress":"Shanghai"}`
 passes. Neither keyword constrains nonobjects. The older `dependencies` keyword
-remains unsupported, as do `propertyNames` and the unevaluated keywords.
+remains unsupported, as do the unevaluated keywords.
+
+`propertyNames` accepts an object or boolean schema and checks each member
+name as a JSON string. Member values are ignored. `true` allows every name;
+`false` permits only empty objects. Nonobjects are unaffected. `enum` and `const`
+can restrict allowed names, but do not require them to exist. String length,
+patterns, combinators, conditions and local references apply to the name string.
+
+```json
+{
+  "type": "object",
+  "propertyNames": {
+    "pattern": "^[a-z][a-z0-9_]*$"
+  }
+}
+```
+
+`{"user_id":1}` and `{}` pass; `{"User-ID":1}` fails because its name does not
+match the pattern. This does not replace `required`, check member values, or
+declare names for `additionalProperties`.
+
+Every name subschema is prechecked even for empty/nonobject input or an inactive
+conditional branch. Ordinary errors point to the containing object and identify
+the escaped name in their message. Execution errors retain the containing object's
+JSON Pointer and the schema pointer, with the name in the message. Synthetic
+name strings have their own cycle identity; references and branches inherit it.
+Depth and visit budgets are shared with all other validation. A name referencing
+the root schema is allowed when it terminates on that string; genuine reference
+cycles remain execution errors. Names, values and member order are never changed.
 
 `additionalProperties` allows extra members when omitted or `true`, rejects
 each extra member when `false`, and validates extra values when given a schema.
@@ -1345,8 +1380,8 @@ plus violating data is exit `1`, and compilation or evaluation failure is exit `
 The native standard-suite command uses the vendored
 [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite/tree/55719286c33ae0d1823bfb65fea10338a19bc37c)
 revision `55719286c33ae0d1823bfb65fea10338a19bc37c` and an independently reviewed
-manifest. The current run covers **462 groups / 2354 tests**: **998 executed and
-998 passed**, **466 compile rejected**, **890 explicitly skipped**. Rejections
+manifest. The current run covers **462 groups / 2354 tests**: **1022 executed and
+1022 passed**, **442 compile rejected**, **890 explicitly skipped**. Rejections
 and skips are not counted as standard-validation passes. False accepts, false
 rejects, execution errors and scope errors are zero. This establishes the stated
 subset, not full Draft 2020-12 conformance. See the generated
@@ -1950,7 +1985,7 @@ so `moon test` is the same command on every machine.
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 444 tests
+moon test  --target native   # 454 tests
 moon fmt                     # format
 
 cd frontend

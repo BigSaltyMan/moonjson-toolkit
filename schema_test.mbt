@@ -1,4 +1,260 @@
 ///|
+test "public propertyNames APIs agree on names and preserve independent constraints" {
+  for
+    (raw, input, count) in [
+      ("{\"propertyNames\":{\"$ref\":\"#\"}}", "{\"a\":1}", 0),
+      (
+        "{\"$defs\":{\"name\":{\"const\":\"a\"}},\"propertyNames\":{\"$ref\":\"#/$defs/name\"}}",
+        "{\"b\":1}", 1,
+      ),
+      ("{\"propertyNames\":false}", "{}", 0),
+      ("{\"propertyNames\":false}", "{\"a\":null}", 1),
+      ("{\"propertyNames\":true}", "{\"a\":false}", 0),
+      ("{\"propertyNames\":{\"type\":\"integer\"}}", "{\"1\":1}", 1),
+      ("{\"propertyNames\":{\"enum\":[\"a\",\"b\"]}}", "{}", 0),
+      (
+        "{\"propertyNames\":{\"enum\":[\"a\",\"b\"]}}", "{\"a\":1,\"b\":false}",
+        0,
+      ),
+      ("{\"propertyNames\":{\"const\":\"a\"}}", "{\"b\":1}", 1),
+      (
+        "{\"propertyNames\":{\"pattern\":\"^[a-z][a-z0-9_]*$\"}}", "{\"user_id\":1}",
+        0,
+      ),
+      (
+        "{\"propertyNames\":{\"pattern\":\"^[a-z][a-z0-9_]*$\"}}", "{\"User-ID\":1}",
+        1,
+      ),
+      ("{\"propertyNames\":{\"minLength\":1}}", "{\"\":1}", 1),
+      ("{\"propertyNames\":{\"maxLength\":1}}", "{\"中文\":1}", 1),
+      (
+        "{\"propertyNames\":{\"minLength\":1,\"maxLength\":1}}", "{\"😀\":1}",
+        0,
+      ),
+      ("{\"propertyNames\":{\"const\":\"\"}}", "{\"\":false}", 0),
+      ("{\"propertyNames\":{\"const\":\"中文\"}}", "{\"中文\":false}", 0),
+      ("{\"propertyNames\":{\"const\":\"😀\"}}", "{\"😀\":false}", 0),
+      (
+        "{\"propertyNames\":{\"const\":\"quote\\\"\"}}", "{\"quote\\\"\":false}",
+        0,
+      ),
+      (
+        "{\"propertyNames\":{\"const\":\"line\\nbreak\"}}", "{\"line\\nbreak\":false}",
+        0,
+      ),
+      ("{\"propertyNames\":{\"const\":\"/\"}}", "{\"/\":false}", 0),
+      ("{\"propertyNames\":{\"const\":\"~\"}}", "{\"~\":false}", 0),
+      ("{\"propertyNames\":{\"const\":\"a/b~c\"}}", "{\"a/b~c\":false}", 0),
+      ("{\"propertyNames\":{\"const\":\"a\"}}", "{\"a\":null}", 0),
+      ("{\"propertyNames\":{\"const\":\"a\"}}", "{\"a\":false}", 0),
+      ("{\"propertyNames\":{\"const\":\"a\"}}", "{\"a\":0}", 0),
+      ("{\"propertyNames\":{\"const\":\"a\"}}", "{\"a\":\"\"}", 0),
+      ("{\"propertyNames\":{\"const\":\"a\"}}", "{\"a\":[]}", 0),
+      ("{\"propertyNames\":{\"const\":\"a\"}}", "{\"a\":[1]}", 0),
+      ("{\"propertyNames\":{\"const\":\"a\"}}", "{\"a\":{\"nested\":1}}", 0),
+      ("{\"propertyNames\":false}", "null", 0),
+      ("{\"propertyNames\":false}", "false", 0),
+      ("{\"propertyNames\":false}", "0", 0),
+      ("{\"propertyNames\":false}", "\"\"", 0),
+      ("{\"propertyNames\":false}", "[]", 0),
+      ("{\"propertyNames\":false}", "[{}]", 0),
+      (
+        "{\"propertyNames\":{\"enum\":[\"a\"]},\"additionalProperties\":false}",
+        "{\"a\":1}", 1,
+      ),
+      (
+        "{\"properties\":{\"a\":{\"type\":\"integer\"}},\"propertyNames\":{\"const\":\"a\"}}",
+        "{\"a\":\"bad\"}", 1,
+      ),
+      (
+        "{\"propertyNames\":{\"maxLength\":1},\"patternProperties\":{\"^a\":{\"type\":\"integer\"}},\"additionalProperties\":false}",
+        "{\"a\":\"bad\"}", 1,
+      ),
+      (
+        "{\"propertyNames\":{\"enum\":[\"a\",\"b\"]},\"dependentRequired\":{\"a\":[\"b\"]}}",
+        "{\"a\":0}", 1,
+      ),
+      (
+        "{\"propertyNames\":{\"const\":\"a\"},\"dependentSchemas\":{\"a\":false}}",
+        "{\"a\":0}", 1,
+      ),
+      (
+        "{\"if\":{\"required\":[\"a\"]},\"then\":{\"propertyNames\":{\"const\":\"a\"}},\"else\":{\"propertyNames\":true}}",
+        "{\"a\":0,\"b\":1}", 1,
+      ),
+      (
+        "{\"propertyNames\":{\"if\":{\"pattern\":\"^a\"},\"then\":{\"maxLength\":1},\"else\":{\"const\":\"b\"}}}",
+        "{\"a\":1,\"b\":0}", 0,
+      ),
+      (
+        "{\"propertyNames\":{\"if\":{\"pattern\":\"^a\"},\"then\":{\"maxLength\":1},\"else\":{\"const\":\"b\"}}}",
+        "{\"aa\":0,\"c\":0}", 2,
+      ),
+      (
+        "{\"propertyNames\":{\"allOf\":[{\"minLength\":1},{\"maxLength\":1}]}}",
+        "{\"\":1,\"ab\":2}", 2,
+      ),
+      (
+        "{\"propertyNames\":{\"anyOf\":[{\"const\":\"a\"},{\"const\":\"b\"}]}}",
+        "{\"a\":1,\"b\":2}", 0,
+      ),
+      (
+        "{\"propertyNames\":{\"oneOf\":[{\"const\":\"a\"},{\"type\":\"string\"}]}}",
+        "{\"a\":1}", 1,
+      ),
+      ("{\"propertyNames\":{\"not\":{\"const\":\"a\"}}}", "{\"b\":1}", 0),
+      ("{\"if\":true,\"else\":{\"propertyNames\":true}}", "{}", 0),
+      (
+        "{\"dependentSchemas\":{\"a\":{\"propertyNames\":true}}}", "{\"a\":null}",
+        0,
+      ),
+    ] {
+    let schema = json(raw)
+    let compiled = match @moonjson-toolkit.compile_schema(schema) {
+      Ok(compiled) => compiled
+      Err(_) => abort("valid name schema rejected")
+    }
+    let direct = match @moonjson-toolkit.validate_schema(json(input), schema) {
+      Ok(errors) => errors
+      Err(_) => abort("name evaluation failed")
+    }
+    let reused = match
+      @moonjson-toolkit.validate_compiled_schema(json(input), compiled) {
+      Ok(errors) => errors
+      Err(_) => abort("name evaluation failed")
+    }
+    assert_eq(direct.length(), count)
+    assert_eq(
+      direct.map(@moonjson-toolkit.render_schema_error),
+      reused.map(@moonjson-toolkit.render_schema_error),
+    )
+  }
+  for
+    (raw, location, kind) in [
+      (
+        "{\"propertyNames\":1}",
+        "propertyNames",
+        @moonjson-toolkit.InvalidSchema,
+      ),
+      (
+        "{\"propertyNames\":\"x\"}",
+        "propertyNames",
+        @moonjson-toolkit.InvalidSchema,
+      ),
+      (
+        "{\"propertyNames\":[]}",
+        "propertyNames",
+        @moonjson-toolkit.InvalidSchema,
+      ),
+      (
+        "{\"propertyNames\":null}",
+        "propertyNames",
+        @moonjson-toolkit.InvalidSchema,
+      ),
+      (
+        "{\"propertyNames\":{\"pattern\":\"[\"}}",
+        "propertyNames.pattern",
+        @moonjson-toolkit.InvalidSchema,
+      ),
+      (
+        "{\"propertyNames\":{\"minLength\":-1}}",
+        "propertyNames.minLength",
+        @moonjson-toolkit.InvalidSchema,
+      ),
+      (
+        "{\"propertyNames\":{\"$ref\":\"#/missing\"}}",
+        "propertyNames.$ref",
+        @moonjson-toolkit.InvalidSchema,
+      ),
+      (
+        "{\"propertyNames\":{\"unevaluatedProperties\":true}}",
+        "propertyNames.unevaluatedProperties",
+        @moonjson-toolkit.UnsupportedFeature,
+      ),
+      (
+        "{\"if\":true,\"else\":{\"propertyNames\":{\"pattern\":\"[\"}}}",
+        "else.propertyNames.pattern",
+        @moonjson-toolkit.InvalidSchema,
+      ),
+    ] {
+    match @moonjson-toolkit.validate_schema(json("{}"), json(raw)) {
+      Err(@moonjson-toolkit.SchemaProblems(problems)) => {
+        assert_eq(problems[0].path, location)
+        assert_eq(problems[0].kind, kind)
+      }
+      _ => abort("public precheck missed an inactive name schema")
+    }
+  }
+  let schema = json(
+    "{\"$defs\":{\"loop\":{\"$ref\":\"#/$defs/loop\"}},\"propertyNames\":{\"$ref\":\"#/$defs/loop\"}}",
+  )
+  let compiled = match @moonjson-toolkit.compile_schema(schema) {
+    Ok(compiled) => compiled
+    Err(_) => abort("compilable name cycle refused")
+  }
+  let input = json("{\"a\":1}")
+  match
+    (
+      @moonjson-toolkit.validate_schema(input, schema),
+      @moonjson-toolkit.validate_compiled_schema(input, compiled),
+    ) {
+    (Err(@moonjson-toolkit.EvaluationFailed(direct)), Err(reused)) => {
+      assert_eq(direct, reused)
+      assert_eq(direct.kind, @moonjson-toolkit.ReferenceCycle)
+      assert_eq(direct.instance_path, "")
+      assert_eq(direct.schema_path, "/$defs/loop/$ref")
+      assert_eq(direct.message, "property name \"a\": reference cycle")
+    }
+    _ => abort("public name cycle became a validation result")
+  }
+}
+
+///|
+test "propertyNames compiled snapshots and repeated calls preserve input members" {
+  let names = [json("\"a\""), json("\"b\"")]
+  let keywords = [("enum", @pjson.Array(items=names))]
+  let schema = @pjson.Object(members=[
+    ("propertyNames", @pjson.Object(members=keywords)),
+  ])
+  let compiled = match @moonjson-toolkit.compile_schema(schema) {
+    Ok(compiled) => compiled
+    Err(_) => abort("valid name schema refused")
+  }
+  names.clear()
+  keywords[0] = ("$ref", json("\"#\""))
+  let members = [("a", json("[1,2]")), ("c", json("null"))]
+  let data = @pjson.Object(members~)
+  for _ in 0..<3 {
+    match @moonjson-toolkit.validate_compiled_schema(data, compiled) {
+      Ok([error]) => {
+        assert_eq(error.path, "")
+        assert_true(error.message.has_prefix("property name \"c\": "))
+      }
+      _ => abort("compiled name schema was mutated")
+    }
+    assert_true(
+      @moonjson-toolkit.validate_compiled_schema(
+        json("{\"b\":false}"),
+        compiled,
+      )
+      is Ok([]),
+    )
+    assert_eq(members.length(), 2)
+    assert_eq(members[0].0, "a")
+    assert_eq(members[1].0, "c")
+    match members[0].1 {
+      Array(items~) => {
+        assert_eq(items.length(), 2)
+        assert_true(items[0] is Number(raw="1"))
+        assert_true(items[1] is Number(raw="2"))
+      }
+      _ => abort("name validation changed a value")
+    }
+    assert_true(members[1].1 is Null)
+  }
+}
+
+///|
 test "public dependency validation agrees with compiled evaluation" {
   for
     (raw, input, count) in [
@@ -161,10 +417,10 @@ test "public dependency validation agrees with compiled evaluation" {
   match
     @moonjson-toolkit.validate_schema(
       json("{}"),
-      json("{\"dependentSchemas\":{\"a\":{\"propertyNames\":true}}}"),
+      json("{\"dependentSchemas\":{\"a\":{\"unevaluatedProperties\":true}}}"),
     ) {
     Err(@moonjson-toolkit.SchemaProblems(problems)) => {
-      assert_eq(problems[0].path, "dependentSchemas.a.propertyNames")
+      assert_eq(problems[0].path, "dependentSchemas.a.unevaluatedProperties")
       assert_eq(problems[0].kind, @moonjson-toolkit.UnsupportedFeature)
     }
     _ => abort("public API bypassed dependency precheck")

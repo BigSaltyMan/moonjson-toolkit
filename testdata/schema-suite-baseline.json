@@ -1,14 +1,14 @@
 {
   "upstream_commit": "55719286c33ae0d1823bfb65fea10338a19bc37c",
-  "manifest_sha256": "41e58fd1a0d29e0d6be0679591d3802ec5847ad4a2814b29c8e930d66acad75d",
+  "manifest_sha256": "0c7150e7e35b586cb3bc3439a8a76ce6051dca73894b4742dcb5adf222ff2a45",
   "counts": {
     "groups": 462,
     "tests": 2354,
-    "executed": 998,
-    "passed": 998,
+    "executed": 1022,
+    "passed": 1022,
     "false_accept": 0,
     "false_reject": 0,
-    "compile_rejected": 466,
+    "compile_rejected": 442,
     "execution_error": 0,
     "skipped": 890
   },
@@ -830,11 +830,11 @@
       "counts": {
         "groups": 6,
         "tests": 22,
-        "executed": 0,
-        "passed": 0,
+        "executed": 22,
+        "passed": 22,
         "false_accept": 0,
         "false_reject": 0,
-        "compile_rejected": 22,
+        "compile_rejected": 0,
         "execution_error": 0,
         "skipped": 0
       }
@@ -1026,11 +1026,11 @@
       "counts": {
         "groups": 9,
         "tests": 21,
-        "executed": 19,
-        "passed": 19,
+        "executed": 21,
+        "passed": 21,
         "false_accept": 0,
         "false_reject": 0,
-        "compile_rejected": 2,
+        "compile_rejected": 0,
         "execution_error": 0,
         "skipped": 0
       }
@@ -1094,5 +1094,5 @@
   ],
   "scope_errors": [],
   "runner_errors": [],
-  "records_sha256": "fdf7248d611024ede6f666215d0737fe9f8d8d966ca08f061ea2be8eed12a73d"
+  "records_sha256": "09b683e7516f5b8d220b1d888e9c79abf429bb7f061c72787de1ff3cac284b8c"
 }

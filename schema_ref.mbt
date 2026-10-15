@@ -221,15 +221,24 @@ fn resolve_schema_ref(
 }
 
 ///|
+/// Property names are synthetic strings at the containing object's pointer.
+/// Their identity must differ from both that object and its member values.
+priv enum SchemaInstanceKind {
+  InstanceValue
+  PropertyName(String)
+} derive(Eq, Hash)
+
+///|
 priv struct SchemaEvaluationContext {
   compiled : CompiledSchema
-  active : Map[(Int, String), Bool]
+  active : Map[(Int, String, SchemaInstanceKind), Bool]
   depth_limit : Int
   visit_limit : Int
   mut visits : Int
   mut failure : SchemaEvaluationError?
   mut schema_pointer : String
   mut instance_pointer : String
+  mut instance_kind : SchemaInstanceKind
   mut depth : Int
 }
 
@@ -243,7 +252,11 @@ fn evaluation_fail(
   if ctx.failure == None {
     ctx.failure = Some({
       kind,
-      message: reason,
+      message: match ctx.instance_kind {
+        InstanceValue => reason
+        PropertyName(name) =>
+          "property name \"" + escape_json_string(name) + "\": " + reason
+      },
       instance_path: ctx.instance_pointer,
       schema_path: schema_pointer,
     })
@@ -268,6 +281,7 @@ fn evaluate_schema_with_limits(
     failure: None,
     schema_pointer: "",
     instance_pointer: "",
+    instance_kind: InstanceValue,
     depth: 0,
   }
   let errors = []
@@ -293,7 +307,7 @@ fn evaluate_schema_node(
   let node = ctx.compiled.nodes[ctx.compiled.node_ids[pointer]]
   let previous_instance = ctx.instance_pointer
   ctx.instance_pointer = instance
-  let key = (node.id, instance)
+  let key = (node.id, instance, ctx.instance_kind)
   if ctx.active.contains(key) {
     // The location of the edge that closed the cycle, rather than the target.
     evaluation_fail(
@@ -344,5 +358,10 @@ fn evaluate_schema_child(
     Some(token) => pointer_child(ctx.instance_pointer, token)
     None => ctx.instance_pointer
   }
+  let previous_kind = ctx.instance_kind
+  if instance_token is Some(_) {
+    ctx.instance_kind = InstanceValue
+  }
   evaluate_schema_node(value, pointer, instance, display, errors, ctx)
+  ctx.instance_kind = previous_kind
 }

@@ -1,4 +1,225 @@
 ///|
+test "propertyNames checks string names including Unicode and ignores member values" {
+  for
+    (schema, data, count) in [
+      ("{\"propertyNames\":false}", "{}", 0),
+      ("{\"propertyNames\":false}", "{\"a\":null}", 1),
+      ("{\"propertyNames\":true}", "{\"a\":false}", 0),
+      ("{\"propertyNames\":{\"type\":\"integer\"}}", "{\"1\":1}", 1),
+      ("{\"propertyNames\":{\"enum\":[\"a\",\"b\"]}}", "{}", 0),
+      (
+        "{\"propertyNames\":{\"enum\":[\"a\",\"b\"]}}", "{\"a\":1,\"b\":false}",
+        0,
+      ),
+      ("{\"propertyNames\":{\"const\":\"a\"}}", "{\"b\":1}", 1),
+      (
+        "{\"propertyNames\":{\"pattern\":\"^[a-z][a-z0-9_]*$\"}}", "{\"user_id\":1}",
+        0,
+      ),
+      (
+        "{\"propertyNames\":{\"pattern\":\"^[a-z][a-z0-9_]*$\"}}", "{\"User-ID\":1}",
+        1,
+      ),
+      ("{\"propertyNames\":{\"minLength\":1}}", "{\"\":1}", 1),
+      ("{\"propertyNames\":{\"maxLength\":1}}", "{\"中文\":1}", 1),
+      (
+        "{\"propertyNames\":{\"minLength\":1,\"maxLength\":1}}", "{\"😀\":1}",
+        0,
+      ),
+      ("{\"propertyNames\":{\"const\":\"\"}}", "{\"\":false}", 0),
+      ("{\"propertyNames\":{\"const\":\"中文\"}}", "{\"中文\":false}", 0),
+      ("{\"propertyNames\":{\"const\":\"😀\"}}", "{\"😀\":false}", 0),
+      (
+        "{\"propertyNames\":{\"const\":\"quote\\\"\"}}", "{\"quote\\\"\":false}",
+        0,
+      ),
+      (
+        "{\"propertyNames\":{\"const\":\"line\\nbreak\"}}", "{\"line\\nbreak\":false}",
+        0,
+      ),
+      ("{\"propertyNames\":{\"const\":\"/\"}}", "{\"/\":false}", 0),
+      ("{\"propertyNames\":{\"const\":\"~\"}}", "{\"~\":false}", 0),
+      ("{\"propertyNames\":{\"const\":\"a/b~c\"}}", "{\"a/b~c\":false}", 0),
+      ("{\"propertyNames\":{\"const\":\"a\"}}", "{\"a\":null}", 0),
+      ("{\"propertyNames\":{\"const\":\"a\"}}", "{\"a\":false}", 0),
+      ("{\"propertyNames\":{\"const\":\"a\"}}", "{\"a\":0}", 0),
+      ("{\"propertyNames\":{\"const\":\"a\"}}", "{\"a\":\"\"}", 0),
+      ("{\"propertyNames\":{\"const\":\"a\"}}", "{\"a\":[]}", 0),
+      ("{\"propertyNames\":{\"const\":\"a\"}}", "{\"a\":[1]}", 0),
+      ("{\"propertyNames\":{\"const\":\"a\"}}", "{\"a\":{\"nested\":1}}", 0),
+      ("{\"propertyNames\":false}", "null", 0),
+      ("{\"propertyNames\":false}", "false", 0),
+      ("{\"propertyNames\":false}", "0", 0),
+      ("{\"propertyNames\":false}", "\"\"", 0),
+      ("{\"propertyNames\":false}", "[]", 0),
+      ("{\"propertyNames\":false}", "[{}]", 0),
+    ] {
+    match validate_schema(parse_ok(data), parse_ok(schema)) {
+      Ok(errors) => assert_eq(errors.length(), count)
+      Err(_) => abort("property name validation could not complete")
+    }
+  }
+}
+
+///|
+test "propertyNames composes independently without declaring additional properties" {
+  for
+    (schema, data, count) in [
+      (
+        "{\"propertyNames\":{\"enum\":[\"a\"]},\"additionalProperties\":false}",
+        "{\"a\":1}", 1,
+      ),
+      (
+        "{\"properties\":{\"a\":{\"type\":\"integer\"}},\"propertyNames\":{\"const\":\"a\"}}",
+        "{\"a\":\"bad\"}", 1,
+      ),
+      (
+        "{\"propertyNames\":{\"maxLength\":1},\"patternProperties\":{\"^a\":{\"type\":\"integer\"}},\"additionalProperties\":false}",
+        "{\"a\":\"bad\"}", 1,
+      ),
+      (
+        "{\"propertyNames\":{\"enum\":[\"a\",\"b\"]},\"dependentRequired\":{\"a\":[\"b\"]}}",
+        "{\"a\":0}", 1,
+      ),
+      (
+        "{\"propertyNames\":{\"const\":\"a\"},\"dependentSchemas\":{\"a\":false}}",
+        "{\"a\":0}", 1,
+      ),
+      (
+        "{\"if\":{\"required\":[\"a\"]},\"then\":{\"propertyNames\":{\"const\":\"a\"}},\"else\":{\"propertyNames\":true}}",
+        "{\"a\":0,\"b\":1}", 1,
+      ),
+      (
+        "{\"propertyNames\":{\"if\":{\"pattern\":\"^a\"},\"then\":{\"maxLength\":1},\"else\":{\"const\":\"b\"}}}",
+        "{\"a\":1,\"b\":0}", 0,
+      ),
+      (
+        "{\"propertyNames\":{\"if\":{\"pattern\":\"^a\"},\"then\":{\"maxLength\":1},\"else\":{\"const\":\"b\"}}}",
+        "{\"aa\":0,\"c\":0}", 2,
+      ),
+      (
+        "{\"propertyNames\":{\"allOf\":[{\"minLength\":1},{\"maxLength\":1}]}}",
+        "{\"\":1,\"ab\":2}", 2,
+      ),
+      (
+        "{\"propertyNames\":{\"anyOf\":[{\"const\":\"a\"},{\"const\":\"b\"}]}}",
+        "{\"a\":1,\"b\":2}", 0,
+      ),
+      (
+        "{\"propertyNames\":{\"oneOf\":[{\"const\":\"a\"},{\"type\":\"string\"}]}}",
+        "{\"a\":1}", 1,
+      ),
+      ("{\"propertyNames\":{\"not\":{\"const\":\"a\"}}}", "{\"b\":1}", 0),
+      ("{\"if\":true,\"else\":{\"propertyNames\":true}}", "{}", 0),
+      (
+        "{\"dependentSchemas\":{\"a\":{\"propertyNames\":true}}}", "{\"a\":null}",
+        0,
+      ),
+    ] {
+    match validate_schema(parse_ok(data), parse_ok(schema)) {
+      Ok(errors) => assert_eq(errors.length(), count)
+      Err(_) => abort("property name validation could not complete")
+    }
+  }
+}
+
+///|
+test "property name diagnostics identify names in order at the containing object" {
+  match
+    validate_schema(
+      parse_ok("{\"data\":{\"bad-name\":1,\"A\":0,\"good\":null}}"),
+      parse_ok(
+        "{\"properties\":{\"data\":{\"propertyNames\":{\"pattern\":\"^[a-z]+$\"}}}}",
+      ),
+    ) {
+    Ok(errors) => {
+      assert_eq(errors.length(), 2)
+      assert_eq(errors[0].path, "data")
+      assert_eq(errors[1].path, "data")
+      assert_eq(
+        errors[0].message,
+        "property name \"bad-name\": it does not match the pattern \"^[a-z]+$\"",
+      )
+      assert_eq(
+        errors[1].message,
+        "property name \"A\": it does not match the pattern \"^[a-z]+$\"",
+      )
+    }
+    _ => abort("name violations changed order or path")
+  }
+  for
+    (name, expected) in [
+      ("", "property name \"\": it is rejected by the false schema"),
+      ("中文", "property name \"中文\": it is rejected by the false schema"),
+      ("😀", "property name \"😀\": it is rejected by the false schema"),
+      (
+        "quote\"", "property name \"quote\\\"\": it is rejected by the false schema",
+      ),
+      (
+        "line\nbreak", "property name \"line\\nbreak\": it is rejected by the false schema",
+      ),
+      ("/", "property name \"/\": it is rejected by the false schema"),
+      ("~", "property name \"~\": it is rejected by the false schema"),
+      ("a/b~c", "property name \"a/b~c\": it is rejected by the false schema"),
+    ] {
+    let value = @pjson.Object(members=[(name, parse_ok("null"))])
+    match validate_schema(value, parse_ok("{\"propertyNames\":false}")) {
+      Ok([error]) => {
+        assert_eq(error.path, "")
+        assert_eq(error.message, expected)
+        assert_eq(render_schema_error(error).split("\n").length(), 1)
+      }
+      _ => abort("special name was not diagnosed as a name")
+    }
+  }
+}
+
+///|
+test "propertyNames prechecks all schemas including inactive names and branches" {
+  for
+    (raw, location, kind) in [
+      ("{\"propertyNames\":1}", "propertyNames", InvalidSchema),
+      ("{\"propertyNames\":\"x\"}", "propertyNames", InvalidSchema),
+      ("{\"propertyNames\":[]}", "propertyNames", InvalidSchema),
+      ("{\"propertyNames\":null}", "propertyNames", InvalidSchema),
+      (
+        "{\"propertyNames\":{\"pattern\":\"[\"}}",
+        "propertyNames.pattern",
+        InvalidSchema,
+      ),
+      (
+        "{\"propertyNames\":{\"minLength\":-1}}",
+        "propertyNames.minLength",
+        InvalidSchema,
+      ),
+      (
+        "{\"propertyNames\":{\"$ref\":\"#/missing\"}}",
+        "propertyNames.$ref",
+        InvalidSchema,
+      ),
+      (
+        "{\"propertyNames\":{\"unevaluatedProperties\":true}}",
+        "propertyNames.unevaluatedProperties",
+        UnsupportedFeature,
+      ),
+      (
+        "{\"if\":true,\"else\":{\"propertyNames\":{\"pattern\":\"[\"}}}",
+        "else.propertyNames.pattern",
+        InvalidSchema,
+      ),
+    ] {
+    match compile_schema(parse_ok(raw)) {
+      Err(problems) => {
+        assert_eq(problems.length(), 1)
+        assert_eq(problems[0].path, location)
+        assert_eq(problems[0].kind, kind)
+      }
+      _ => abort("invalid property name schema compiled")
+    }
+  }
+}
+
+///|
 test "object dependencies trigger on presence and remain directional" {
   for
     (schema, data, count) in [
@@ -202,8 +423,8 @@ test "dependency prechecks inspect every name list and inactive subschema" {
         InvalidSchema,
       ),
       (
-        "{\"dependentSchemas\":{\"a\":{\"propertyNames\":true}}}",
-        "dependentSchemas.a.propertyNames",
+        "{\"dependentSchemas\":{\"a\":{\"unevaluatedProperties\":true}}}",
+        "dependentSchemas.a.unevaluatedProperties",
         UnsupportedFeature,
       ),
       ("{\"dependencies\":{}}", "dependencies", UnsupportedFeature),
@@ -388,8 +609,8 @@ test "every conditional branch is prechecked even when ignored or never selected
       ("{\"then\":123}", "then", InvalidSchema),
       ("{\"else\":[]}", "else", InvalidSchema),
       (
-        "{\"if\":true,\"else\":{\"propertyNames\":true}}",
-        "else.propertyNames",
+        "{\"if\":true,\"else\":{\"unevaluatedProperties\":true}}",
+        "else.unevaluatedProperties",
         UnsupportedFeature,
       ),
       (

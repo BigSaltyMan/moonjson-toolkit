@@ -1,4 +1,116 @@
 ///|
+test "property name references distinguish synthetic strings from object values" {
+  for
+    (raw, input, count) in [
+      ("{\"propertyNames\":{\"$ref\":\"#\"}}", "{\"a\":1,\"b\":false}", 0),
+      (
+        "{\"propertyNames\":{\"allOf\":[{\"$ref\":\"#\"},{\"minLength\":1}]}}", "{\"a\":1,\"b\":1}",
+        0,
+      ),
+      (
+        "{\"propertyNames\":{\"anyOf\":[{\"$ref\":\"#\"},false]}}", "{\"a\":1}",
+        0,
+      ),
+      (
+        "{\"propertyNames\":{\"oneOf\":[{\"$ref\":\"#\"},false]}}", "{\"a\":1}",
+        0,
+      ),
+      ("{\"propertyNames\":{\"not\":{\"$ref\":\"#\"}}}", "{\"a\":1}", 1),
+      (
+        "{\"propertyNames\":{\"if\":{\"$ref\":\"#\"},\"then\":{\"const\":\"a\"},\"else\":false}}",
+        "{\"a\":1}", 0,
+      ),
+      (
+        "{\"propertyNames\":{\"$ref\":\"#\"},\"properties\":{\"data\":{\"$ref\":\"#\"}}}",
+        "{\"data\":{\"a\":1}}", 0,
+      ),
+    ] {
+    let schema = ref_compiled(raw)
+    for _ in 0..<2 {
+      match validate_compiled_schema(parse_ok(input), schema) {
+        Ok(errors) => assert_eq(errors.length(), count)
+        Err(_) =>
+          abort("property name was confused with its containing instance")
+      }
+    }
+  }
+}
+
+///|
+test "true name cycles retain schema pointer and object pointer with escaped context" {
+  let schema = ref_compiled(
+    "{\"$defs\":{\"loop\":{\"$ref\":\"#/$defs/loop\"}},\"properties\":{\"a/b~c\":{\"propertyNames\":{\"$ref\":\"#/$defs/loop\"}}}}",
+  )
+  let data = parse_ok("{\"a/b~c\":{\"bad\\\"\\n/name\":1}}")
+  match validate_compiled_schema(data, schema) {
+    Err(error) => {
+      assert_eq(error.kind, ReferenceCycle)
+      assert_eq(error.instance_path, "/a~1b~0c")
+      assert_eq(error.schema_path, "/$defs/loop/$ref")
+      assert_eq(
+        error.message,
+        "property name \"bad\\\"\\n/name\": reference cycle",
+      )
+      assert_eq(error.message.split("\n").length(), 1)
+    }
+    _ => abort("true name cycle became an ordinary violation")
+  }
+  assert_true(
+    validate_compiled_schema(parse_ok("{\"a/b~c\":{}}"), schema) is Ok([]),
+  )
+  let restored = ref_compiled(
+    "{\"propertyNames\":true,\"properties\":{\"a\":{\"$ref\":\"#/properties/a\"}}}",
+  )
+  match validate_compiled_schema(parse_ok("{\"a\":1}"), restored) {
+    Err(error) => {
+      assert_eq(error.message, "reference cycle")
+      assert_eq(error.instance_path, "/a")
+      assert_eq(error.schema_path, "/properties/a/$ref")
+    }
+    _ => abort("name context leaked into a member value")
+  }
+}
+
+///|
+test "property names share visits depth and later value budgets" {
+  let schema = ref_compiled("{\"propertyNames\":true}")
+  let data = parse_ok("{\"a\":1,\"b\":2}")
+  assert_true(evaluate_schema_with_limits(data, schema, 2, 3) is Ok([]))
+  match evaluate_schema_with_limits(data, schema, 2, 2) {
+    Err(error) => {
+      assert_eq(error.kind, ResourceLimit)
+      assert_eq(error.instance_path, "")
+      assert_eq(error.schema_path, "/propertyNames")
+      assert_true(error.message.has_prefix("property name \"b\": "))
+    }
+    _ => abort("name budgets were reset between members")
+  }
+  match evaluate_schema_with_limits(data, schema, 1, 3) {
+    Err(error) => {
+      assert_eq(error.kind, ResourceLimit)
+      assert_true(error.message.has_prefix("property name \"a\": "))
+    }
+    _ => abort("property name depth limit was bypassed")
+  }
+  assert_true(evaluate_schema_with_limits(data, schema, 2, 3) is Ok([]))
+  let value_schema = ref_compiled(
+    "{\"propertyNames\":true,\"properties\":{\"a\":true}}",
+  )
+  match evaluate_schema_with_limits(data, value_schema, 2, 3) {
+    Err(error) => {
+      assert_eq(error.kind, ResourceLimit)
+      assert_eq(error.instance_path, "/a")
+      assert_eq(error.schema_path, "/properties/a")
+      assert_eq(
+        error.message,
+        "schema evaluation depth or node visit limit exceeded",
+      )
+    }
+    _ => abort("name visits were not shared with property value evaluation")
+  }
+}
+
+///|
 test "dependency references retain current instance and escape schema pointer names" {
   let schema = ref_compiled(
     "{\"$defs\":{\"dep\":{\"properties\":{\"b\":{\"type\":\"string\"}}}},\"dependentSchemas\":{\"a/b~c\":{\"$ref\":\"#/$defs/dep\"}}}",

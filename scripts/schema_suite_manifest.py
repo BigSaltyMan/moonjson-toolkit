@@ -12,7 +12,7 @@ import urllib.parse
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DATA = ROOT / "testdata/json-schema-suite"
-SUPPORTED = set("type required properties patternProperties minProperties maxProperties prefixItems items minItems maxItems uniqueItems contains minContains maxContains enum const minimum maximum exclusiveMinimum exclusiveMaximum multipleOf minLength maxLength pattern allOf anyOf oneOf not if then else dependentRequired dependentSchemas additionalProperties $defs $ref $schema title description $comment format default examples".split())
+SUPPORTED = set("type required properties patternProperties minProperties maxProperties prefixItems items minItems maxItems uniqueItems contains minContains maxContains enum const minimum maximum exclusiveMinimum exclusiveMaximum multipleOf minLength maxLength pattern allOf anyOf oneOf not if then else propertyNames dependentRequired dependentSchemas additionalProperties $defs $ref $schema title description $comment format default examples".split())
 COUNTS = {"minLength", "maxLength", "minItems", "maxItems", "minProperties", "maxProperties", "minContains", "maxContains"}
 
 
@@ -77,7 +77,7 @@ def limitation(root):
                     queue.append((sub, location))
             elif keyword in {"allOf", "anyOf", "oneOf", "prefixItems"}:
                 queue.extend((sub, here + f"[{i}]") for i, sub in enumerate(value))
-            elif keyword in {"not", "items", "additionalProperties", "contains", "if", "then", "else"}:
+            elif keyword in {"not", "items", "additionalProperties", "contains", "if", "then", "else", "propertyNames"}:
                 queue.append((value, here))
     return found
 

@@ -192,7 +192,7 @@ way to it, and -v wins over it as it wins over the name lists.
 --schema <path> checks the input against a JSON Schema instead of printing
 it, and is read with -v, which is the flag that asks for a verdict rather
 than a document. The supported JSON Schema Draft 2020-12 subset is: type,
-required, dependentRequired, dependentSchemas, properties, patternProperties, minProperties, maxProperties,
+required, dependentRequired, dependentSchemas, propertyNames, properties, patternProperties, minProperties, maxProperties,
 prefixItems, items, minItems, maxItems, uniqueItems, contains, minContains, maxContains,
 enum, const, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf,
 minLength, maxLength, pattern, allOf, anyOf, oneOf, not, if, then, else, additionalProperties, $defs and local JSON Pointer $ref.
@@ -226,6 +226,13 @@ Dependencies: {"type":"object","dependentRequired":{"creditCard":["billingAddres
 accepts {} and {"creditCard":"1234","billingAddress":"Shanghai"}; rejects
 {"creditCard":"1234"} and {"creditCard":"1234","billingAddress":""}.
 The older dependencies keyword remains unsupported.
+propertyNames checks each name as a string, independently of its member value.
+It neither requires members nor declares them for additionalProperties.
+Every name schema is prechecked, including unused and unselected branches.
+Name evaluations have separate cycle identities and share the normal budgets;
+diagnostics identify the property name at the containing object pointer.
+Names: {"type":"object","propertyNames":{"pattern":"^[a-z][a-z0-9_]*$"}}
+accepts {"user_id":1} and {}; rejects {"User-ID":1} because of its name.
 Regex subset: literals, dot, classes, groups, alternation, repetitions, ^ and $.
 Dot excludes LF, CR, U+2028 and U+2029. \s uses ECMAScript whitespace;
 \S is its complement. Patterns compile once per schema and are reused.
@@ -813,7 +820,7 @@ printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
 本工具支持明确列出的 JSON Schema Draft 2020-12 子集。未支持的关键字、版本或机制会在
 校验前报错，退出码为 `2`。本工具尚未完整实现 Draft 2020-12。
 
-当前支持 `type`、`required`、`dependentRequired`、`dependentSchemas`、
+当前支持 `type`、`required`、`dependentRequired`、`dependentSchemas`、`propertyNames`、
 `properties`、`patternProperties`、`minProperties`、
 `maxProperties`、`prefixItems`、`items`、`minItems`、`maxItems`、
 `uniqueItems`、`contains`、`minContains`、`maxContains`、`enum`、`const`、`minimum`、
@@ -888,7 +895,31 @@ printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
 `{}` 通过，因为没有触发依赖。`{"creditCard":"1234"}` 缺少 `billingAddress`，失败；
 `{"creditCard":"1234","billingAddress":""}` 因地址为空而失败；
 `{"creditCard":"1234","billingAddress":"Shanghai"}` 通过。两项关键词都不约束非对象实例。
-旧版 `dependencies`、`propertyNames` 和 `unevaluated*` 仍未支持，由预检查明确拒绝。
+旧版 `dependencies` 和 `unevaluated*` 仍未支持，由预检查明确拒绝。
+
+`propertyNames` 接受对象或布尔 Schema，将每个属性名当作 JSON 字符串校验，
+不检查属性值。`true` 允许任意名称，`false` 只允许空对象，非对象实例不受影响。
+`enum`、`const` 可以限制允许的名称，但不要求这些字段存在。字符串长度、正则、
+组合、条件和本地引用都作用于名称字符串。
+
+```json
+{
+  "type": "object",
+  "propertyNames": {
+    "pattern": "^[a-z][a-z0-9_]*$"
+  }
+}
+```
+
+`{"user_id":1}` 和 `{}` 通过；`{"User-ID":1}` 因属性名不符合模式而失败。
+这项校验不代替 `required`，不检查属性值，也不将名称视为 `additionalProperties`
+意义上的已声明属性。
+
+即使输入为空对象、非对象，或所在条件分支不会执行，属性名子 Schema 仍会完整预检查。
+普通违规指向当前对象，并在消息中标注经过 JSON 转义的属性名。执行错误保留当前对象的
+JSON Pointer 和 Schema Pointer，在消息中补充名称。临时名称字符串使用独立的循环检测
+身份，引用和组合分支继承它；深度和访问预算与其他校验共享。名称引用根 Schema 时，
+若在字符串实例上结束则允许；真正的自引用仍返回执行错误。校验不修改名称、值或成员顺序。
 
 `additionalProperties` 省略或为 `true` 时允许额外属性；为 `false` 时逐个拒绝；为 Schema
 时校验每个额外属性的值。只有未被同级 `properties` 声明、也未匹配任何同级
@@ -1202,8 +1233,8 @@ JSON 数组修改它。CLI 每轮只编译一次，供单文件、批量文件�
 标准测试命令使用仓库内的
 [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite/tree/55719286c33ae0d1823bfb65fea10338a19bc37c)
 固定版本 `55719286c33ae0d1823bfb65fea10338a19bc37c`，并用独立清单逐组声明范围。
-本次实际覆盖 **462 组、2354 条测试**：支持范围内 **执行 998 条、通过 998 条**，另有
-**466 条编译拒绝、890 条明确跳过**。拒绝和跳过不计作标准校验通过；误通过、误拒绝、
+本次实际覆盖 **462 组、2354 条测试**：支持范围内 **执行 1022 条、通过 1022 条**，另有
+**442 条编译拒绝、890 条明确跳过**。拒绝和跳过不计作标准校验通过；误通过、误拒绝、
 执行错误和范围错误均为零。这些结果只验证声明的子集，不代表完整 Draft 2020-12 支持。
 各能力统计和每项排除原因见生成的[兼容性报告](docs/schema-compatibility.md)，具体策略见
 `testdata/schema-suite-manifest.json`。
@@ -1749,7 +1780,7 @@ AI 响应处理都不需要联网，所以在任何机器上 `moon test` 都是�
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 444 tests
+moon test  --target native   # 454 tests
 moon fmt                     # format
 
 cd frontend

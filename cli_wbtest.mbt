@@ -1,4 +1,53 @@
 ///|
+async test "propertyNames CLI distinguishes names values and failures with exit 0 1 2" {
+  for
+    index, (schema, input, code, reason) in [
+      (
+        "{\"propertyNames\":{\"pattern\":\"^[a-z][a-z0-9_]*$\"}}", "{\"user_id\":1}",
+        0, "",
+      ),
+      ("{\"propertyNames\":false}", "{}", 0, ""),
+      ("{\"propertyNames\":{\"$ref\":\"#\"}}", "{\"a\":1}", 0, ""),
+      (
+        "{\"properties\":{\"data\":{\"propertyNames\":{\"pattern\":\"^[a-z]+$\"}}}}",
+        "{\"data\":{\"bad-name\":1}}", 1, "data: property name \"bad-name\": it does not match the pattern \"^[a-z]+$\"",
+      ),
+      (
+        "{\"propertyNames\":false}", "{\"bad\\\"\\nname\":0}", 1, "property name \"bad\\\"\\nname\": it is rejected by the false schema",
+      ),
+      ("{\"propertyNames\":1}", "{}", 2, "propertyNames"),
+      (
+        "{\"if\":true,\"else\":{\"propertyNames\":{\"unevaluatedProperties\":true}}}",
+        "{}", 2, "else.propertyNames.unevaluatedProperties",
+      ),
+      (
+        "{\"$defs\":{\"loop\":{\"$ref\":\"#/$defs/loop\"}},\"properties\":{\"data\":{\"propertyNames\":{\"$ref\":\"#/$defs/loop\"}}}}",
+        "{\"data\":{\"a\":1}}", 2, "property name \"a\": reference cycle at instance /data, schema /$defs/loop/$ref",
+      ),
+    ] {
+    let result = run_against_schema(
+      Scratch::named("property_names_cli_" + index.to_string()),
+      input,
+      schema,
+      ["--no-color"],
+      StubAnalyzer::new(Ok("unused")),
+    )
+    assert_eq(result.code, code)
+    if code == 0 {
+      assert_eq(result.err, "")
+      assert_true(result.out.contains("matches the schema"))
+    } else {
+      assert_eq(result.out, "")
+      assert_true(result.err.contains(reason))
+      assert_false(result.err.contains("matches the schema"))
+      if index == 4 {
+        assert_eq(result.err.trim().split("\n").length(), 2)
+      }
+    }
+  }
+}
+
+///|
 async test "dependency CLI reports existence violations schema failures and budget errors" {
   for
     index, (schema, input, code, reason) in [
@@ -17,7 +66,8 @@ async test "dependency CLI reports existence violations schema failures and budg
       ),
       ("{\"dependentRequired\":{\"a\":[1]}}", "{}", 2, "dependentRequired.a[0]"),
       (
-        "{\"dependentSchemas\":{\"a\":{\"propertyNames\":true}}}", "{}", 2, "dependentSchemas.a.propertyNames",
+        "{\"dependentSchemas\":{\"a\":{\"unevaluatedProperties\":true}}}", "{}",
+        2, "dependentSchemas.a.unevaluatedProperties",
       ),
       (
         "{\"dependentSchemas\":{\"a\":{\"$ref\":\"#\"}}}", "{\"a\":1}", 2, "schema /dependentSchemas/a/$ref",
@@ -94,7 +144,7 @@ async test "conditional CLI preserves selected instance paths and exit 0 1 2" {
         "{\"data\":true}", 1, "data: it is a boolean where the schema expects a string",
       ),
       (
-        "{\"if\":true,\"else\":{\"propertyNames\":true}}", "{}", 2, "else.propertyNames",
+        "{\"if\":true,\"else\":{\"unevaluatedProperties\":true}}", "{}", 2, "else.unevaluatedProperties",
       ),
       ("{\"then\":1}", "{}", 2, "then"),
       (
