@@ -3,3 +3,4 @@
 testdata/json-schema-suite/** -text whitespace=-blank-at-eol
 testdata/schema-suite-manifest.json text eol=lf
 scripts/*.sh text eol=lf
+examples/schema-acceptance/** text eol=lf

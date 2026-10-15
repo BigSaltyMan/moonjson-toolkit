@@ -1377,6 +1377,11 @@ The CLI compiles once per run and shares that result across files and JSONL
 records: supported schema plus matching data is exit `0`, supported schema
 plus violating data is exit `1`, and compilation or evaluation failure is exit `2`.
 
+For review handoff, see the [remediation and acceptance notes](docs/schema-remediation.md),
+[compatibility report](docs/schema-compatibility.md) and [updated submission](docs/october-submission.md).
+Run the local CLI demonstrations with `bash scripts/check_schema_acceptance.sh`;
+results and diagnostics are saved under `_build/schema-acceptance/`.
+
 The native standard-suite command uses the vendored
 [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite/tree/55719286c33ae0d1823bfb65fea10338a19bc37c)
 revision `55719286c33ae0d1823bfb65fea10338a19bc37c` and an independently reviewed

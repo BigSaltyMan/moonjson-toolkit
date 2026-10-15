@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "n": {
+      "type": "integer"
+    },
+    "loop": {
+      "$ref": "#/properties/loop"
+    }
+  }
+}
