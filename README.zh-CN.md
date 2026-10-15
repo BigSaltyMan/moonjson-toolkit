@@ -1230,6 +1230,10 @@ match @toolkit.validate_schema(document, schema) {
 JSON 数组修改它。CLI 每轮只编译一次，供单文件、批量文件和 JSONL 共用：合法 schema 配合
 合法数据返回 `0`，合法 schema 配合违规数据返回 `1`，Schema 编译失败或执行错误返回 `2`。
 
+复验交付入口：[整改验收说明](docs/schema-remediation.md)、[兼容性报告](docs/schema-compatibility.md)
+和[更新后的申报说明](docs/october-submission.md)。运行 `bash scripts/check_schema_acceptance.sh`
+可核对本地 CLI 示例，逐例退出码及诊断保存在 `_build/schema-acceptance/`。
+
 标准测试命令使用仓库内的
 [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite/tree/55719286c33ae0d1823bfb65fea10338a19bc37c)
 固定版本 `55719286c33ae0d1823bfb65fea10338a19bc37c`，并用独立清单逐组声明范围。

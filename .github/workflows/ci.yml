@@ -33,6 +33,9 @@ jobs:
       - name: Build
         run: moon build --target native
 
+      - name: Reproduce Schema acceptance examples
+        run: bash scripts/check_schema_acceptance.sh
+
       - name: JSON Schema standard suite (strict, offline data)
         run: |
           moon run --target native cmd/schema_suite -- \
@@ -51,6 +54,14 @@ jobs:
             _build/schema-suite/report.json
             _build/schema-suite/toolchain.txt
             docs/schema-compatibility.md
+          if-no-files-found: warn
+
+      - name: Preserve acceptance outputs even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-acceptance-outputs
+          path: _build/schema-acceptance/
           if-no-files-found: warn
 
   frontend:
