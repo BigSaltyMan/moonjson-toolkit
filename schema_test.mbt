@@ -1,4 +1,228 @@
 ///|
+test "public dependency validation agrees with compiled evaluation" {
+  for
+    (raw, input, count) in [
+      ("{\"dependentSchemas\":{\"a\":false}}", "{}", 0),
+      ("{\"dependentSchemas\":{\"a\":false}}", "{\"a\":null}", 1),
+      ("{\"dependentSchemas\":{\"a\":true}}", "{\"a\":false}", 0),
+      ("{\"dependentSchemas\":{}}", "{}", 0),
+      (
+        "{\"dependentSchemas\":{\"a\":{\"required\":[\"b\"]}}}", "{\"a\":{\"b\":1}}",
+        1,
+      ),
+      (
+        "{\"dependentSchemas\":{\"a\":{\"type\":\"object\",\"required\":[\"b\"]}}}",
+        "{\"a\":null,\"b\":1}", 0,
+      ),
+      (
+        "{\"dependentSchemas\":{\"a\":false,\"b\":false}}", "{\"a\":0,\"b\":\"\"}",
+        2,
+      ),
+      (
+        "{\"properties\":{\"a\":true},\"dependentSchemas\":{\"a\":{\"additionalProperties\":false}}}",
+        "{\"a\":1}", 1,
+      ),
+      (
+        "{\"properties\":{\"a\":true},\"additionalProperties\":false,\"dependentSchemas\":{\"a\":{\"properties\":{\"b\":true}}}}",
+        "{\"a\":1,\"b\":1}", 1,
+      ),
+      (
+        "{\"allOf\":[{\"dependentRequired\":{\"a\":[\"b\"]}},{\"dependentSchemas\":{\"a\":{\"properties\":{\"b\":{\"type\":\"string\"}}}}}]}",
+        "{\"a\":0,\"b\":1}", 1,
+      ),
+      (
+        "{\"if\":{\"required\":[\"a\"]},\"then\":{\"dependentRequired\":{\"a\":[\"b\"]}},\"else\":true}",
+        "{\"a\":0}", 1,
+      ),
+      (
+        "{\"dependentSchemas\":{\"a\":{\"if\":{\"required\":[\"b\"]},\"then\":{\"required\":[\"c\"]}}}}",
+        "{\"a\":0,\"b\":0}", 1,
+      ),
+    ] {
+    let schema = json(raw)
+    let compiled = match @moonjson-toolkit.compile_schema(schema) {
+      Ok(compiled) => compiled
+      Err(_) => abort("valid dependency refused")
+    }
+    let direct = match @moonjson-toolkit.validate_schema(json(input), schema) {
+      Ok(errors) => errors
+      Err(_) => abort("dependency execution failed")
+    }
+    let reused = match
+      @moonjson-toolkit.validate_compiled_schema(json(input), compiled) {
+      Ok(errors) => errors
+      Err(_) => abort("dependency execution failed")
+    }
+    assert_eq(direct.length(), count)
+    assert_eq(
+      direct.map(@moonjson-toolkit.render_schema_error),
+      reused.map(@moonjson-toolkit.render_schema_error),
+    )
+  }
+  match
+    @moonjson-toolkit.validate_schema(
+      json("{}"),
+      json("{\"dependentRequired\":[]}"),
+    ) {
+    Err(@moonjson-toolkit.SchemaProblems(problems)) => {
+      assert_eq(problems[0].path, "dependentRequired")
+      assert_eq(problems[0].kind, @moonjson-toolkit.InvalidSchema)
+    }
+    _ => abort("public API bypassed dependency precheck")
+  }
+  match
+    @moonjson-toolkit.validate_schema(
+      json("{}"),
+      json("{\"dependentSchemas\":[]}"),
+    ) {
+    Err(@moonjson-toolkit.SchemaProblems(problems)) => {
+      assert_eq(problems[0].path, "dependentSchemas")
+      assert_eq(problems[0].kind, @moonjson-toolkit.InvalidSchema)
+    }
+    _ => abort("public API bypassed dependency precheck")
+  }
+  match
+    @moonjson-toolkit.validate_schema(
+      json("{}"),
+      json("{\"dependentRequired\":{\"a\":null}}"),
+    ) {
+    Err(@moonjson-toolkit.SchemaProblems(problems)) => {
+      assert_eq(problems[0].path, "dependentRequired.a")
+      assert_eq(problems[0].kind, @moonjson-toolkit.InvalidSchema)
+    }
+    _ => abort("public API bypassed dependency precheck")
+  }
+  match
+    @moonjson-toolkit.validate_schema(
+      json("{}"),
+      json("{\"dependentRequired\":{\"a\":[1]}}"),
+    ) {
+    Err(@moonjson-toolkit.SchemaProblems(problems)) => {
+      assert_eq(problems[0].path, "dependentRequired.a[0]")
+      assert_eq(problems[0].kind, @moonjson-toolkit.InvalidSchema)
+    }
+    _ => abort("public API bypassed dependency precheck")
+  }
+  match
+    @moonjson-toolkit.validate_schema(
+      json("{}"),
+      json("{\"dependentRequired\":{\"a\":[\"x\",\"x\"]}}"),
+    ) {
+    Err(@moonjson-toolkit.SchemaProblems(problems)) => {
+      assert_eq(problems[0].path, "dependentRequired.a[1]")
+      assert_eq(problems[0].kind, @moonjson-toolkit.InvalidSchema)
+    }
+    _ => abort("public API bypassed dependency precheck")
+  }
+  match
+    @moonjson-toolkit.validate_schema(
+      json("{}"),
+      json("{\"dependentSchemas\":{\"a\":null}}"),
+    ) {
+    Err(@moonjson-toolkit.SchemaProblems(problems)) => {
+      assert_eq(problems[0].path, "dependentSchemas.a")
+      assert_eq(problems[0].kind, @moonjson-toolkit.InvalidSchema)
+    }
+    _ => abort("public API bypassed dependency precheck")
+  }
+  match
+    @moonjson-toolkit.validate_schema(
+      json("{}"),
+      json("{\"dependentSchemas\":{\"a\":{\"type\":3}}}"),
+    ) {
+    Err(@moonjson-toolkit.SchemaProblems(problems)) => {
+      assert_eq(problems[0].path, "dependentSchemas.a.type")
+      assert_eq(problems[0].kind, @moonjson-toolkit.InvalidSchema)
+    }
+    _ => abort("public API bypassed dependency precheck")
+  }
+  match
+    @moonjson-toolkit.validate_schema(
+      json("{}"),
+      json("{\"dependentSchemas\":{\"a\":{\"pattern\":\"[\"}}}"),
+    ) {
+    Err(@moonjson-toolkit.SchemaProblems(problems)) => {
+      assert_eq(problems[0].path, "dependentSchemas.a.pattern")
+      assert_eq(problems[0].kind, @moonjson-toolkit.InvalidSchema)
+    }
+    _ => abort("public API bypassed dependency precheck")
+  }
+  match
+    @moonjson-toolkit.validate_schema(
+      json("{}"),
+      json("{\"dependentSchemas\":{\"a\":{\"$ref\":\"#/missing\"}}}"),
+    ) {
+    Err(@moonjson-toolkit.SchemaProblems(problems)) => {
+      assert_eq(problems[0].path, "dependentSchemas.a.$ref")
+      assert_eq(problems[0].kind, @moonjson-toolkit.InvalidSchema)
+    }
+    _ => abort("public API bypassed dependency precheck")
+  }
+  match
+    @moonjson-toolkit.validate_schema(
+      json("{}"),
+      json("{\"dependentSchemas\":{\"a\":{\"propertyNames\":true}}}"),
+    ) {
+    Err(@moonjson-toolkit.SchemaProblems(problems)) => {
+      assert_eq(problems[0].path, "dependentSchemas.a.propertyNames")
+      assert_eq(problems[0].kind, @moonjson-toolkit.UnsupportedFeature)
+    }
+    _ => abort("public API bypassed dependency precheck")
+  }
+  match
+    @moonjson-toolkit.validate_schema(json("{}"), json("{\"dependencies\":{}}")) {
+    Err(@moonjson-toolkit.SchemaProblems(problems)) => {
+      assert_eq(problems[0].path, "dependencies")
+      assert_eq(problems[0].kind, @moonjson-toolkit.UnsupportedFeature)
+    }
+    _ => abort("public API bypassed dependency precheck")
+  }
+}
+
+///|
+test "compiled dependency snapshots isolate maps lists and nested schemas" {
+  let names = [json("\"b\"")]
+  let required = [("a", @pjson.Array(items=names))]
+  let child = [("properties", json("{\"b\":{\"type\":\"string\"}}"))]
+  let dependencies = [("a", @pjson.Object(members=child))]
+  let schema = @pjson.Object(members=[
+    ("dependentRequired", @pjson.Object(members=required)),
+    ("dependentSchemas", @pjson.Object(members=dependencies)),
+  ])
+  let compiled = match @moonjson-toolkit.compile_schema(schema) {
+    Ok(compiled) => compiled
+    Err(_) => abort("valid dependencies refused")
+  }
+  names.clear()
+  required.clear()
+  child[0] = ("$ref", json("\"#\""))
+  dependencies.clear()
+  for _ in 0..<3 {
+    assert_true(
+      @moonjson-toolkit.validate_compiled_schema(json("{}"), compiled) is Ok([]),
+    )
+    assert_true(
+      @moonjson-toolkit.validate_compiled_schema(json("{\"a\":null}"), compiled)
+      is Ok([_]),
+    )
+    assert_true(
+      @moonjson-toolkit.validate_compiled_schema(
+        json("{\"a\":false,\"b\":2}"),
+        compiled,
+      )
+      is Ok([_]),
+    )
+    assert_true(
+      @moonjson-toolkit.validate_compiled_schema(
+        json("{\"a\":0,\"b\":\"ok\"}"),
+        compiled,
+      )
+      is Ok([]),
+    )
+  }
+}
+
+///|
 fn json(text : String) -> @pjson.Json {
   match @pjson.parse(text) {
     Ok(value) => value
@@ -50,8 +274,8 @@ test "public conditional validators agree and precheck inactive branches" {
     (raw, path, kind) in [
       ("{\"then\":3}", "then", @moonjson-toolkit.InvalidSchema),
       (
-        "{\"if\":true,\"else\":{\"dependentRequired\":{}}}",
-        "else.dependentRequired",
+        "{\"if\":true,\"else\":{\"unevaluatedProperties\":{}}}",
+        "else.unevaluatedProperties",
         @moonjson-toolkit.UnsupportedFeature,
       ),
       (

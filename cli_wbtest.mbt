@@ -1,4 +1,61 @@
 ///|
+async test "dependency CLI reports existence violations schema failures and budget errors" {
+  for
+    index, (schema, input, code, reason) in [
+      ("{\"dependentRequired\":{\"a\":[\"b\"]}}", "{}", 0, ""),
+      (
+        "{\"dependentRequired\":{\"a\":[\"b\"]},\"dependentSchemas\":{\"a\":{\"properties\":{\"b\":{\"type\":\"string\",\"minLength\":1}}}}}",
+        "{\"a\":null,\"b\":\"ok\"}", 0, "",
+      ),
+      (
+        "{\"properties\":{\"data\":{\"dependentRequired\":{\"a\":[\"b\"]}}}}", "{\"data\":{\"a\":false}}",
+        1, "data: member \"a\" requires member \"b\"",
+      ),
+      (
+        "{\"dependentSchemas\":{\"a\":{\"properties\":{\"b\":{\"minLength\":1}}}}}",
+        "{\"a\":0,\"b\":\"\"}", 1, "b: it is 0 characters long",
+      ),
+      ("{\"dependentRequired\":{\"a\":[1]}}", "{}", 2, "dependentRequired.a[0]"),
+      (
+        "{\"dependentSchemas\":{\"a\":{\"propertyNames\":true}}}", "{}", 2, "dependentSchemas.a.propertyNames",
+      ),
+      (
+        "{\"dependentSchemas\":{\"a\":{\"$ref\":\"#\"}}}", "{\"a\":1}", 2, "schema /dependentSchemas/a/$ref",
+      ),
+      ("{\"dependentSchemas\":{\"a\":{\"$ref\":\"#\"}}}", "{}", 0, ""),
+      (
+        "{\"$defs\":{\"n0\":true,\"n1\":{\"allOf\":[{\"$ref\":\"#/$defs/n0\"},{\"$ref\":\"#/$defs/n0\"}]},\"n2\":{\"allOf\":[{\"$ref\":\"#/$defs/n1\"},{\"$ref\":\"#/$defs/n1\"}]},\"n3\":{\"allOf\":[{\"$ref\":\"#/$defs/n2\"},{\"$ref\":\"#/$defs/n2\"}]},\"n4\":{\"allOf\":[{\"$ref\":\"#/$defs/n3\"},{\"$ref\":\"#/$defs/n3\"}]},\"n5\":{\"allOf\":[{\"$ref\":\"#/$defs/n4\"},{\"$ref\":\"#/$defs/n4\"}]},\"n6\":{\"allOf\":[{\"$ref\":\"#/$defs/n5\"},{\"$ref\":\"#/$defs/n5\"}]},\"n7\":{\"allOf\":[{\"$ref\":\"#/$defs/n6\"},{\"$ref\":\"#/$defs/n6\"}]},\"n8\":{\"allOf\":[{\"$ref\":\"#/$defs/n7\"},{\"$ref\":\"#/$defs/n7\"}]},\"n9\":{\"allOf\":[{\"$ref\":\"#/$defs/n8\"},{\"$ref\":\"#/$defs/n8\"}]},\"n10\":{\"allOf\":[{\"$ref\":\"#/$defs/n9\"},{\"$ref\":\"#/$defs/n9\"}]},\"n11\":{\"allOf\":[{\"$ref\":\"#/$defs/n10\"},{\"$ref\":\"#/$defs/n10\"}]},\"n12\":{\"allOf\":[{\"$ref\":\"#/$defs/n11\"},{\"$ref\":\"#/$defs/n11\"}]},\"n13\":{\"allOf\":[{\"$ref\":\"#/$defs/n12\"},{\"$ref\":\"#/$defs/n12\"}]},\"n14\":{\"allOf\":[{\"$ref\":\"#/$defs/n13\"},{\"$ref\":\"#/$defs/n13\"}]},\"n15\":{\"allOf\":[{\"$ref\":\"#/$defs/n14\"},{\"$ref\":\"#/$defs/n14\"}]},\"n16\":{\"allOf\":[{\"$ref\":\"#/$defs/n15\"},{\"$ref\":\"#/$defs/n15\"}]}},\"dependentSchemas\":{\"a\":{\"$ref\":\"#/$defs/n16\"}}}",
+        "{\"a\":0}", 2, "node visit limit exceeded",
+      ),
+      (
+        "{\"dependentRequired\":{\"a\\nb\":[\"x\\\"\\ny\"]}}", "{\"a\\nb\":0}", 1,
+        "member \"a\\nb\" requires member \"x\\\"\\ny\"",
+      ),
+    ] {
+    let result = run_against_schema(
+      Scratch::named("dependency_cli_" + index.to_string()),
+      input,
+      schema,
+      ["--no-color"],
+      StubAnalyzer::new(Ok("unused")),
+    )
+    assert_eq(result.code, code)
+    if code == 0 {
+      assert_eq(result.err, "")
+      assert_true(result.out.contains("matches the schema"))
+    } else {
+      assert_eq(result.out, "")
+      assert_true(result.err.contains(reason))
+      assert_false(result.err.contains("matches the schema"))
+      if index == 9 {
+        // A heading plus one diagnostic, with no newline injected by names.
+        assert_eq(result.err.trim().split("\n").length(), 2)
+      }
+    }
+  }
+}
+
+///|
 /// Parse `args`, failing the test if they are rejected.
 fn cli_ok(args : Array[String]) -> CliOptions {
   match CliOptions::parse(args) {

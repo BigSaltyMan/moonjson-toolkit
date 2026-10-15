@@ -100,6 +100,10 @@ fn check_value(
           }
           "type" => check_type(value, wanted, path, errors)
           "required" => check_required(value, wanted, path, errors)
+          "dependentRequired" =>
+            check_dependent_required(value, wanted, path, errors)
+          "dependentSchemas" =>
+            check_dependent_schemas(value, wanted, path, errors, ctx)
           "properties" => check_properties(value, wanted, path, errors, ctx)
           "patternProperties" =>
             check_pattern_properties(value, wanted, path, errors, ctx)
@@ -202,6 +206,70 @@ fn check_conditional(
     }
   } else if has_else {
     evaluate_schema_child(value, ["else"], None, path, errors, ctx)
+  }
+}
+
+///|
+/// Dependencies are triggered by presence, including null and other falsy values.
+fn check_dependent_required(
+  value : @pjson.Json,
+  wanted : @pjson.Json,
+  path : String,
+  errors : Array[SchemaError],
+) -> Unit {
+  match (value, wanted) {
+    (Object(members~), Object(members=dependencies)) =>
+      for (trigger, names) in dependencies {
+        if find_member(members, trigger) is Some(_) {
+          if names is Array(items~) {
+            for name in items {
+              if name is Text(value=needed) {
+                if find_member(members, needed) is None {
+                  errors.push({
+                    path,
+                    message: "member \"" +
+                    escape_json_string(trigger) +
+                    "\" requires member \"" +
+                    escape_json_string(needed) +
+                    "\"",
+                  })
+                }
+              }
+            }
+          }
+        }
+      }
+    _ => ()
+  }
+}
+
+///|
+/// Each triggered schema applies to the whole object with the shared context.
+fn check_dependent_schemas(
+  value : @pjson.Json,
+  wanted : @pjson.Json,
+  path : String,
+  errors : Array[SchemaError],
+  ctx : SchemaEvaluationContext,
+) -> Unit {
+  match (value, wanted) {
+    (Object(members~), Object(members=dependencies)) =>
+      for (trigger, _) in dependencies {
+        if ctx.failure != None {
+          break
+        }
+        if find_member(members, trigger) is Some(_) {
+          evaluate_schema_child(
+            value,
+            ["dependentSchemas", trigger],
+            None,
+            path,
+            errors,
+            ctx,
+          )
+        }
+      }
+    _ => ()
   }
 }
 
@@ -1037,6 +1105,19 @@ fn check_schema(
         match keyword {
           "type" => check_type_argument(wanted, here, errors)
           "required" => check_name_list(wanted, here, errors)
+          "dependentRequired" =>
+            match wanted {
+              Object(members=dependencies) =>
+                for (name, names) in dependencies {
+                  check_name_list(names, child_path(here, name), errors)
+                }
+              _ =>
+                errors.push({
+                  path: here,
+                  kind: InvalidSchema,
+                  message: "expected an object mapping member names to lists of member names",
+                })
+            }
           "const" => ()
           "$ref" =>
             match wanted {
@@ -1110,7 +1191,7 @@ fn check_schema(
                   kind_name(wanted),
                 })
             }
-          "properties" | "$defs" =>
+          "properties" | "$defs" | "dependentSchemas" =>
             match wanted {
               Object(members=subschemas) =>
                 for entry in subschemas {

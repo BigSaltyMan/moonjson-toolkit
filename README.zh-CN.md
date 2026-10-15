@@ -192,7 +192,7 @@ way to it, and -v wins over it as it wins over the name lists.
 --schema <path> checks the input against a JSON Schema instead of printing
 it, and is read with -v, which is the flag that asks for a verdict rather
 than a document. The supported JSON Schema Draft 2020-12 subset is: type,
-required, properties, patternProperties, minProperties, maxProperties,
+required, dependentRequired, dependentSchemas, properties, patternProperties, minProperties, maxProperties,
 prefixItems, items, minItems, maxItems, uniqueItems, contains, minContains, maxContains,
 enum, const, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf,
 minLength, maxLength, pattern, allOf, anyOf, oneOf, not, if, then, else, additionalProperties, $defs and local JSON Pointer $ref.
@@ -217,6 +217,15 @@ patternProperties searches field names; every matching rule checks the value.
 additionalProperties excludes names declared explicitly or matched by patterns
 in the same schema object, even when their values fail validation.
 minProperties/maxProperties accept nonnegative integers up to 1000000000.
+dependentRequired triggers when a member exists, including null, false, 0 or "".
+Dependencies are directional. dependentSchemas checks the entire current object,
+not the triggering member value. All dependency schemas are prechecked; only
+triggered schemas run, sharing reference-cycle guards and evaluation budgets.
+Dependencies: {"type":"object","dependentRequired":{"creditCard":["billingAddress"]},
+"dependentSchemas":{"creditCard":{"properties":{"billingAddress":{"type":"string","minLength":1}}}}}
+accepts {} and {"creditCard":"1234","billingAddress":"Shanghai"}; rejects
+{"creditCard":"1234"} and {"creditCard":"1234","billingAddress":""}.
+The older dependencies keyword remains unsupported.
 Regex subset: literals, dot, classes, groups, alternation, repetitions, ^ and $.
 Dot excludes LF, CR, U+2028 and U+2029. \s uses ECMAScript whitespace;
 \S is its complement. Patterns compile once per schema and are reused.
@@ -804,7 +813,8 @@ printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
 本工具支持明确列出的 JSON Schema Draft 2020-12 子集。未支持的关键字、版本或机制会在
 校验前报错，退出码为 `2`。本工具尚未完整实现 Draft 2020-12。
 
-当前支持 `type`、`required`、`properties`、`patternProperties`、`minProperties`、
+当前支持 `type`、`required`、`dependentRequired`、`dependentSchemas`、
+`properties`、`patternProperties`、`minProperties`、
 `maxProperties`、`prefixItems`、`items`、`minItems`、`maxItems`、
 `uniqueItems`、`contains`、`minContains`、`maxContains`、`enum`、`const`、`minimum`、
 `maximum`、`exclusiveMinimum`、`exclusiveMaximum`、`multipleOf`、`minLength`、
@@ -849,8 +859,36 @@ printf '{"customer":{},"lines":[{"qty":2},{"qty":"three"}]}' \
 未支持关键词、非法正则和无法解析的引用仍在读取输入前拒绝。运行时只执行选中分支，条件与
 分支使用当前实例 JSON Pointer 并共享预算。条件的引用循环或超限向上传递为执行错误，
 不能作为条件不成立而执行 `else`；未选中分支中的可编译循环不执行。CLI 退出码仍为 `0/1/2`。
-`dependentRequired`、`dependentSchemas`、`propertyNames` 和 `unevaluated*` 仍未实现，
-继续由预检查明确拒绝。
+
+`dependentRequired` 将触发字段名映射到不重复的字符串数组，允许空对象和空数组。
+字段存在即触发，即使值为 `null`、`false`、`0` 或空字符串。依赖默认单向，
+自依赖和双向依赖都是合法配置。
+
+`dependentSchemas` 将字段名映射到对象或布尔 Schema。触发后校验**整个当前对象**，
+实例路径保持不变；多个字段触发时，所有依赖子 Schema 都必须满足。父级与依赖子 Schema
+的 `properties` 不合并，各自的 `additionalProperties` 独立判断。所有子 Schema 都会
+预检查，包括未触发的分支；运行时只执行已触发分支，共享引用循环检测和求值预算。
+
+```json
+{
+  "type": "object",
+  "dependentRequired": {
+    "creditCard": ["billingAddress"]
+  },
+  "dependentSchemas": {
+    "creditCard": {
+      "properties": {
+        "billingAddress": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}
+```
+
+`{}` 通过，因为没有触发依赖。`{"creditCard":"1234"}` 缺少 `billingAddress`，失败；
+`{"creditCard":"1234","billingAddress":""}` 因地址为空而失败；
+`{"creditCard":"1234","billingAddress":"Shanghai"}` 通过。两项关键词都不约束非对象实例。
+旧版 `dependencies`、`propertyNames` 和 `unevaluated*` 仍未支持，由预检查明确拒绝。
 
 `additionalProperties` 省略或为 `true` 时允许额外属性；为 `false` 时逐个拒绝；为 Schema
 时校验每个额外属性的值。只有未被同级 `properties` 声明、也未匹配任何同级
@@ -1164,8 +1202,8 @@ JSON 数组修改它。CLI 每轮只编译一次，供单文件、批量文件�
 标准测试命令使用仓库内的
 [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite/tree/55719286c33ae0d1823bfb65fea10338a19bc37c)
 固定版本 `55719286c33ae0d1823bfb65fea10338a19bc37c`，并用独立清单逐组声明范围。
-本次实际覆盖 **462 组、2354 条测试**：支持范围内 **执行 955 条、通过 955 条**，另有
-**509 条编译拒绝、890 条明确跳过**。拒绝和跳过不计作标准校验通过；误通过、误拒绝、
+本次实际覆盖 **462 组、2354 条测试**：支持范围内 **执行 998 条、通过 998 条**，另有
+**466 条编译拒绝、890 条明确跳过**。拒绝和跳过不计作标准校验通过；误通过、误拒绝、
 执行错误和范围错误均为零。这些结果只验证声明的子集，不代表完整 Draft 2020-12 支持。
 各能力统计和每项排除原因见生成的[兼容性报告](docs/schema-compatibility.md)，具体策略见
 `testdata/schema-suite-manifest.json`。
@@ -1711,7 +1749,7 @@ AI 响应处理都不需要联网，所以在任何机器上 `moon test` 都是�
 
 ```sh
 moon check --target native   # type-check
-moon test  --target native   # 435 tests
+moon test  --target native   # 444 tests
 moon fmt                     # format
 
 cd frontend

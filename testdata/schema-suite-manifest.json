@@ -72,15 +72,7 @@
       "group": 8,
       "description": "dependentSchemas with additionalProperties",
       "capability": "additionalProperties",
-      "action": "reject",
-      "reason": "Keyword/mechanism dependentSchemas is not implemented",
-      "expected_problems": [
-        {
-          "path": "dependentSchemas",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/allOf.json",
@@ -635,120 +627,56 @@
       "group": 0,
       "description": "single dependency",
       "capability": "dependentRequired",
-      "action": "reject",
-      "reason": "Keyword/mechanism dependentRequired is not implemented",
-      "expected_problems": [
-        {
-          "path": "dependentRequired",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/dependentRequired.json",
       "group": 1,
       "description": "empty dependents",
       "capability": "dependentRequired",
-      "action": "reject",
-      "reason": "Keyword/mechanism dependentRequired is not implemented",
-      "expected_problems": [
-        {
-          "path": "dependentRequired",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/dependentRequired.json",
       "group": 2,
       "description": "multiple dependents required",
       "capability": "dependentRequired",
-      "action": "reject",
-      "reason": "Keyword/mechanism dependentRequired is not implemented",
-      "expected_problems": [
-        {
-          "path": "dependentRequired",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/dependentRequired.json",
       "group": 3,
       "description": "dependencies with escaped characters",
       "capability": "dependentRequired",
-      "action": "reject",
-      "reason": "Keyword/mechanism dependentRequired is not implemented",
-      "expected_problems": [
-        {
-          "path": "dependentRequired",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/dependentSchemas.json",
       "group": 0,
       "description": "single dependency",
       "capability": "dependentSchemas",
-      "action": "reject",
-      "reason": "Keyword/mechanism dependentSchemas is not implemented",
-      "expected_problems": [
-        {
-          "path": "dependentSchemas",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/dependentSchemas.json",
       "group": 1,
       "description": "boolean subschemas",
       "capability": "dependentSchemas",
-      "action": "reject",
-      "reason": "Keyword/mechanism dependentSchemas is not implemented",
-      "expected_problems": [
-        {
-          "path": "dependentSchemas",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/dependentSchemas.json",
       "group": 2,
       "description": "dependencies with escaped characters",
       "capability": "dependentSchemas",
-      "action": "reject",
-      "reason": "Keyword/mechanism dependentSchemas is not implemented",
-      "expected_problems": [
-        {
-          "path": "dependentSchemas",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/dependentSchemas.json",
       "group": 3,
       "description": "dependent subschema incompatible with root",
       "capability": "dependentSchemas",
-      "action": "reject",
-      "reason": "Keyword/mechanism dependentSchemas is not implemented",
-      "expected_problems": [
-        {
-          "path": "dependentSchemas",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        }
-      ]
+      "action": "validate"
     },
     {
       "file": "tests/draft2020-12/dynamicRef.json",
@@ -5187,13 +5115,8 @@
       "description": "unevaluatedProperties with dependentSchemas",
       "capability": "unevaluatedProperties",
       "action": "reject",
-      "reason": "Keyword/mechanism dependentSchemas is not implemented; Keyword/mechanism unevaluatedProperties is not implemented",
+      "reason": "Keyword/mechanism unevaluatedProperties is not implemented",
       "expected_problems": [
-        {
-          "path": "dependentSchemas",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
         {
           "path": "unevaluatedProperties",
           "kind": "UnsupportedFeature",
@@ -5607,13 +5530,8 @@
       "description": "dependentSchemas with unevaluatedProperties",
       "capability": "unevaluatedProperties",
       "action": "reject",
-      "reason": "Keyword/mechanism dependentSchemas is not implemented; Keyword/mechanism unevaluatedProperties is not implemented",
+      "reason": "Keyword/mechanism unevaluatedProperties is not implemented",
       "expected_problems": [
-        {
-          "path": "dependentSchemas",
-          "kind": "UnsupportedFeature",
-          "message_contains": "keyword is not supported"
-        },
         {
           "path": "unevaluatedProperties",
           "kind": "UnsupportedFeature",

@@ -1,4 +1,68 @@
 ///|
+test "dependency references retain current instance and escape schema pointer names" {
+  let schema = ref_compiled(
+    "{\"$defs\":{\"dep\":{\"properties\":{\"b\":{\"type\":\"string\"}}}},\"dependentSchemas\":{\"a/b~c\":{\"$ref\":\"#/$defs/dep\"}}}",
+  )
+  assert_true(
+    validate_compiled_schema(parse_ok("{\"a/b~c\":null,\"b\":\"ok\"}"), schema)
+    is Ok([]),
+  )
+  match validate_compiled_schema(parse_ok("{\"a/b~c\":null,\"b\":2}"), schema) {
+    Ok([error]) => assert_eq(error.path, "b")
+    _ => abort("dependency reference checked the trigger value")
+  }
+  let cycle = ref_compiled(
+    "{\"properties\":{\"data\":{\"dependentSchemas\":{\"a/b~c\":{\"$ref\":\"#/properties/data\"}}}}}",
+  )
+  assert_true(
+    validate_compiled_schema(parse_ok("{\"data\":{}}"), cycle) is Ok([]),
+  )
+  match
+    validate_compiled_schema(parse_ok("{\"data\":{\"a/b~c\":false}}"), cycle) {
+    Err(error) => {
+      assert_eq(error.kind, ReferenceCycle)
+      assert_eq(error.instance_path, "/data")
+      assert_eq(
+        error.schema_path,
+        "/properties/data/dependentSchemas/a~1b~0c/$ref",
+      )
+    }
+    _ => abort("triggered dependency cycle was swallowed")
+  }
+  assert_true(
+    validate_compiled_schema(parse_ok("{\"data\":{}}"), cycle) is Ok([]),
+  )
+}
+
+///|
+test "multiple dependency schemas share budgets and restore reference activity" {
+  let schema = ref_compiled(
+    "{\"$defs\":{\"shared\":true},\"dependentSchemas\":{\"a\":{\"$ref\":\"#/$defs/shared\"},\"b\":{\"$ref\":\"#/$defs/shared\"}}}",
+  )
+  let data = parse_ok("{\"a\":null,\"b\":0}")
+  assert_true(evaluate_schema_with_limits(data, schema, 3, 5) is Ok([]))
+  match evaluate_schema_with_limits(data, schema, 3, 4) {
+    Err(error) => {
+      assert_eq(error.kind, ResourceLimit)
+      assert_eq(error.instance_path, "")
+      assert_eq(error.schema_path, "/$defs/shared")
+    }
+    _ => abort("dependency visits were reset per trigger")
+  }
+  match evaluate_schema_with_limits(data, schema, 1, 5) {
+    Err(error) => {
+      assert_eq(error.kind, ResourceLimit)
+      assert_eq(error.schema_path, "/dependentSchemas/a")
+    }
+    _ => abort("dependency depth budget was bypassed")
+  }
+  assert_true(evaluate_schema_with_limits(data, schema, 3, 5) is Ok([]))
+  assert_true(
+    evaluate_schema_with_limits(parse_ok("{}"), schema, 1, 1) is Ok([]),
+  )
+}
+
+///|
 fn ref_compiled(text : String) -> CompiledSchema {
   match compile_schema(parse_ok(text)) {
     Ok(compiled) => compiled

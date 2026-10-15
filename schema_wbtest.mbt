@@ -1,4 +1,243 @@
 ///|
+test "object dependencies trigger on presence and remain directional" {
+  for
+    (schema, data, count) in [
+      ("{\"dependentRequired\":{\"a\":[\"b\",\"c\"]}}", "{}", 0),
+      ("{\"dependentRequired\":{\"a\":[\"b\",\"c\"]}}", "{\"a\":1}", 2),
+      ("{\"dependentRequired\":{\"a\":[\"b\",\"c\"]}}", "{\"a\":1,\"b\":0}", 1),
+      (
+        "{\"dependentRequired\":{\"a\":[\"b\",\"c\"]}}", "{\"a\":1,\"b\":false,\"c\":null}",
+        0,
+      ),
+      ("{\"dependentRequired\":{\"a\":[\"b\"]}}", "{\"a\":null}", 1),
+      ("{\"dependentRequired\":{\"a\":[\"b\"]}}", "{\"a\":null,\"b\":null}", 0),
+      ("{\"dependentRequired\":{\"a\":[\"b\"]}}", "{\"a\":false}", 1),
+      (
+        "{\"dependentRequired\":{\"a\":[\"b\"]}}", "{\"a\":false,\"b\":false}", 0,
+      ),
+      ("{\"dependentRequired\":{\"a\":[\"b\"]}}", "{\"a\":0}", 1),
+      ("{\"dependentRequired\":{\"a\":[\"b\"]}}", "{\"a\":0,\"b\":0}", 0),
+      ("{\"dependentRequired\":{\"a\":[\"b\"]}}", "{\"a\":\"\"}", 1),
+      ("{\"dependentRequired\":{\"a\":[\"b\"]}}", "{\"a\":\"\",\"b\":\"\"}", 0),
+      ("{\"dependentRequired\":{\"a\":[]}}", "{\"a\":1}", 0),
+      ("{\"dependentRequired\":{}}", "{}", 0),
+      ("{\"dependentRequired\":{\"a\":[\"a\"]}}", "{\"a\":1}", 0),
+      ("{\"dependentRequired\":{\"a\":[\"b\"]}}", "{\"b\":1}", 0),
+      ("{\"dependentRequired\":{\"a\":[\"b\"],\"b\":[\"a\"]}}", "{\"a\":1}", 1),
+      (
+        "{\"dependentRequired\":{\"a\":[\"b\"],\"b\":[\"a\"]}}", "{\"a\":1,\"b\":null}",
+        0,
+      ),
+      (
+        "{\"dependentRequired\":{\"a\":[\"b\"]},\"dependentSchemas\":{\"a\":false}}",
+        "null", 0,
+      ),
+      (
+        "{\"dependentRequired\":{\"a\":[\"b\"]},\"dependentSchemas\":{\"a\":false}}",
+        "false", 0,
+      ),
+      (
+        "{\"dependentRequired\":{\"a\":[\"b\"]},\"dependentSchemas\":{\"a\":false}}",
+        "0", 0,
+      ),
+      (
+        "{\"dependentRequired\":{\"a\":[\"b\"]},\"dependentSchemas\":{\"a\":false}}",
+        "\"\"", 0,
+      ),
+      (
+        "{\"dependentRequired\":{\"a\":[\"b\"]},\"dependentSchemas\":{\"a\":false}}",
+        "[]", 0,
+      ),
+      (
+        "{\"dependentRequired\":{\"a\":[\"b\"]},\"dependentSchemas\":{\"a\":false}}",
+        "[{\"a\":1}]", 0,
+      ),
+    ] {
+    match validate_schema(parse_ok(data), parse_ok(schema)) {
+      Ok(errors) => assert_eq(errors.length(), count)
+      Err(_) => abort("dependency validation unexpectedly failed")
+    }
+  }
+}
+
+///|
+test "dependent schemas validate the entire object and keep sibling scopes separate" {
+  for
+    (schema, data, count) in [
+      ("{\"dependentSchemas\":{\"a\":false}}", "{}", 0),
+      ("{\"dependentSchemas\":{\"a\":false}}", "{\"a\":null}", 1),
+      ("{\"dependentSchemas\":{\"a\":true}}", "{\"a\":false}", 0),
+      ("{\"dependentSchemas\":{}}", "{}", 0),
+      (
+        "{\"dependentSchemas\":{\"a\":{\"required\":[\"b\"]}}}", "{\"a\":{\"b\":1}}",
+        1,
+      ),
+      (
+        "{\"dependentSchemas\":{\"a\":{\"type\":\"object\",\"required\":[\"b\"]}}}",
+        "{\"a\":null,\"b\":1}", 0,
+      ),
+      (
+        "{\"dependentSchemas\":{\"a\":false,\"b\":false}}", "{\"a\":0,\"b\":\"\"}",
+        2,
+      ),
+      (
+        "{\"properties\":{\"a\":true},\"dependentSchemas\":{\"a\":{\"additionalProperties\":false}}}",
+        "{\"a\":1}", 1,
+      ),
+      (
+        "{\"properties\":{\"a\":true},\"additionalProperties\":false,\"dependentSchemas\":{\"a\":{\"properties\":{\"b\":true}}}}",
+        "{\"a\":1,\"b\":1}", 1,
+      ),
+      (
+        "{\"allOf\":[{\"dependentRequired\":{\"a\":[\"b\"]}},{\"dependentSchemas\":{\"a\":{\"properties\":{\"b\":{\"type\":\"string\"}}}}}]}",
+        "{\"a\":0,\"b\":1}", 1,
+      ),
+      (
+        "{\"if\":{\"required\":[\"a\"]},\"then\":{\"dependentRequired\":{\"a\":[\"b\"]}},\"else\":true}",
+        "{\"a\":0}", 1,
+      ),
+      (
+        "{\"dependentSchemas\":{\"a\":{\"if\":{\"required\":[\"b\"]},\"then\":{\"required\":[\"c\"]}}}}",
+        "{\"a\":0,\"b\":0}", 1,
+      ),
+    ] {
+    match validate_schema(parse_ok(data), parse_ok(schema)) {
+      Ok(errors) => assert_eq(errors.length(), count)
+      Err(_) => abort("dependency validation unexpectedly failed")
+    }
+  }
+}
+
+///|
+test "dependency diagnostics follow schema order and escape arbitrary names" {
+  let schema = parse_ok(
+    "{\"dependentRequired\":{\"a\":[\"c\",\"b\"],\"b\":[\"d\"]}}",
+  )
+  match validate_schema(parse_ok("{\"a\":null,\"b\":false}"), schema) {
+    Ok(errors) => {
+      assert_eq(errors.length(), 2)
+      assert_eq(errors[0].message, "member \"a\" requires member \"c\"")
+      assert_eq(errors[1].message, "member \"b\" requires member \"d\"")
+    }
+    _ => abort("expected ordered dependency violations")
+  }
+  for
+    (name, expected) in [
+      ("", "member \"\" requires member \"!\""),
+      ("中文", "member \"中文\" requires member \"中文!\""),
+      ("quote\"", "member \"quote\\\"\" requires member \"quote\\\"!\""),
+      (
+        "line\nbreak", "member \"line\\nbreak\" requires member \"line\\nbreak!\"",
+      ),
+      ("/", "member \"/\" requires member \"/!\""),
+      ("~", "member \"~\" requires member \"~!\""),
+      ("a/b~c", "member \"a/b~c\" requires member \"a/b~c!\""),
+    ] {
+    let needed = name + "!"
+    let dependency = @pjson.Object(members=[
+      (
+        "dependentRequired",
+        @pjson.Object(members=[
+          (name, @pjson.Array(items=[@pjson.Text(value=needed)])),
+        ]),
+      ),
+    ])
+    let schema = @pjson.Object(members=[
+      ("properties", @pjson.Object(members=[("data", dependency)])),
+    ])
+    let members = [(name, parse_ok("null"))]
+    let data = @pjson.Object(members=[("data", @pjson.Object(members~))])
+    match validate_schema(data, schema) {
+      Ok([error]) => {
+        assert_eq(error.path, "data")
+        assert_eq(error.message, expected)
+        assert_eq(error.message.split("\n").length(), 1)
+      }
+      _ => abort("special dependency name was not checked")
+    }
+    members.push((needed, parse_ok("false")))
+    assert_true(validate_schema(data, schema) is Ok([]))
+  }
+}
+
+///|
+test "dependency prechecks inspect every name list and inactive subschema" {
+  for
+    (raw, location, kind) in [
+      ("{\"dependentRequired\":[]}", "dependentRequired", InvalidSchema),
+      ("{\"dependentSchemas\":[]}", "dependentSchemas", InvalidSchema),
+      (
+        "{\"dependentRequired\":{\"a\":null}}",
+        "dependentRequired.a",
+        InvalidSchema,
+      ),
+      (
+        "{\"dependentRequired\":{\"a\":[1]}}",
+        "dependentRequired.a[0]",
+        InvalidSchema,
+      ),
+      (
+        "{\"dependentRequired\":{\"a\":[\"x\",\"x\"]}}",
+        "dependentRequired.a[1]",
+        InvalidSchema,
+      ),
+      (
+        "{\"dependentSchemas\":{\"a\":null}}",
+        "dependentSchemas.a",
+        InvalidSchema,
+      ),
+      (
+        "{\"dependentSchemas\":{\"a\":{\"type\":3}}}",
+        "dependentSchemas.a.type",
+        InvalidSchema,
+      ),
+      (
+        "{\"dependentSchemas\":{\"a\":{\"pattern\":\"[\"}}}",
+        "dependentSchemas.a.pattern",
+        InvalidSchema,
+      ),
+      (
+        "{\"dependentSchemas\":{\"a\":{\"$ref\":\"#/missing\"}}}",
+        "dependentSchemas.a.$ref",
+        InvalidSchema,
+      ),
+      (
+        "{\"dependentSchemas\":{\"a\":{\"propertyNames\":true}}}",
+        "dependentSchemas.a.propertyNames",
+        UnsupportedFeature,
+      ),
+      ("{\"dependencies\":{}}", "dependencies", UnsupportedFeature),
+    ] {
+    match compile_schema(parse_ok(raw)) {
+      Err(problems) => {
+        assert_eq(problems.length(), 1)
+        assert_eq(problems[0].path, location)
+        assert_eq(problems[0].kind, kind)
+      }
+      _ => abort("invalid dependency escaped compilation")
+    }
+  }
+  assert_true(
+    compile_schema(
+      parse_ok(
+        "{\"dependentRequired\":{\"anyOf\":[\"multipleOf\",\"dependentSchemas\"]}}",
+      ),
+    )
+    is Ok(_),
+  )
+  assert_true(
+    compile_schema(parse_ok("{\"dependentSchemas\":{\"anyOf\":true}}")) is Ok(_),
+  )
+  assert_true(
+    compile_schema(parse_ok("{\"const\":{\"dependentSchemas\":{\"bad\":3}}}"))
+    is Ok(_),
+  )
+  assert_true(
+    compile_schema(parse_ok("{\"enum\":[{\"dependentRequired\":3}]}")) is Ok(_),
+  )
+}
+
+///|
 /// The report of checking a document against a schema, written the way a report
 /// reads: one line per error, in the order they were found, and nothing at all
 /// when the document matches.

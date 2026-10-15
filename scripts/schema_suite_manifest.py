@@ -12,7 +12,7 @@ import urllib.parse
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DATA = ROOT / "testdata/json-schema-suite"
-SUPPORTED = set("type required properties patternProperties minProperties maxProperties prefixItems items minItems maxItems uniqueItems contains minContains maxContains enum const minimum maximum exclusiveMinimum exclusiveMaximum multipleOf minLength maxLength pattern allOf anyOf oneOf not if then else additionalProperties $defs $ref $schema title description $comment format default examples".split())
+SUPPORTED = set("type required properties patternProperties minProperties maxProperties prefixItems items minItems maxItems uniqueItems contains minContains maxContains enum const minimum maximum exclusiveMinimum exclusiveMaximum multipleOf minLength maxLength pattern allOf anyOf oneOf not if then else dependentRequired dependentSchemas additionalProperties $defs $ref $schema title description $comment format default examples".split())
 COUNTS = {"minLength", "maxLength", "minItems", "maxItems", "minProperties", "maxProperties", "minContains", "maxContains"}
 
 
@@ -69,7 +69,7 @@ def limitation(root):
                 found.append((here, "UnsupportedFeature", "exceeds the supported", "Count parameters exceed the implementation limit of 1000000000"))
             if keyword == "pattern" and regex_limit(value):
                 found.append((here, "UnsupportedFeature", "not a pattern this tool reads", "Regex uses a mechanism outside the declared subset"))
-            if keyword in {"properties", "$defs", "patternProperties"}:
+            if keyword in {"properties", "$defs", "patternProperties", "dependentSchemas"}:
                 for name, sub in value.items():
                     location = here + "[" + json.dumps(name, ensure_ascii=False) + "]" if keyword == "patternProperties" else child(here, name)
                     if keyword == "patternProperties" and regex_limit(name):
