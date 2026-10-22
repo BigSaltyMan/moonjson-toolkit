@@ -1,4 +1,305 @@
 ///|
+async test "schema validation report: valid and invalid input" {
+  let scratch = Scratch::named("schema_validation_report_verdict")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  for
+    (schema, input, code, location) in [
+      (
+        "{\"properties\":{\"name\":{\"type\":\"string\"}}}", "{\"name\":\"Li\"}",
+        0, "",
+      ),
+      (
+        "{\"properties\":{\"name\":{\"type\":\"string\"}}}", "{\"name\":1}", 1, "name",
+      ),
+      ("false", "null", 1, ""),
+      ("true", "null", 0, ""),
+    ] {
+    let result = run_against_schema(
+      scratch,
+      input,
+      schema,
+      ["--schema-output=json"],
+      analyzer,
+    )
+    assert_eq(result.code, code)
+    let report = if code == 0 {
+      assert_eq(result.err, "")
+      report_json(result.out)
+    } else {
+      assert_eq(result.out, "")
+      report_json(result.err)
+    }
+    assert_true(report_field(report, "reportVersion") is Number(raw="1"))
+    assert_true(report_field(report, "reportType") is Text(value="validation"))
+    assert_true(
+      report_field(report, "schemaFile") is Text(value=path) &&
+      path == scratch.schema,
+    )
+    assert_true(
+      report_field(report, "inputFile") is Text(value=path) &&
+      path == scratch.input,
+    )
+    let issues = report_issues(report)
+    if code == 0 {
+      assert_true(report_field(report, "status") is Text(value="valid"))
+      assert_eq(issues.length(), 0)
+    } else {
+      assert_true(report_field(report, "status") is Text(value="invalid"))
+      assert_eq(issues.length(), 1)
+      assert_true(report_field(issues[0], "stage") is Text(value="input"))
+      assert_true(
+        report_field(issues[0], "kind") is Text(value="ValidationError"),
+      )
+      assert_true(
+        report_field(issues[0], "location") is Text(value=actual) &&
+        actual == location,
+      )
+    }
+  }
+  let stdin_report = schema_validation_report(
+    scratch.schema,
+    input_label(None),
+    "valid",
+    [],
+    0,
+  )
+  assert_true(
+    report_field(report_json(stdin_report.out), "inputFile")
+    is Text(value="<stdin>"),
+  )
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "schema validation report: input read and parse errors" {
+  let scratch = Scratch::named("schema_validation_report_input_errors")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  @fs.write_file(scratch.schema, "true")
+  discard(scratch.input)
+  for
+    (source, kind, extra) in [
+      (None, "ReadError", []),
+      (Some("{"), "ParseError", []),
+      (Some("[[0]]"), "ParseError", ["--max-depth", "0"]),
+    ] {
+    match source {
+      Some(text) => @fs.write_file(scratch.input, text)
+      None => ()
+    }
+    let result = run(
+      [
+        "-v",
+        "--schema",
+        scratch.schema,
+        "-f",
+        scratch.input,
+        "--schema-output=json",
+      ] +
+      extra,
+      analyze=analyzer.analyzer(),
+    )
+    assert_eq(result.code, 1)
+    assert_eq(result.out, "")
+    let report = report_json(result.err)
+    assert_true(report_field(report, "status") is Text(value="error"))
+    let issues = report_issues(report)
+    assert_eq(issues.length(), 1)
+    assert_true(report_field(issues[0], "stage") is Text(value="input"))
+    assert_true(
+      report_field(issues[0], "kind") is Text(value=actual) && actual == kind,
+    )
+    assert_true(report_field(issues[0], "location") is Null)
+    assert_true(
+      report_field(issues[0], "message") is Text(value=message) && message != "",
+    )
+  }
+  assert_eq(analyzer.calls, 0)
+  discard(scratch.input)
+  discard(scratch.schema)
+}
+
+///|
+async test "schema validation report: schema errors precede input reads" {
+  let scratch = Scratch::named("schema_validation_report_schema_errors")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  discard(scratch.input)
+  discard(scratch.schema)
+  for
+    (schema, kind, location) in [
+      (None, "ReadError", None),
+      (Some("{"), "ParseError", None),
+      (Some("{\"minLength\":-1}"), "InvalidSchema", Some("minLength")),
+      (
+        Some("{\"unevaluatedProperties\":false}"),
+        "UnsupportedFeature",
+        Some("unevaluatedProperties"),
+      ),
+    ] {
+    match schema {
+      Some(text) => @fs.write_file(scratch.schema, text)
+      None => ()
+    }
+    let result = run(
+      [
+        "-v",
+        "--schema",
+        scratch.schema,
+        "-f",
+        scratch.input,
+        "--schema-output=json",
+      ],
+      analyze=analyzer.analyzer(),
+    )
+    assert_eq(result.code, 2)
+    assert_eq(result.out, "")
+    let report = report_json(result.err)
+    assert_true(report_field(report, "status") is Text(value="error"))
+    assert_true(
+      report_field(report, "inputFile") is Text(value=path) &&
+      path == scratch.input,
+    )
+    let issues = report_issues(report)
+    assert_eq(issues.length(), 1)
+    assert_true(report_field(issues[0], "stage") is Text(value="schema"))
+    assert_true(
+      report_field(issues[0], "kind") is Text(value=actual) && actual == kind,
+    )
+    match location {
+      Some(expected) =>
+        assert_true(
+          report_field(issues[0], "location") is Text(value=actual) &&
+          actual == expected,
+        )
+      None => assert_true(report_field(issues[0], "location") is Null)
+    }
+  }
+  assert_false(exists(scratch.input))
+  assert_eq(analyzer.calls, 0)
+  discard(scratch.schema)
+}
+
+///|
+async test "schema validation report: evaluation failures retain pointers" {
+  let scratch = Scratch::named("schema_validation_report_cycle")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let result = run_against_schema(
+    scratch,
+    "{\"loop\":1}",
+    "{\"properties\":{\"loop\":{\"$ref\":\"#/properties/loop\"}}}",
+    ["--schema-output=json"],
+    analyzer,
+  )
+  assert_eq(result.code, 2)
+  assert_eq(result.out, "")
+  let report = report_json(result.err)
+  assert_true(report_field(report, "status") is Text(value="error"))
+  let issues = report_issues(report)
+  assert_eq(issues.length(), 1)
+  assert_true(report_field(issues[0], "stage") is Text(value="evaluation"))
+  assert_true(report_field(issues[0], "kind") is Text(value="ReferenceCycle"))
+  assert_true(report_field(issues[0], "location") is Null)
+  assert_true(report_field(issues[0], "instancePointer") is Text(value="/loop"))
+  assert_true(
+    report_field(issues[0], "schemaPointer")
+    is Text(value="/properties/loop/$ref"),
+  )
+  let limit = schema_evaluation_issue({
+    kind: ResourceLimit,
+    message: "node visit limit exceeded",
+    instance_path: "",
+    schema_path: "",
+  })
+  assert_true(report_field(limit, "kind") is Text(value="ResourceLimit"))
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
+async test "schema validation report: escaping and text compatibility" {
+  let scratch = Scratch::named("schema_validation_report_中文")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let name = "中文\"\\\n"
+  let schema = @pjson.Object(members=[
+    (
+      "properties",
+      @pjson.Object(members=[(name, report_json("{\"type\":\"integer\"}"))]),
+    ),
+  ])
+  let input = @pjson.Object(members=[(name, @pjson.Text(value="bad"))])
+  let json_result = run_against_schema(
+    scratch,
+    format_compact(input),
+    format_compact(schema),
+    ["--schema-output=json"],
+    analyzer,
+  )
+  assert_eq(json_result.code, 1)
+  assert_eq(json_result.out, "")
+  let issue = report_issues(report_json(json_result.err))[0]
+  assert_true(
+    report_field(issue, "location") is Text(value=actual) && actual == name,
+  )
+  let message = "it is a string where the schema expects an integer"
+  assert_true(
+    report_field(issue, "message") is Text(value=actual) && actual == message,
+  )
+  for extra in [["--no-color"], ["--schema-output=text", "--no-color"]] {
+    let text = run_against_schema(
+      scratch,
+      format_compact(input),
+      format_compact(schema),
+      extra,
+      analyzer,
+    )
+    assert_eq(text.code, 1)
+    assert_eq(text.out, "")
+    assert_eq(
+      text.err,
+      "error: " +
+      scratch.input +
+      " does not match the schema\n  " +
+      name +
+      ": " +
+      message +
+      "\n",
+    )
+  }
+  let path = "C:\\中文\\\"input\"\n.json"
+  let diagnostic = "bad \"value\"\\\nnext line"
+  let escaped = schema_validation_report(
+    path,
+    path,
+    "error",
+    [schema_report_issue("ReadError", None, diagnostic, stage="input")],
+    1,
+  )
+  let report = report_json(escaped.err)
+  assert_true(
+    report_field(report, "schemaFile") is Text(value=actual) && actual == path,
+  )
+  assert_true(
+    report_field(report, "inputFile") is Text(value=actual) && actual == path,
+  )
+  assert_true(
+    report_field(report_issues(report)[0], "message") is Text(value=actual) &&
+    actual == diagnostic,
+  )
+  assert_false(escaped.err.contains("\u001b"))
+  // Sharing issue conversion must leave the independent-check report unchanged.
+  let independent = report_json(
+    schema_read_failure_json(SchemaReadError(path, diagnostic)).err,
+  )
+  match independent {
+    Object(members~) => assert_true(find_member(members, "reportType") is None)
+    _ => abort("expected report object")
+  }
+  match report_issues(independent)[0] {
+    Object(members~) => assert_true(find_member(members, "stage") is None)
+    _ => abort("expected issue object")
+  }
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
 fn report_field(report : @pjson.Json, name : String) -> @pjson.Json {
   match report {
     Object(members~) =>

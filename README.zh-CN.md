@@ -123,7 +123,8 @@ Options:
       --check-schema <path>
                          Compile a Schema without reading business JSON
       --schema-output <text|json>
-                         Report format for --check-schema only (default: text)
+                         Report format for --check-schema or -v --schema
+                         (default: text)
   -h, --help             Show this message and exit
   -V, --version          Show the version and exit
       --ai               Ask the AI for a quality report and suggestions
@@ -351,10 +352,22 @@ JSON Schema conformance. Use it alone or with --no-color; --help and
 --version keep their usual priority. Exit 0 means compilation succeeded;
 exit 2 means invalid arguments, an unreadable file, invalid JSON or a
 schema compilation problem. Example: moonjson-toolkit --check-schema schema.json
---schema-output json emits one JSON report: success on stdout (exit 0),
-read, parse or compile failure on stderr (exit 2), with the other stream
-empty. Argument errors remain text. The report is not a standards certification.
+For --check-schema, --schema-output json emits one JSON report: success
+on stdout (exit 0), read, parse or compile failure on stderr (exit 2),
+with the other stream empty. Argument errors remain text. Reports are not
+standards certification.
 Example: moonjson-toolkit --check-schema schema.json --schema-output json
+
+JSON reports also support single-document -v --schema: use one --file or
+omit it for stdin. Batches, JSONL, AI, statistics, transforms and exports
+cannot be combined with this mode; --max-depth and --no-color are allowed.
+A valid input is reported on stdout (exit 0). An invalid input or an input
+read/parse error is reported on stderr (exit 1); schema or evaluation
+errors use stderr (exit 2). The other stream stays empty. Reports include
+reportType validation, status valid/invalid/error and issue stage
+schema/input/evaluation. Locations use display paths; evaluation errors
+have separate instancePointer and schemaPointer JSON Pointers.
+Example: moonjson-toolkit -v --schema schema.json -f data.json --schema-output json
 
 Exit codes:
   0  success
@@ -797,7 +810,7 @@ moonjson-toolkit --check-schema schema.json --schema-output json
 ```
 
 等号写法 `--schema-output=json` 效果相同；指定 `text` 或省略该选项时保留默认文本报告。
-此选项只能与 `--check-schema` 同用。成功时退出 `0`，stdout 输出一个完整 JSON 文档，
+独立检查 `--check-schema` 成功时退出 `0`，stdout 输出一个完整 JSON 文档，
 stderr 为空；读取、解析或编译失败时退出 `2`，stderr 输出一个完整 JSON 文档，stdout 为空。
 参数错误和模式冲突仍使用普通文本诊断。
 每项问题包含 `kind`、`location` 和 `message`；类别为 `ReadError`、`ParseError`、
@@ -805,6 +818,34 @@ stderr 为空；读取、解析或编译失败时退出 `2`，stderr 输出一�
 位置显示方式，不是 JSON Pointer；读取、解析失败时为 `null`。报告不含 ANSI 颜色代码。
 `reportVersion` 为 `1`。`supported` 只表示能在本工具的子集中编译，`true` 和 `false` 都可得到
 该状态；JSON 报告不代表标准兼容性认证。
+
+单文档业务 JSON 校验也可以输出结构化报告：
+
+```sh
+moonjson-toolkit -v --schema schema.json -f data.json --schema-output json
+```
+
+省略 `-f` 时读取 stdin，报告中的 `inputFile` 为 `"<stdin>"`。
+JSON 校验报告必须同时指定 `-v --schema`，最多允许一个输入文件；JSONL、AI、统计、
+结构变换和其他导出模式会在读取文件前被拒绝。允许 `--max-depth` 和 `--no-color`。
+先完成 Schema 编译，再读取业务输入；默认文本输出保持不变。
+
+| 结果 | status | 输出流 | 退出码 |
+|---|---|---|---|
+| 输入符合 Schema | `valid` | stdout | `0` |
+| 输入不符合约束 | `invalid` | stderr | `1` |
+| 输入读取或解析失败 | `error` | stderr | `1` |
+| Schema 读取、解析或编译失败 | `error` | stderr | `2` |
+| 引用循环或资源超限 | `error` | stderr | `2` |
+
+选定的输出流中只有一个完整 JSON 文档，另一个流为空。报告包含 `reportVersion: 1`、
+`reportType: "validation"`、`schemaFile`、`inputFile`、`status` 和 `issues`。
+每项问题的 `stage` 为 `schema`、`input` 或 `evaluation`。普通违规的类别为
+`ValidationError`，`location` 保留 `SchemaError.path` 的显示路径，不是 JSON Pointer。
+读取、解析问题分别为 `ReadError`、`ParseError`，`location` 为 `null`；Schema 编译问题
+保留原有类别。执行失败为 `ReferenceCycle` 或 `ResourceLimit`，`location` 为 `null`，
+另用 `instancePointer`、`schemaPointer` 保存现有 RFC 6901 指针，空指针表示根节点。
+参数错误仍使用文本。独立检查报告的格式保持不变，两种报告均不代表完整的标准兼容性认证。
 
 `--schema <path>` 拿输入去比对一份 JSON Schema，而不是把它打印出来。它和 `-v` 一起读 ——
 后者要的正是一个判断而不是一份文档 —— 两者合起来回答的，正是写一份 schema 时想问的那个

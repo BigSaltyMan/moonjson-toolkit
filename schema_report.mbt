@@ -20,8 +20,9 @@ fn schema_report_issue(
   kind : String,
   location : String?,
   message : String,
+  stage? : String = "",
 ) -> @pjson.Json {
-  @pjson.Object(members=[
+  let members = [
     ("kind", @pjson.Text(value=kind)),
     (
       "location",
@@ -31,14 +32,34 @@ fn schema_report_issue(
       },
     ),
     ("message", @pjson.Text(value=message)),
-  ])
+  ]
+  @pjson.Object(
+    members=if stage == "" {
+      members
+    } else {
+      [("stage", @pjson.Text(value=stage))] + members
+    },
+  )
 }
 
 ///|
-fn schema_read_failure_json(error : SchemaReadFailure) -> RunResult {
-  let (path, issues) = match error {
+fn schema_parse_message(diagnostic : JsonDiagnostic) -> String {
+  "line " +
+  diagnostic.line.to_string() +
+  ", column " +
+  diagnostic.column.to_string() +
+  ": " +
+  diagnostic.message
+}
+
+///|
+fn schema_read_issues(
+  error : SchemaReadFailure,
+  stage? : String = "",
+) -> (String, Array[@pjson.Json]) {
+  match error {
     SchemaReadError(path, message) =>
-      (path, [schema_report_issue("ReadError", None, message)])
+      (path, [schema_report_issue("ReadError", None, message, stage~)])
     SchemaParseError(path, diagnostic) =>
       (
         path,
@@ -46,12 +67,8 @@ fn schema_read_failure_json(error : SchemaReadFailure) -> RunResult {
           schema_report_issue(
             "ParseError",
             None,
-            "line " +
-            diagnostic.line.to_string() +
-            ", column " +
-            diagnostic.column.to_string() +
-            ": " +
-            diagnostic.message,
+            schema_parse_message(diagnostic),
+            stage~,
           ),
         ],
       )
@@ -64,9 +81,55 @@ fn schema_read_failure_json(error : SchemaReadFailure) -> RunResult {
             UnsupportedFeature => "UnsupportedFeature"
             UnsupportedVersion => "UnsupportedVersion"
           }
-          schema_report_issue(kind, Some(problem.path), problem.message)
+          schema_report_issue(kind, Some(problem.path), problem.message, stage~)
         }),
       )
   }
+}
+
+///|
+fn schema_read_failure_json(error : SchemaReadFailure) -> RunResult {
+  let (path, issues) = schema_read_issues(error)
   failure(schema_check_json(path, issues), exit_usage_error)
+}
+
+///|
+fn schema_validation_report(
+  schema_path : String,
+  source : String,
+  status : String,
+  issues : Array[@pjson.Json],
+  code : Int,
+) -> RunResult {
+  let text = format_compact(
+    @pjson.Object(members=[
+      ("reportVersion", @pjson.Number(raw="1")),
+      ("reportType", @pjson.Text(value="validation")),
+      ("schemaFile", @pjson.Text(value=schema_path)),
+      ("inputFile", @pjson.Text(value=source)),
+      ("status", @pjson.Text(value=status)),
+      ("issues", @pjson.Array(items=issues)),
+    ]),
+  )
+  if code == exit_success {
+    { out: text + "\n", err: "", code, }
+  } else {
+    failure(text, code)
+  }
+}
+
+///|
+fn schema_evaluation_issue(error : SchemaEvaluationError) -> @pjson.Json {
+  let kind = match error.kind {
+    ReferenceCycle => "ReferenceCycle"
+    ResourceLimit => "ResourceLimit"
+  }
+  @pjson.Object(members=[
+    ("stage", @pjson.Text(value="evaluation")),
+    ("kind", @pjson.Text(value=kind)),
+    ("location", @pjson.Null),
+    ("message", @pjson.Text(value=error.message)),
+    ("instancePointer", @pjson.Text(value=error.instance_path)),
+    ("schemaPointer", @pjson.Text(value=error.schema_path)),
+  ])
 }

@@ -170,7 +170,44 @@ fn schema_report(errors : Array[SchemaError]) -> String {
 /// than to answer for the first of them and quietly drop the rest.
 fn validate_options(options : CliOptions) -> Result[Unit, String] {
   if options.schema_output != None && options.check_schema == None {
-    return Err("--schema-output requires --check-schema")
+    if !options.validate || options.schema == None {
+      return Err("--schema-output requires --check-schema or -v --schema")
+    }
+    if options.schema_output == Some("json") {
+      if options.files.length() > 1 {
+        return Err("--schema-output json supports only a single input file")
+      }
+      for
+        (present, option) in [
+          (options.jsonl, "--jsonl"),
+          (options.ai, "--ai"),
+          (options.model != None, "--model"),
+          (options.ai_base_url != None, "--ai-base-url"),
+          (options.moon_deps, "--moon-deps"),
+          (options.stats, "--stats"),
+          (options.json_out != None, "--json-out"),
+          (options.emit_moonbit != None, "--emit-moonbit"),
+          (options.paths, "--paths"),
+          (options.keys_only, "--keys-only"),
+          (options.flatten, "--flatten"),
+          (options.unflatten, "--unflatten"),
+          (options.prune_null, "--prune-null"),
+          (options.prune_empty, "--prune-empty"),
+          (options.select != None, "--select"),
+          (options.sort_by != None, "--sort-by"),
+          (options.unique != None, "--unique"),
+          (options.trim_strings, "--trim-strings"),
+          (options.compact, "--compact"),
+          (options.sort_keys, "--sort-keys"),
+          (options.indent != default_indent, "--indent"),
+          (options.fail_fast, "--fail-fast"),
+          (options.continue_on_error, "--continue-on-error"),
+        ] {
+        if present {
+          return Err("--schema-output json cannot be combined with " + option)
+        }
+      }
+    }
   }
   if options.check_schema != None {
     for
@@ -603,6 +640,11 @@ pub async fn run(
       }
     None => ()
   }
+  match (options.schema_output, options.schema) {
+    (Some("json"), Some(path)) =>
+      return run_schema_validation_report(options, path)
+    _ => ()
+  }
   // The schema is read before any input is, so that a run with a schema it
   // cannot read costs nothing to answer and says nothing about the documents it
   // was never going to check. It is one schema for the whole run, which is why
@@ -666,6 +708,86 @@ pub async fn run(
     append_summary(out, passed, failures)
   }
   { out: out.to_string(), err: err.to_string(), code, }
+}
+
+///|
+/// Compile before reading the single input and return before any document
+/// formatting, statistics, transforms or AI work can run.
+async fn run_schema_validation_report(
+  options : CliOptions,
+  schema_path : String,
+) -> RunResult {
+  let input = if options.files.is_empty() {
+    None
+  } else {
+    Some(options.files[0])
+  }
+  let source = input_label(input)
+  let compiled = match read_schema(schema_path) {
+    Ok(compiled) => compiled
+    Err(error) => {
+      let (_, issues) = schema_read_issues(error, stage="schema")
+      return schema_validation_report(
+        schema_path, source, "error", issues, exit_usage_error,
+      )
+    }
+  }
+  let text = match read_input(input) {
+    Ok(text) => text
+    Err(message) =>
+      return schema_validation_report(
+        schema_path,
+        source,
+        "error",
+        [schema_report_issue("ReadError", None, message, stage="input")],
+        exit_input_error,
+      )
+  }
+  let json = match parse_with_diagnostic(text, options.max_depth) {
+    Ok(json) => json
+    Err(diagnostic) =>
+      return schema_validation_report(
+        schema_path,
+        source,
+        "error",
+        [
+          schema_report_issue(
+            "ParseError",
+            None,
+            schema_parse_message(diagnostic),
+            stage="input",
+          ),
+        ],
+        exit_input_error,
+      )
+  }
+  match validate_compiled_schema(json, compiled) {
+    Ok([]) =>
+      schema_validation_report(schema_path, source, "valid", [], exit_success)
+    Ok(errors) =>
+      schema_validation_report(
+        schema_path,
+        source,
+        "invalid",
+        errors.map(fn(error) {
+          schema_report_issue(
+            "ValidationError",
+            Some(error.path),
+            error.message,
+            stage="input",
+          )
+        }),
+        exit_input_error,
+      )
+    Err(error) =>
+      schema_validation_report(
+        schema_path,
+        source,
+        "error",
+        [schema_evaluation_issue(error)],
+        exit_usage_error,
+      )
+  }
 }
 
 ///|

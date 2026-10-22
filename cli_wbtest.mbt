@@ -1,4 +1,63 @@
 ///|
+async test "schema validation report: parameter scope" {
+  for extra in [[], ["-f", "data.json"], ["--max-depth", "10", "--no-color"]] {
+    let options = cli_ok(
+      ["-v", "--schema", "schema.json", "--schema-output=json"] + extra,
+    )
+    assert_true(validate_options(options) is Ok(_))
+  }
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  for
+    (args, reason) in [
+      (["--schema-output=json"], "requires --check-schema or -v --schema"),
+      (["-v", "--schema-output=json"], "requires --check-schema or -v --schema"),
+      (
+        ["--schema", "missing.json", "--schema-output=json"],
+        "requires --check-schema or -v --schema",
+      ),
+      (
+        [
+          "-v", "--schema", "missing.json", "-f", "one.json", "-f", "two.json", "--schema-output=json",
+        ],
+        "only a single input file",
+      ),
+    ] {
+    let result = run(args + ["--no-color"], analyze=analyzer.analyzer())
+    assert_eq(result.code, 2)
+    assert_eq(result.out, "")
+    assert_true(result.err.has_prefix("error: "))
+    assert_true(result.err.contains(reason))
+    assert_false(result.err.contains("cannot read"))
+  }
+  for
+    extra in [
+      ["--jsonl"],
+      ["--ai"],
+      ["--stats"],
+      ["--flatten"],
+      ["--json-out", "unused.json"],
+      ["--emit-moonbit"],
+      ["--paths"],
+      ["--moon-deps"],
+    ] {
+    let result = run(
+      ["-v", "--schema", "missing.json", "--schema-output=json", "--no-color"] +
+      extra,
+      analyze=analyzer.analyzer(),
+    )
+    assert_eq(result.code, 2)
+    assert_eq(result.out, "")
+    assert_true(
+      result.err.has_prefix(
+        "error: --schema-output json cannot be combined with ",
+      ),
+    )
+    assert_false(result.err.contains("cannot read"))
+  }
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
 async test "schema report: parameter parsing and mode requirements" {
   assert_eq(CliOptions::default().schema_output, None)
   for format in ["text", "json"] {
@@ -22,7 +81,7 @@ async test "schema report: parameter parsing and mode requirements" {
     assert_true(cli_err(args).contains("--schema-output"))
   }
   let analyzer = StubAnalyzer::new(Ok("unused"))
-  for extra in [[], ["-v", "--schema", "missing.json"]] {
+  for extra in [[], ["-v"]] {
     let result = run(
       ["--schema-output", "json", "--no-color"] + extra,
       analyze=analyzer.analyzer(),
@@ -30,7 +89,9 @@ async test "schema report: parameter parsing and mode requirements" {
     assert_eq(result.code, 2)
     assert_eq(result.out, "")
     assert_true(
-      result.err.has_prefix("error: --schema-output requires --check-schema\n"),
+      result.err.has_prefix(
+        "error: --schema-output requires --check-schema or -v --schema\n",
+      ),
     )
     assert_false(result.err.contains("cannot read"))
   }
