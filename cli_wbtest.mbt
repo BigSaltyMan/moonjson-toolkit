@@ -1,4 +1,56 @@
 ///|
+async test "schema report: parameter parsing and mode requirements" {
+  assert_eq(CliOptions::default().schema_output, None)
+  for format in ["text", "json"] {
+    for
+      args in [
+        ["--check-schema", "schema.json", "--schema-output", format],
+        ["--schema-output=" + format, "--check-schema=schema.json"],
+      ] {
+      assert_eq(cli_ok(args).schema_output, Some(format))
+    }
+  }
+  for
+    args in [
+      ["--schema-output"],
+      ["--schema-output="],
+      ["--schema-output", ""],
+      ["--schema-output", "yaml"],
+      ["--schema-output=JSON"],
+      ["--schema-output", "--check-schema", "schema.json"],
+    ] {
+    assert_true(cli_err(args).contains("--schema-output"))
+  }
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  for extra in [[], ["-v", "--schema", "missing.json"]] {
+    let result = run(
+      ["--schema-output", "json", "--no-color"] + extra,
+      analyze=analyzer.analyzer(),
+    )
+    assert_eq(result.code, 2)
+    assert_eq(result.out, "")
+    assert_true(
+      result.err.has_prefix("error: --schema-output requires --check-schema\n"),
+    )
+    assert_false(result.err.contains("cannot read"))
+  }
+  let conflict = run(
+    [
+      "--check-schema", "missing.json", "--schema-output=json", "--ai", "--no-color",
+    ],
+    analyze=analyzer.analyzer(),
+  )
+  assert_eq(conflict.code, 2)
+  assert_eq(conflict.out, "")
+  assert_true(
+    conflict.err.has_prefix(
+      "error: --check-schema cannot be combined with --ai\n",
+    ),
+  )
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
 test "schema check: parameter parsing" {
   assert_eq(CliOptions::default().check_schema, None)
   for

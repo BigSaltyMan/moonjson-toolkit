@@ -122,6 +122,8 @@ Options:
       --schema <path>    Check the input against the JSON Schema in <path>
       --check-schema <path>
                          Compile a Schema without reading business JSON
+      --schema-output <text|json>
+                         Report format for --check-schema only (default: text)
   -h, --help             Show this message and exit
   -V, --version          Show the version and exit
       --ai               Ask the AI for a quality report and suggestions
@@ -349,6 +351,10 @@ JSON Schema conformance. Use it alone or with --no-color; --help and
 --version keep their usual priority. Exit 0 means compilation succeeded;
 exit 2 means invalid arguments, an unreadable file, invalid JSON or a
 schema compilation problem. Example: moonjson-toolkit --check-schema schema.json
+--schema-output json emits one JSON report: success on stdout (exit 0),
+read, parse or compile failure on stderr (exit 2), with the other stream
+empty. Argument errors remain text. The report is not a standards certification.
+Example: moonjson-toolkit --check-schema schema.json --schema-output json
 
 Exit codes:
   0  success
@@ -782,6 +788,23 @@ moonjson-toolkit --check-schema schema.json
 参数错误返回 `2`，原因写入 stderr，stdout 为空。
 此模式与业务输入、数据校验、AI、依赖分析、统计、结构变换及导出选项分开使用。
 允许 `--no-color`，帮助和版本选项保持原有优先级。
+
+脚本或编辑器集成可请求机器可读报告：
+
+```sh
+moonjson-toolkit --check-schema schema.json --schema-output json
+# {"reportVersion":1,"schemaFile":"schema.json","status":"supported","issues":[]}
+```
+
+等号写法 `--schema-output=json` 效果相同；指定 `text` 或省略该选项时保留默认文本报告。
+此选项只能与 `--check-schema` 同用。成功时退出 `0`，stdout 输出一个完整 JSON 文档，
+stderr 为空；读取、解析或编译失败时退出 `2`，stderr 输出一个完整 JSON 文档，stdout 为空。
+参数错误和模式冲突仍使用普通文本诊断。
+每项问题包含 `kind`、`location` 和 `message`；类别为 `ReadError`、`ParseError`、
+`InvalidSchema`、`UnsupportedFeature` 或 `UnsupportedVersion`。`location` 沿用现有 Schema
+位置显示方式，不是 JSON Pointer；读取、解析失败时为 `null`。报告不含 ANSI 颜色代码。
+`reportVersion` 为 `1`。`supported` 只表示能在本工具的子集中编译，`true` 和 `false` 都可得到
+该状态；JSON 报告不代表标准兼容性认证。
 
 `--schema <path>` 拿输入去比对一份 JSON Schema，而不是把它打印出来。它和 `-v` 一起读 ——
 后者要的正是一个判断而不是一份文档 —— 两者合起来回答的，正是写一份 schema 时想问的那个

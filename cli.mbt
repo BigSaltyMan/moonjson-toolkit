@@ -43,6 +43,7 @@ pub(all) struct CliOptions {
   mut validate : Bool
   mut schema : String?
   mut check_schema : String?
+  mut schema_output : String?
   mut help : Bool
   mut version : Bool
   mut ai : Bool
@@ -80,6 +81,7 @@ pub fn CliOptions::default() -> CliOptions {
     validate: false,
     schema: None,
     check_schema: None,
+    schema_output: None,
     help: false,
     version: false,
     ai: false,
@@ -125,6 +127,8 @@ pub fn usage() -> String {
     "      --schema <path>    Check the input against the JSON Schema in <path>",
     "      --check-schema <path>",
     "                         Compile a Schema without reading business JSON",
+    "      --schema-output <text|json>",
+    "                         Report format for --check-schema only (default: text)",
     "  -h, --help             Show this message and exit",
     "  -V, --version          Show the version and exit",
     "      --ai               Ask the AI for a quality report and suggestions",
@@ -352,6 +356,10 @@ pub fn usage() -> String {
     "--version keep their usual priority. Exit 0 means compilation succeeded;",
     "exit 2 means invalid arguments, an unreadable file, invalid JSON or a",
     "schema compilation problem. Example: moonjson-toolkit --check-schema schema.json",
+    "--schema-output json emits one JSON report: success on stdout (exit 0),",
+    "read, parse or compile failure on stderr (exit 2), with the other stream",
+    "empty. Argument errors remain text. The report is not a standards certification.",
+    "Example: moonjson-toolkit --check-schema schema.json --schema-output json",
     "",
     "Exit codes:",
     "  0  success",
@@ -508,6 +516,13 @@ fn apply_value_option(
         options.check_schema = Some(value)
         Ok(())
       }
+    "schema-output" =>
+      if value == "text" || value == "json" {
+        options.schema_output = Some(value)
+        Ok(())
+      } else {
+        Err("option --schema-output requires text or json")
+      }
     "sort-by" => {
       options.sort_by = Some(value)
       Ok(())
@@ -626,11 +641,11 @@ pub fn CliOptions::parse(args : Array[String]) -> Result[CliOptions, String] {
                 options.emit_moonbit = Some(default_root_name)
               }
           }
-        "check-schema" => {
+        "check-schema" | "schema-output" => {
           if inline == None && index < total && args[index].has_prefix("-") {
-            return Err("option --check-schema requires a value")
+            return Err("option --" + name + " requires a value")
           }
-          match option_value("--check-schema", inline, args, index) {
+          match option_value("--" + name, inline, args, index) {
             Err(message) => return Err(message)
             Ok((value, next)) =>
               match apply_value_option(options, name, value) {

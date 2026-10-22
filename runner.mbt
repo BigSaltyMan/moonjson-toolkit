@@ -74,6 +74,14 @@ async fn read_input(input : String?) -> Result[String, String] {
 }
 
 ///|
+/// Preserve the original failure until the caller chooses a report format.
+priv enum SchemaReadFailure {
+  SchemaReadError(String, String)
+  SchemaParseError(String, JsonDiagnostic)
+  SchemaCompileError(String, Array[SchemaProblem])
+}
+
+///|
 /// Read the schema the command line named.
 ///
 /// Read once per run rather than once per input: the same schema is applied to
@@ -86,51 +94,56 @@ async fn read_input(input : String?) -> Result[String, String] {
 /// The depth limit is not applied to the schema: `--max-depth` says how deep a
 /// document this run reads, and the schema is what the documents are read
 /// against rather than one of them.
-async fn read_schema(path : String) -> Result[CompiledSchema, RunResult] {
+async fn read_schema(
+  path : String,
+) -> Result[CompiledSchema, SchemaReadFailure] {
   let text = match read_file(path) {
     Ok(text) => text
-    Err(message) =>
-      return Err(
-        failure(
-          error_prefix() + "cannot read the schema " + path + ": " + message,
-          exit_usage_error,
-        ),
-      )
+    Err(message) => return Err(SchemaReadError(path, message))
   }
   let schema = match parse_with_diagnostic(text, None) {
     Ok(schema) => schema
-    Err(diagnostic) =>
-      return Err(
-        failure(
-          error_prefix() +
-          "the schema " +
-          path +
-          " is not valid JSON\n" +
-          diagnostic.render(),
-          exit_usage_error,
-        ),
-      )
+    Err(diagnostic) => return Err(SchemaParseError(path, diagnostic))
   }
   match compile_schema(schema) {
     Ok(compiled) => Ok(compiled)
-    Err(problems) => {
+    Err(problems) => Err(SchemaCompileError(path, problems))
+  }
+}
+
+///|
+fn schema_read_failure_text(error : SchemaReadFailure) -> RunResult {
+  match error {
+    SchemaReadError(path, message) =>
+      failure(
+        error_prefix() + "cannot read the schema " + path + ": " + message,
+        exit_usage_error,
+      )
+    SchemaParseError(path, diagnostic) =>
+      failure(
+        error_prefix() +
+        "the schema " +
+        path +
+        " is not valid JSON\n" +
+        diagnostic.render(),
+        exit_usage_error,
+      )
+    SchemaCompileError(path, problems) => {
       let reason = if problems.any(fn(problem) { problem.kind != InvalidSchema }) {
         " contains unsupported features"
       } else {
         " is not one this tool can read"
       }
-      Err(
-        failure(
-          error_prefix() +
-          "the schema " +
-          path +
-          reason +
-          "\n" +
-          problems
-          .map(fn(problem) { "  " + render_schema_problem(problem) })
-          .join("\n"),
-          exit_usage_error,
-        ),
+      failure(
+        error_prefix() +
+        "the schema " +
+        path +
+        reason +
+        "\n" +
+        problems
+        .map(fn(problem) { "  " + render_schema_problem(problem) })
+        .join("\n"),
+        exit_usage_error,
       )
     }
   }
@@ -156,6 +169,9 @@ fn schema_report(errors : Array[SchemaError]) -> String {
 /// command line that names more than one, and the answer is to refuse rather
 /// than to answer for the first of them and quietly drop the rest.
 fn validate_options(options : CliOptions) -> Result[Unit, String] {
+  if options.schema_output != None && options.check_schema == None {
+    return Err("--schema-output requires --check-schema")
+  }
   if options.check_schema != None {
     for
       (present, option) in [
@@ -568,13 +584,22 @@ pub async fn run(
       return match read_schema(path) {
         Ok(_) =>
           {
-            out: "Schema check passed: " +
-            path +
-            "\nThe schema compiles within this tool's supported subset.\n",
+            out: if options.schema_output == Some("json") {
+              schema_check_json(path, []) + "\n"
+            } else {
+              "Schema check passed: " +
+              path +
+              "\nThe schema compiles within this tool's supported subset.\n"
+            },
             err: "",
             code: exit_success,
           }
-        Err(result) => result
+        Err(error) =>
+          if options.schema_output == Some("json") {
+            schema_read_failure_json(error)
+          } else {
+            schema_read_failure_text(error)
+          }
       }
     None => ()
   }
@@ -586,7 +611,7 @@ pub async fn run(
     Some(path) =>
       match read_schema(path) {
         Ok(schema) => Some(schema)
-        Err(result) => return result
+        Err(error) => return schema_read_failure_text(error)
       }
     None => None
   }

@@ -1,4 +1,230 @@
 ///|
+fn report_field(report : @pjson.Json, name : String) -> @pjson.Json {
+  match report {
+    Object(members~) =>
+      match find_member(members, name) {
+        Some(value) => value
+        None => abort("missing report field: " + name)
+      }
+    _ => abort("expected a report object")
+  }
+}
+
+///|
+fn report_json(text : String) -> @pjson.Json {
+  match parse_with_diagnostic(text, None) {
+    Ok(json) => json
+    Err(_) => abort("expected exactly one JSON document")
+  }
+}
+
+///|
+fn report_issues(report : @pjson.Json) -> Array[@pjson.Json] {
+  match report_field(report, "issues") {
+    Array(items~) => items
+    _ => abort("expected an issues array")
+  }
+}
+
+///|
+async test "schema report: successful reports" {
+  let scratch = Scratch::named("schema_report_success")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  for schema in ["{}", "true", "false"] {
+    @fs.write_file(scratch.schema, schema)
+    let result = run(
+      ["--check-schema", scratch.schema, "--schema-output", "json"],
+      analyze=analyzer.analyzer(),
+    )
+    assert_eq(result.code, 0)
+    assert_eq(result.err, "")
+    let report = report_json(result.out)
+    assert_true(report_field(report, "reportVersion") is Number(raw="1"))
+    assert_true(report_field(report, "status") is Text(value="supported"))
+    assert_true(
+      report_field(report, "schemaFile") is Text(value=path) &&
+      path == scratch.schema,
+    )
+    assert_eq(report_issues(report).length(), 0)
+    assert_false(result.out.contains("\u001b"))
+  }
+  assert_eq(analyzer.calls, 0)
+  discard(scratch.schema)
+}
+
+///|
+async test "schema report: structured compilation problems" {
+  let scratch = Scratch::named("schema_report_compile")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  for
+    (schema, kind, location) in [
+      (
+        "{\"properties\":{\"name\":{\"minLength\":-1}}}", "InvalidSchema", "properties.name.minLength",
+      ),
+      (
+        "{\"unevaluatedProperties\":false}", "UnsupportedFeature", "unevaluatedProperties",
+      ),
+      (
+        "{\"$schema\":\"http://json-schema.org/draft-07/schema#\"}", "UnsupportedVersion",
+        "$schema",
+      ),
+      ("123", "InvalidSchema", ""),
+    ] {
+    @fs.write_file(scratch.schema, schema)
+    let result = run(
+      ["--check-schema", scratch.schema, "--schema-output=json"],
+      analyze=analyzer.analyzer(),
+    )
+    assert_eq(result.code, 2)
+    assert_eq(result.out, "")
+    let report = report_json(result.err)
+    assert_true(report_field(report, "reportVersion") is Number(raw="1"))
+    assert_true(
+      report_field(report, "schemaFile") is Text(value=path) &&
+      path == scratch.schema,
+    )
+    assert_true(report_field(report, "status") is Text(value="error"))
+    let issues = report_issues(report)
+    let original = schema_problems(report_json(schema))
+    assert_eq(issues.length(), 1)
+    assert_true(
+      report_field(issues[0], "kind") is Text(value=actual) && actual == kind,
+    )
+    assert_true(
+      report_field(issues[0], "location") is Text(value=actual) &&
+      actual == location,
+    )
+    assert_true(
+      report_field(issues[0], "message") is Text(value=actual) &&
+      actual == original[0].message,
+    )
+    assert_false(result.err.contains("\u001b"))
+  }
+  assert_eq(analyzer.calls, 0)
+  discard(scratch.schema)
+}
+
+///|
+async test "schema report: read and parse failures" {
+  let scratch = Scratch::named("schema_report_read_parse")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  discard(scratch.schema)
+  for
+    (kind, source) in [
+      ("ReadError", None),
+      ("ParseError", Some("{\n  \"type\":\n}")),
+    ] {
+    match source {
+      Some(text) => @fs.write_file(scratch.schema, text)
+      None => ()
+    }
+    let result = run(
+      ["--check-schema", scratch.schema, "--schema-output=json"],
+      analyze=analyzer.analyzer(),
+    )
+    assert_eq(result.code, 2)
+    assert_eq(result.out, "")
+    let report = report_json(result.err)
+    assert_true(
+      report_field(report, "schemaFile") is Text(value=path) &&
+      path == scratch.schema,
+    )
+    assert_true(report_field(report, "status") is Text(value="error"))
+    let issues = report_issues(report)
+    assert_eq(issues.length(), 1)
+    assert_true(
+      report_field(issues[0], "kind") is Text(value=actual) && actual == kind,
+    )
+    assert_true(report_field(issues[0], "location") is Null)
+    match report_field(issues[0], "message") {
+      Text(value=message) => {
+        assert_true(message != "")
+        if kind == "ParseError" {
+          assert_true(message.has_prefix("line 3, column 1: "))
+        }
+      }
+      _ => abort("expected a diagnostic message")
+    }
+    assert_false(result.err.contains("\u001b"))
+  }
+  assert_eq(analyzer.calls, 0)
+  discard(scratch.schema)
+}
+
+///|
+async test "schema report: escaping and text compatibility" {
+  let scratch = Scratch::named("schema_report_escape_中文")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  let name = "中文\"\\\n"
+  let schema = @pjson.Object(members=[
+    (
+      "properties",
+      @pjson.Object(members=[
+        (name, @pjson.Object(members=[("type", @pjson.Text(value=name))])),
+      ]),
+    ),
+  ])
+  @fs.write_file(scratch.schema, format_compact(schema))
+  let result = run(
+    ["--check-schema", scratch.schema, "--schema-output=json"],
+    analyze=analyzer.analyzer(),
+  )
+  assert_eq(result.code, 2)
+  assert_eq(result.out, "")
+  let issue = report_issues(report_json(result.err))[0]
+  let problem = schema_problems(schema)[0]
+  assert_true(
+    report_field(issue, "location") is Text(value=location) &&
+    location == problem.path,
+  )
+  assert_true(
+    report_field(issue, "message") is Text(value=message) &&
+    message == problem.message,
+  )
+  assert_true(problem.path.contains(name))
+  let expected = "error: the schema " +
+    scratch.schema +
+    " is not one this tool can read\n  " +
+    render_schema_problem(problem) +
+    "\n"
+  for extra in [["--no-color"], ["--schema-output=text", "--no-color"]] {
+    let text = run(
+      ["--check-schema", scratch.schema] + extra,
+      analyze=analyzer.analyzer(),
+    )
+    assert_eq(text.code, 2)
+    assert_eq(text.out, "")
+    assert_eq(text.err, expected)
+  }
+  // Synthetic path and I/O reason cover characters Windows cannot put in a filename.
+  let path = "C:\\中文\\\"schema\"\n.json"
+  let reason = "cannot read \"文件\"\\\nnext line"
+  set_color_enabled(true)
+  let failure = schema_read_failure_json(SchemaReadError(path, reason))
+  let parsed = report_json(failure.err)
+  assert_true(
+    report_field(parsed, "schemaFile") is Text(value=actual) && actual == path,
+  )
+  assert_true(
+    report_field(report_issues(parsed)[0], "message") is Text(value=actual) &&
+    actual == reason,
+  )
+  assert_false(failure.err.contains("\u001b"))
+  let parse_failure = schema_read_failure_json(
+    SchemaParseError(path, JsonDiagnostic::at("{", 1, reason)),
+  )
+  assert_true(
+    report_field(report_issues(report_json(parse_failure.err))[0], "message")
+    is Text(value=message) &&
+    message == "line 1, column 2: " + reason,
+  )
+  assert_false(parse_failure.err.contains("\u001b"))
+  set_color_enabled(false)
+  assert_eq(analyzer.calls, 0)
+  discard(scratch.schema)
+}
+
+///|
 async test "schema check: successful compilation" {
   let scratch = Scratch::named("schema_check_success")
   let analyzer = StubAnalyzer::new(Ok("unused"))

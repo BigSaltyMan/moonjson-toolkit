@@ -143,6 +143,8 @@ Options:
       --schema <path>    Check the input against the JSON Schema in <path>
       --check-schema <path>
                          Compile a Schema without reading business JSON
+      --schema-output <text|json>
+                         Report format for --check-schema only (default: text)
   -h, --help             Show this message and exit
   -V, --version          Show the version and exit
       --ai               Ask the AI for a quality report and suggestions
@@ -370,6 +372,10 @@ JSON Schema conformance. Use it alone or with --no-color; --help and
 --version keep their usual priority. Exit 0 means compilation succeeded;
 exit 2 means invalid arguments, an unreadable file, invalid JSON or a
 schema compilation problem. Example: moonjson-toolkit --check-schema schema.json
+--schema-output json emits one JSON report: success on stdout (exit 0),
+read, parse or compile failure on stderr (exit 2), with the other stream
+empty. Argument errors remain text. The report is not a standards certification.
+Example: moonjson-toolkit --check-schema schema.json --schema-output json
 
 Exit codes:
   0  success
@@ -852,6 +858,25 @@ JSON Schema conformance or that every input will pass. File, JSON, compilation
 and option errors return `2`, with diagnostics on stderr and empty stdout.
 Use this mode separately from input, validation, AI, analysis, transformation
 and export options. `--no-color` is allowed; help and version retain priority.
+
+For scripts and editor integrations, request a machine-readable report:
+
+```sh
+moonjson-toolkit --check-schema schema.json --schema-output json
+# {"reportVersion":1,"schemaFile":"schema.json","status":"supported","issues":[]}
+```
+
+`--schema-output=json` is equivalent; `text` or omission preserves the default
+text report. This option is only valid with `--check-schema`. Success writes
+one complete JSON document to stdout with exit `0` and empty stderr. Read,
+parse or compilation failures write one complete JSON document to stderr with
+exit `2` and empty stdout. Argument and mode-conflict errors remain plain text.
+Each issue has `kind`, `location` and `message`; kinds are `ReadError`,
+`ParseError`, `InvalidSchema`, `UnsupportedFeature` or `UnsupportedVersion`.
+`location` uses the existing Schema display location, not JSON Pointer; it is
+`null` for read and parse failures. Reports contain no ANSI colour codes.
+`reportVersion` is `1`. A `supported` status means compilation within this
+tool's subset, including for `true` and `false`; it is not standards certification.
 
 `--schema <path>` checks the input against a JSON Schema rather than printing
 it. It is read with `-v`, the flag that asks for a verdict rather than a
