@@ -156,6 +156,42 @@ fn schema_report(errors : Array[SchemaError]) -> String {
 /// command line that names more than one, and the answer is to refuse rather
 /// than to answer for the first of them and quietly drop the rest.
 fn validate_options(options : CliOptions) -> Result[Unit, String] {
+  if options.check_schema != None {
+    for
+      (present, option) in [
+        (options.files.length() > 0, "--file"),
+        (options.validate, "--validate"),
+        (options.schema != None, "--schema"),
+        (options.jsonl, "--jsonl"),
+        (options.ai, "--ai"),
+        (options.model != None, "--model"),
+        (options.ai_base_url != None, "--ai-base-url"),
+        (options.moon_deps, "--moon-deps"),
+        (options.stats, "--stats"),
+        (options.json_out != None, "--json-out"),
+        (options.emit_moonbit != None, "--emit-moonbit"),
+        (options.paths, "--paths"),
+        (options.keys_only, "--keys-only"),
+        (options.flatten, "--flatten"),
+        (options.unflatten, "--unflatten"),
+        (options.prune_null, "--prune-null"),
+        (options.prune_empty, "--prune-empty"),
+        (options.select != None, "--select"),
+        (options.sort_by != None, "--sort-by"),
+        (options.unique != None, "--unique"),
+        (options.trim_strings, "--trim-strings"),
+        (options.compact, "--compact"),
+        (options.sort_keys, "--sort-keys"),
+        (options.indent != default_indent, "--indent"),
+        (options.max_depth != None, "--max-depth"),
+        (options.fail_fast, "--fail-fast"),
+        (options.continue_on_error, "--continue-on-error"),
+      ] {
+      if present {
+        return Err("--check-schema cannot be combined with " + option)
+      }
+    }
+  }
   // Each undoes the other, so asking for both is not a pair of changes but a
   // question about which one was meant.
   if options.flatten && options.unflatten {
@@ -526,6 +562,21 @@ pub async fn run(
         "\nrun 'moonjson-toolkit --help' to see the available options",
         exit_usage_error,
       )
+  }
+  match options.check_schema {
+    Some(path) =>
+      return match read_schema(path) {
+        Ok(_) =>
+          {
+            out: "Schema check passed: " +
+            path +
+            "\nThe schema compiles within this tool's supported subset.\n",
+            err: "",
+            code: exit_success,
+          }
+        Err(result) => result
+      }
+    None => ()
   }
   // The schema is read before any input is, so that a run with a schema it
   // cannot read costs nothing to answer and says nothing about the documents it

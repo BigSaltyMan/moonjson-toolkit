@@ -99,7 +99,7 @@ moonjson-toolkit - format, validate and analyse JSON documents
 Usage:
   moonjson-toolkit [options]
 
-Input is read from standard input unless --file is given.
+Input is read from standard input unless --file or --check-schema is given.
 
 Options:
   -f, --file <path>      Read one or more input files instead of standard input
@@ -120,6 +120,8 @@ Options:
       --keys-only        Print only the paths that name an object member
   -v, --validate         Only check the input and report the first error
       --schema <path>    Check the input against the JSON Schema in <path>
+      --check-schema <path>
+                         Compile a Schema without reading business JSON
   -h, --help             Show this message and exit
   -V, --version          Show the version and exit
       --ai               Ask the AI for a quality report and suggestions
@@ -338,6 +340,15 @@ and a module required at more than one version, or a circular dependency,
 is reported beneath the tree. The tree is the whole of the output, so no
 other option is consulted; --ai reviews the document instead, so under it
 --moon-deps does nothing.
+
+--check-schema <path> (or --check-schema=<path>) checks schema parameters,
+references and this tool's supported subset, without validating business
+data or reading standard input. A false schema also compiles successfully.
+Success means the schema compiles within the supported subset, not full
+JSON Schema conformance. Use it alone or with --no-color; --help and
+--version keep their usual priority. Exit 0 means compilation succeeded;
+exit 2 means invalid arguments, an unreadable file, invalid JSON or a
+schema compilation problem. Example: moonjson-toolkit --check-schema schema.json
 
 Exit codes:
   0  success
@@ -755,6 +766,22 @@ moon run cmd/main -- --stats -f test.json
 写成 `=0`。
 
 ## 校验 JSON Schema
+
+单独检查 Schema 文件，无需提供业务 JSON：
+
+```sh
+moonjson-toolkit --check-schema schema.json
+# Schema check passed: schema.json
+# The schema compiles within this tool's supported subset.
+```
+
+也可以使用 `--check-schema=schema.json`。该模式检查参数、引用和本工具的支持范围，
+不读取 stdin、不调用 AI，也不生成统计文件。对象 Schema、`true`、`false` 都可以编译成功；
+即使 `false` 会拒绝所有业务数据，在这里仍返回 `0`。成功只表示能在本工具支持的子集中编译，
+不代表完整符合 JSON Schema 标准，也不代表所有输入都会通过。文件读取、JSON 语法、编译或
+参数错误返回 `2`，原因写入 stderr，stdout 为空。
+此模式与业务输入、数据校验、AI、依赖分析、统计、结构变换及导出选项分开使用。
+允许 `--no-color`，帮助和版本选项保持原有优先级。
 
 `--schema <path>` 拿输入去比对一份 JSON Schema，而不是把它打印出来。它和 `-v` 一起读 ——
 后者要的正是一个判断而不是一份文档 —— 两者合起来回答的，正是写一份 schema 时想问的那个

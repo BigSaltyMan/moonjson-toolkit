@@ -120,7 +120,7 @@ moonjson-toolkit - format, validate and analyse JSON documents
 Usage:
   moonjson-toolkit [options]
 
-Input is read from standard input unless --file is given.
+Input is read from standard input unless --file or --check-schema is given.
 
 Options:
   -f, --file <path>      Read one or more input files instead of standard input
@@ -141,6 +141,8 @@ Options:
       --keys-only        Print only the paths that name an object member
   -v, --validate         Only check the input and report the first error
       --schema <path>    Check the input against the JSON Schema in <path>
+      --check-schema <path>
+                         Compile a Schema without reading business JSON
   -h, --help             Show this message and exit
   -V, --version          Show the version and exit
       --ai               Ask the AI for a quality report and suggestions
@@ -359,6 +361,15 @@ and a module required at more than one version, or a circular dependency,
 is reported beneath the tree. The tree is the whole of the output, so no
 other option is consulted; --ai reviews the document instead, so under it
 --moon-deps does nothing.
+
+--check-schema <path> (or --check-schema=<path>) checks schema parameters,
+references and this tool's supported subset, without validating business
+data or reading standard input. A false schema also compiles successfully.
+Success means the schema compiles within the supported subset, not full
+JSON Schema conformance. Use it alone or with --no-color; --help and
+--version keep their usual priority. Exit 0 means compilation succeeded;
+exit 2 means invalid arguments, an unreadable file, invalid JSON or a
+schema compilation problem. Example: moonjson-toolkit --check-schema schema.json
 
 Exit codes:
   0  success
@@ -824,6 +835,23 @@ The two lines say what the report above says, in the order it says it, with the
 types the document does not contain left out rather than shown as `=0`.
 
 ## Validating against a JSON Schema
+
+Check a Schema file on its own, without supplying business JSON:
+
+```sh
+moonjson-toolkit --check-schema schema.json
+# Schema check passed: schema.json
+# The schema compiles within this tool's supported subset.
+```
+
+`--check-schema=schema.json` is equivalent. This checks parameters, references
+and the supported subset without reading stdin, calling AI or writing statistics.
+An object schema, `true` or `false` can compile successfully; even `false` returns
+`0` here because no business data is being validated. Success does not mean full
+JSON Schema conformance or that every input will pass. File, JSON, compilation
+and option errors return `2`, with diagnostics on stderr and empty stdout.
+Use this mode separately from input, validation, AI, analysis, transformation
+and export options. `--no-color` is allowed; help and version retain priority.
 
 `--schema <path>` checks the input against a JSON Schema rather than printing
 it. It is read with `-v`, the flag that asks for a verdict rather than a

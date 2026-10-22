@@ -1,4 +1,144 @@
 ///|
+async test "schema check: successful compilation" {
+  let scratch = Scratch::named("schema_check_success")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  for schema in ["{\"type\":\"object\"}", "true", "false"] {
+    @fs.write_file(scratch.schema, schema)
+    let result = run(
+      ["--check-schema", scratch.schema, "--no-color"],
+      analyze=analyzer.analyzer(),
+    )
+    assert_eq(result.code, 0)
+    assert_eq(result.err, "")
+    assert_eq(
+      result.out,
+      "Schema check passed: " +
+      scratch.schema +
+      "\nThe schema compiles within this tool's supported subset.\n",
+    )
+  }
+  assert_eq(analyzer.calls, 0)
+  discard(scratch.schema)
+}
+
+///|
+async test "schema check: compilation and file failures" {
+  let scratch = Scratch::named("schema_check_failure")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  discard(scratch.schema)
+  let missing = run(
+    ["--check-schema=" + scratch.schema, "--no-color"],
+    analyze=analyzer.analyzer(),
+  )
+  assert_eq(missing.code, 2)
+  assert_eq(missing.out, "")
+  assert_true(missing.err.contains("cannot read the schema " + scratch.schema))
+  for
+    (schema, reason, location) in [
+      ("{", "is not valid JSON", scratch.schema),
+      (
+        "{\"properties\":{\"name\":{\"minLength\":-1}}}", "is not one this tool can read",
+        "properties.name.minLength",
+      ),
+      (
+        "{\"properties\":{\"name\":{\"unevaluatedProperties\":false}}}", "keyword is not supported",
+        "properties.name.unevaluatedProperties",
+      ),
+      (
+        "{\"$ref\":\"#/$defs/missing\"}", "reference target does not exist: /$defs",
+        "$ref",
+      ),
+    ] {
+    @fs.write_file(scratch.schema, schema)
+    let result = run(
+      ["--check-schema", scratch.schema, "--no-color"],
+      analyze=analyzer.analyzer(),
+    )
+    assert_eq(result.code, 2)
+    assert_eq(result.out, "")
+    assert_true(result.err.contains(reason))
+    assert_true(result.err.contains(location))
+  }
+  assert_eq(analyzer.calls, 0)
+  discard(scratch.schema)
+}
+
+///|
+async test "schema check: mode isolation and option priority" {
+  let scratch = Scratch::named("schema_check_isolation")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  discard(scratch.schema)
+  discard(scratch.input)
+  discard(scratch.stats)
+  for
+    (extra, option) in [
+      (["-f", scratch.input], "--file"),
+      (["-v"], "--validate"),
+      (["--schema", scratch.input], "--schema"),
+      (["--jsonl"], "--jsonl"),
+      (["--ai"], "--ai"),
+      (["--model", "unused"], "--model"),
+      (["--ai-base-url", "http://localhost"], "--ai-base-url"),
+      (["--moon-deps"], "--moon-deps"),
+      (["--stats"], "--stats"),
+      (["--json-out", scratch.stats], "--json-out"),
+      (["--emit-moonbit"], "--emit-moonbit"),
+      (["--paths"], "--paths"),
+      (["--keys-only"], "--keys-only"),
+      (["--flatten"], "--flatten"),
+      (["--unflatten"], "--unflatten"),
+      (["--prune-null"], "--prune-null"),
+      (["--prune-empty"], "--prune-empty"),
+      (["--select", "name"], "--select"),
+      (["--sort-by", "name"], "--sort-by"),
+      (["--unique"], "--unique"),
+      (["--trim-strings"], "--trim-strings"),
+      (["--compact"], "--compact"),
+      (["--sort-keys"], "--sort-keys"),
+      (["--indent", "4"], "--indent"),
+      (["--max-depth", "10"], "--max-depth"),
+      (["--fail-fast"], "--fail-fast"),
+      (["--continue-on-error"], "--continue-on-error"),
+    ] {
+    let result = run(
+      ["--check-schema", scratch.schema, "--no-color"] + extra,
+      analyze=analyzer.analyzer(),
+    )
+    assert_eq(result.code, 2)
+    assert_eq(result.out, "")
+    assert_true(
+      result.err.contains("--check-schema cannot be combined with " + option),
+    )
+    assert_false(result.err.contains("cannot read"))
+  }
+  for
+    (flag, expected) in [
+      ("--help", usage() + "\n"),
+      ("--version", version_line() + "\n"),
+    ] {
+    let result = run(
+      ["--check-schema", scratch.schema, "--ai", flag],
+      analyze=analyzer.analyzer(),
+    )
+    assert_eq(result.code, 0)
+    assert_eq(result.err, "")
+    assert_eq(result.out, expected)
+  }
+  @fs.write_file(scratch.schema, "false")
+  let standalone = run(
+    ["--check-schema=" + scratch.schema],
+    analyze=analyzer.analyzer(),
+  )
+  assert_eq(standalone.code, 0)
+  assert_eq(standalone.err, "")
+  assert_true(standalone.out.has_prefix("Schema check passed: "))
+  assert_eq(analyzer.calls, 0)
+  assert_false(exists(scratch.input))
+  assert_false(exists(scratch.stats))
+  discard(scratch.schema)
+}
+
+///|
 /// A document that exercises nesting, so the statistics are not all zeroes.
 /// 9 nodes, 4 keys and a maximum depth of 4.
 let document_sample : String =

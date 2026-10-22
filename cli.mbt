@@ -42,6 +42,7 @@ pub(all) struct CliOptions {
   mut emit_moonbit : String?
   mut validate : Bool
   mut schema : String?
+  mut check_schema : String?
   mut help : Bool
   mut version : Bool
   mut ai : Bool
@@ -78,6 +79,7 @@ pub fn CliOptions::default() -> CliOptions {
     emit_moonbit: None,
     validate: false,
     schema: None,
+    check_schema: None,
     help: false,
     version: false,
     ai: false,
@@ -100,7 +102,7 @@ pub fn usage() -> String {
     "Usage:",
     "  moonjson-toolkit [options]",
     "",
-    "Input is read from standard input unless --file is given.",
+    "Input is read from standard input unless --file or --check-schema is given.",
     "",
     "Options:",
     "  -f, --file <path>      Read one or more input files instead of standard input",
@@ -121,6 +123,8 @@ pub fn usage() -> String {
     "      --keys-only        Print only the paths that name an object member",
     "  -v, --validate         Only check the input and report the first error",
     "      --schema <path>    Check the input against the JSON Schema in <path>",
+    "      --check-schema <path>",
+    "                         Compile a Schema without reading business JSON",
     "  -h, --help             Show this message and exit",
     "  -V, --version          Show the version and exit",
     "      --ai               Ask the AI for a quality report and suggestions",
@@ -340,6 +344,15 @@ pub fn usage() -> String {
     "other option is consulted; --ai reviews the document instead, so under it",
     "--moon-deps does nothing.",
     "",
+    "--check-schema <path> (or --check-schema=<path>) checks schema parameters,",
+    "references and this tool's supported subset, without validating business",
+    "data or reading standard input. A false schema also compiles successfully.",
+    "Success means the schema compiles within the supported subset, not full",
+    "JSON Schema conformance. Use it alone or with --no-color; --help and",
+    "--version keep their usual priority. Exit 0 means compilation succeeded;",
+    "exit 2 means invalid arguments, an unreadable file, invalid JSON or a",
+    "schema compilation problem. Example: moonjson-toolkit --check-schema schema.json",
+    "",
     "Exit codes:",
     "  0  success",
     "  1  the input could not be read, or is not valid JSON",
@@ -488,6 +501,13 @@ fn apply_value_option(
       options.schema = Some(value)
       Ok(())
     }
+    "check-schema" =>
+      if value == "" {
+        Err("option --check-schema requires a non-empty value")
+      } else {
+        options.check_schema = Some(value)
+        Ok(())
+      }
     "sort-by" => {
       options.sort_by = Some(value)
       Ok(())
@@ -606,6 +626,19 @@ pub fn CliOptions::parse(args : Array[String]) -> Result[CliOptions, String] {
                 options.emit_moonbit = Some(default_root_name)
               }
           }
+        "check-schema" => {
+          if inline == None && index < total && args[index].has_prefix("-") {
+            return Err("option --check-schema requires a value")
+          }
+          match option_value("--check-schema", inline, args, index) {
+            Err(message) => return Err(message)
+            Ok((value, next)) =>
+              match apply_value_option(options, name, value) {
+                Err(message) => return Err(message)
+                Ok(_) => index = next
+              }
+          }
+        }
         "file"
         | "json-out"
         | "schema"

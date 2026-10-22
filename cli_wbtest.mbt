@@ -1,4 +1,28 @@
 ///|
+test "schema check: parameter parsing" {
+  assert_eq(CliOptions::default().check_schema, None)
+  for
+    args in [["--check-schema", "schema.json"], ["--check-schema=schema.json"]] {
+    let options = cli_ok(args)
+    assert_eq(options.check_schema, Some("schema.json"))
+    assert_eq(options.schema, None)
+    assert_false(options.validate)
+    assert_eq(options.files.length(), 0)
+  }
+  assert_eq(
+    cli_err(["--check-schema"]),
+    "option --check-schema requires a value",
+  )
+  for args in [["--check-schema="], ["--check-schema", ""]] {
+    assert_eq(cli_err(args), "option --check-schema requires a non-empty value")
+  }
+  assert_eq(
+    cli_err(["--check-schema", "--no-color"]),
+    "option --check-schema requires a value",
+  )
+}
+
+///|
 async test "propertyNames CLI distinguishes names values and failures with exit 0 1 2" {
   for
     index, (schema, input, code, reason) in [
