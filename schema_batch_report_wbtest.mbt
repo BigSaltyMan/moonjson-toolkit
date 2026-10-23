@@ -106,11 +106,15 @@ async test "schema batch report: parameter scope" {
     let (result, _) = batch_report_case("conflict", None, [None, None], extra~)
     assert_eq(result.code, 2)
     assert_eq(result.out, "")
-    assert_true(
-      result.err.has_prefix(
-        "error: --schema-output json cannot be combined with ",
-      ),
-    )
+    if extra[0] == "--jsonl" {
+      assert_true(result.err.contains("supports only one JSONL input file"))
+    } else {
+      assert_true(
+        result.err.has_prefix(
+          "error: --schema-output json cannot be combined with ",
+        ),
+      )
+    }
     assert_false(result.err.contains("cannot read"))
   }
 }

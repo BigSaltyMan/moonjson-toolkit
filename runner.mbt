@@ -174,9 +174,11 @@ fn validate_options(options : CliOptions) -> Result[Unit, String] {
       return Err("--schema-output requires --check-schema or -v --schema")
     }
     if options.schema_output == Some("json") {
+      if options.jsonl && options.files.length() > 1 {
+        return Err("--schema-output json supports only one JSONL input file")
+      }
       for
         (present, option) in [
-          (options.jsonl, "--jsonl"),
           (options.ai, "--ai"),
           (options.model != None, "--model"),
           (options.ai_base_url != None, "--ai-base-url"),
@@ -708,7 +710,7 @@ pub async fn run(
 }
 
 ///|
-/// Compile before reading the single input and return before any document
+/// Compile before reading any input and return before any document
 /// formatting, statistics, transforms or AI work can run.
 async fn run_schema_validation_report(
   options : CliOptions,
@@ -725,6 +727,15 @@ async fn run_schema_validation_report(
     Ok(compiled) => compiled
     Err(error) => {
       let (_, issues) = schema_read_issues(error, stage="schema")
+      if options.jsonl {
+        return schema_jsonl_report(
+          schema_path,
+          source,
+          [],
+          issues,
+          code=exit_usage_error,
+        )
+      }
       if many {
         return schema_batch_report(
           schema_path,
@@ -737,6 +748,9 @@ async fn run_schema_validation_report(
         schema_path, source, "error", issues, exit_usage_error,
       )
     }
+  }
+  if options.jsonl {
+    return run_schema_jsonl_report(options, schema_path, compiled, input)
   }
   if many {
     let results = []
@@ -799,6 +813,16 @@ async fn check_schema_input(
         code: exit_input_error,
       }
   }
+  check_schema_value(compiled, source, json)
+}
+
+///|
+/// Validate one parsed document or record with a fresh evaluation context.
+fn check_schema_value(
+  compiled : CompiledSchema,
+  source : String,
+  json : @pjson.Json,
+) -> SchemaInputResult {
   match validate_compiled_schema(json, compiled) {
     Ok([]) => { source, status: "valid", issues: [], code: exit_success, }
     Ok(errors) =>
@@ -823,6 +847,50 @@ async fn check_schema_input(
         code: exit_usage_error,
       }
   }
+}
+
+///|
+async fn run_schema_jsonl_report(
+  options : CliOptions,
+  schema_path : String,
+  compiled : CompiledSchema,
+  input : String?,
+) -> RunResult {
+  let source = input_label(input)
+  let text = match read_input(input) {
+    Ok(text) => text
+    Err(message) =>
+      return schema_jsonl_report(
+        schema_path,
+        source,
+        [],
+        [schema_report_issue("ReadError", None, message, stage="input")],
+        code=exit_input_error,
+      )
+  }
+  let lines = jsonl_record_lines(text)
+  let results = []
+  for index, record in parse_jsonl_with_depth(text, options.max_depth) {
+    let result = match record {
+      Ok(json) => check_schema_value(compiled, source, json)
+      Err(diagnostic) =>
+        {
+          source,
+          status: "error",
+          code: exit_input_error,
+          issues: [
+            schema_report_issue(
+              "ParseError",
+              None,
+              schema_parse_message(diagnostic),
+              stage="input",
+            ),
+          ],
+        }
+    }
+    results.push((lines[index], result))
+  }
+  schema_jsonl_report(schema_path, source, results, [])
 }
 
 ///|

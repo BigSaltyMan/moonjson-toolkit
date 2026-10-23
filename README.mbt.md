@@ -382,7 +382,7 @@ Example: moonjson-toolkit --check-schema schema.json --schema-output json
 JSON reports support -v --schema for stdin, one file or multiple --file inputs.
 Omit --file for stdin; one file uses reportType validation, multiple files
 use batchValidation. Batches compile the schema once and process every input
-in command order, including repeated paths. JSONL, AI, statistics, transforms,
+in command order, including repeated paths. AI, statistics, transforms,
 exports, --fail-fast and --continue-on-error cannot be combined with this mode.
 --max-depth and --no-color are allowed. Batch exit codes prefer 2 over 1 over 0.
 A valid input or batch is reported on stdout (exit 0). An invalid input or an input
@@ -393,6 +393,16 @@ schema/input/evaluation. Locations use display paths; evaluation errors
 have separate instancePointer and schemaPointer JSON Pointers.
 Example: moonjson-toolkit -v --schema schema.json -f data.json --schema-output json
 Batch: moonjson-toolkit -v --schema schema.json -f first.json -f second.json --schema-output json
+With --jsonl, JSON reports support one file or stdin, not multiple files.
+Input is JSONL; output is one jsonlValidation JSON document, not NDJSON.
+Blank lines are skipped; results retain actual 1-based line numbers.
+Locations and instancePointer are relative to each record. Parse diagnostics
+retain source line/column numbers. Every record is attempted with its own
+evaluation budget; exits prefer 2 over 1 over 0. Empty input succeeds.
+Only an entirely successful run writes stdout; failures write the complete
+report to stderr with stdout empty. No partial reports or text summaries.
+JSONL: moonjson-toolkit -v --schema schema.json --jsonl -f data.jsonl --schema-output json
+Stdin: cat data.jsonl | moonjson-toolkit -v --schema schema.json --jsonl --schema-output json
 
 Exit codes:
   0  success
@@ -902,7 +912,7 @@ moonjson-toolkit -v --schema schema.json -f data.json --schema-output json
 ```
 
 Omit `-f` to read stdin; the report then uses `"<stdin>"` as `inputFile`.
-JSON validation reports require `-v --schema` and reject JSONL, AI, statistics,
+JSON validation reports require `-v --schema` and reject AI, statistics,
 transforms, other export modes, `--fail-fast` and `--continue-on-error` before
 reading files. `--max-depth` and `--no-color` are allowed. Schema compilation
 finishes before input is read. Default text output remains unchanged.
@@ -941,7 +951,8 @@ moonjson-toolkit -v --schema schema.json \
 The Schema is compiled once, then every file is attempted in command order,
 including repeated paths. A failed input does not stop later files. Each
 validation has its own evaluation context and resource budget. One file keeps
-the single-document `validation` format; JSONL JSON reports are not supported.
+the single-document `validation` format. JSONL reports support only one input,
+as described below.
 
 `summary.requested` counts the supplied paths; `processed` includes read and
 parse failures. The `valid`, `invalid` and `errors` counts sum to `processed`.
@@ -956,6 +967,41 @@ use 1, evaluation failures use 2. Only an entirely successful batch writes
 stdout. Any failure writes the complete report to stderr, leaving stdout
 empty, even when some inputs passed. Reports contain no text headings or
 summaries outside the JSON document.
+
+For JSONL, read one file or stdin and emit one complete JSON report:
+
+```sh
+moonjson-toolkit -v --schema schema.json \
+  --jsonl -f data.jsonl --schema-output json
+cat data.jsonl | moonjson-toolkit -v \
+  --schema schema.json --jsonl --schema-output json
+```
+
+```json
+{"reportVersion":1,"reportType":"jsonlValidation","schemaFile":"schema.json","inputFile":"data.jsonl","status":"invalid","summary":{"records":2,"valid":1,"invalid":1,"errors":0},"issues":[],"results":[{"line":1,"status":"valid","exitCode":0,"issues":[]},{"line":3,"status":"invalid","exitCode":1,"issues":[{"stage":"input","kind":"ValidationError","location":"name","message":"it is a number where the schema expects a string"}]}]}
+```
+
+The input is JSONL; the report itself is one JSON document, not NDJSON. Blank
+lines follow the existing skip rule, and `results[].line` retains the actual
+1-based source line. `location` and `instancePointer` refer to the current
+record, while parse diagnostic messages retain source line and column numbers.
+Stdin uses `inputFile: "<stdin>"`. Multiple JSONL files are not supported in this
+report mode; AI, statistics, transforms, exports and early-stop/summary flags
+remain incompatible.
+
+The Schema compiles once. All records are processed, including those after
+parse, validation or evaluation failures, with independent evaluation contexts
+and budgets. `summary.records` counts nonblank records, including parse errors;
+`valid + invalid + errors == records`. Record issues belong to their result.
+Schema failures and whole-input read errors instead appear in top-level
+`issues`, with zero counts and empty `results`.
+
+Any record error makes status `error`; otherwise ordinary violations make it
+`invalid`, and all matches make it `valid`. Exit codes prefer **2 > 1 > 0**:
+Schema or evaluation failures use 2, input read/parse errors and violations use
+1. Empty or whitespace-only input succeeds with zero records. Only a successful
+run writes stdout; failures write the entire report to stderr with stdout empty.
+No partial record reports, colour codes or text summaries are emitted.
 
 `--schema <path>` checks the input against a JSON Schema rather than printing
 it. It is read with `-v`, the flag that asks for a verdict rather than a

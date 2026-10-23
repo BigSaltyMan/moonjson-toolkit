@@ -361,7 +361,7 @@ Example: moonjson-toolkit --check-schema schema.json --schema-output json
 JSON reports support -v --schema for stdin, one file or multiple --file inputs.
 Omit --file for stdin; one file uses reportType validation, multiple files
 use batchValidation. Batches compile the schema once and process every input
-in command order, including repeated paths. JSONL, AI, statistics, transforms,
+in command order, including repeated paths. AI, statistics, transforms,
 exports, --fail-fast and --continue-on-error cannot be combined with this mode.
 --max-depth and --no-color are allowed. Batch exit codes prefer 2 over 1 over 0.
 A valid input or batch is reported on stdout (exit 0). An invalid input or an input
@@ -372,6 +372,16 @@ schema/input/evaluation. Locations use display paths; evaluation errors
 have separate instancePointer and schemaPointer JSON Pointers.
 Example: moonjson-toolkit -v --schema schema.json -f data.json --schema-output json
 Batch: moonjson-toolkit -v --schema schema.json -f first.json -f second.json --schema-output json
+With --jsonl, JSON reports support one file or stdin, not multiple files.
+Input is JSONL; output is one jsonlValidation JSON document, not NDJSON.
+Blank lines are skipped; results retain actual 1-based line numbers.
+Locations and instancePointer are relative to each record. Parse diagnostics
+retain source line/column numbers. Every record is attempted with its own
+evaluation budget; exits prefer 2 over 1 over 0. Empty input succeeds.
+Only an entirely successful run writes stdout; failures write the complete
+report to stderr with stdout empty. No partial reports or text summaries.
+JSONL: moonjson-toolkit -v --schema schema.json --jsonl -f data.jsonl --schema-output json
+Stdin: cat data.jsonl | moonjson-toolkit -v --schema schema.json --jsonl --schema-output json
 
 Exit codes:
   0  success
@@ -830,7 +840,7 @@ moonjson-toolkit -v --schema schema.json -f data.json --schema-output json
 ```
 
 省略 `-f` 时读取 stdin，报告中的 `inputFile` 为 `"<stdin>"`。
-JSON 校验报告必须同时指定 `-v --schema`；JSONL、AI、统计、结构变换、其他导出模式、
+JSON 校验报告必须同时指定 `-v --schema`；AI、统计、结构变换、其他导出模式、
 `--fail-fast` 和 `--continue-on-error` 会在读取文件前被拒绝。允许 `--max-depth` 和 `--no-color`。
 先完成 Schema 编译，再读取业务输入；默认文本输出保持不变。
 
@@ -864,7 +874,7 @@ moonjson-toolkit -v --schema schema.json \
 
 Schema 只编译一次，随后按命令行顺序尝试处理全部文件；重复路径按输入位置分别处理，不去重。
 某个文件失败后继续处理后续文件，每次校验使用独立的求值上下文和资源预算。一个文件仍使用
-原有 `validation` 单文档格式；尚不支持 JSONL 的 JSON 报告。
+原有 `validation` 单文档格式；JSONL 的 JSON 报告仅支持一个输入，见下文。
 
 `summary.requested` 为指定的路径数量；`processed` 包括读取、解析失败的文件。
 `valid`、`invalid`、`errors` 三项计数之和等于 `processed`。每个结果包含 `inputFile`、
@@ -875,6 +885,34 @@ Schema 只编译一次，随后按命令行顺序尝试处理全部文件；重�
 `valid`。进程退出码取最高优先级，**2 > 1 > 0**：输入读取、解析失败退出 `1`，求值失败退出
 `2`。只有全部成功时才向 stdout 输出；整体失败时，完整报告写入 stderr，stdout 为空，即使
 部分输入已经通过。JSON 文档外不附加文本标题或总结。
+
+JSONL 支持读取一个文件或 stdin，并输出一个完整的 JSON 报告：
+
+```sh
+moonjson-toolkit -v --schema schema.json \
+  --jsonl -f data.jsonl --schema-output json
+cat data.jsonl | moonjson-toolkit -v \
+  --schema schema.json --jsonl --schema-output json
+```
+
+```json
+{"reportVersion":1,"reportType":"jsonlValidation","schemaFile":"schema.json","inputFile":"data.jsonl","status":"invalid","summary":{"records":2,"valid":1,"invalid":1,"errors":0},"issues":[],"results":[{"line":1,"status":"valid","exitCode":0,"issues":[]},{"line":3,"status":"invalid","exitCode":1,"issues":[{"stage":"input","kind":"ValidationError","location":"name","message":"it is a number where the schema expects a string"}]}]}
+```
+
+输入是 JSONL，输出是一个汇总 JSON 文档，不是逐条输出的 NDJSON。空白行沿用现有跳过规则；
+`results[].line` 保留从 `1` 开始的实际行号。`location` 和 `instancePointer` 相对于当前记录，
+解析诊断中的行列仍对应原输入。stdin 的 `inputFile` 为 `"<stdin>"`。此模式暂不支持多个 JSONL
+文件，也不允许 AI、统计、变换、其他导出、`--fail-fast` 或 `--continue-on-error`。
+
+Schema 只编译一次，每条记录使用独立求值上下文和预算；解析、普通违规或执行失败后继续处理
+后续记录。`summary.records` 统计非空白记录，包括解析失败；`valid + invalid + errors == records`。
+记录问题归入各自结果；Schema 问题和整个输入的读取失败归入顶层 `issues`，此时四项记录计数
+均为 `0`，`results` 为空，不虚构记录。
+
+任意记录错误使顶层状态为 `error`；否则有普通违规时为 `invalid`，全部符合时为 `valid`。
+退出码优先级为 **2 > 1 > 0**：Schema 或执行失败退出 `2`，输入读取、解析失败和普通违规退出
+`1`。空输入或仅有空白行时退出 `0`，记录计数为零。成功时向 stdout 输出；失败时完整报告
+写入 stderr，stdout 为空，不输出部分记录报告、颜色或文本总结。
 
 `--schema <path>` 拿输入去比对一份 JSON Schema，而不是把它打印出来。它和 `-v` 一起读 ——
 后者要的正是一个判断而不是一份文档 —— 两者合起来回答的，正是写一份 schema 时想问的那个

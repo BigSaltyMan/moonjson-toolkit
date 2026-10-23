@@ -16,8 +16,11 @@ async test "schema validation report: parameter scope" {
         "requires --check-schema or -v --schema",
       ),
       (
-        ["-v", "--schema", "missing.json", "--jsonl", "--schema-output=json"],
-        "cannot be combined with --jsonl",
+        [
+          "-v", "--schema", "missing.json", "--jsonl", "-f", "one.json", "-f", "two.json",
+          "--schema-output=json",
+        ],
+        "supports only one JSONL input file",
       ),
     ] {
     let result = run(args + ["--no-color"], analyze=analyzer.analyzer())
@@ -29,7 +32,7 @@ async test "schema validation report: parameter scope" {
   }
   for
     extra in [
-      ["--jsonl"],
+      ["--fail-fast"],
       ["--ai"],
       ["--stats"],
       ["--flatten"],

@@ -202,3 +202,74 @@ fn schema_batch_report(
     failure(text, code)
   }
 }
+
+///|
+/// JSONL input still produces one JSON document. Record numbers are actual
+/// source lines; schema and whole-input failures have no record results.
+fn schema_jsonl_report(
+  schema_path : String,
+  source : String,
+  results : Array[(Int, SchemaInputResult)],
+  issues : Array[@pjson.Json],
+  code? : Int = exit_success,
+) -> RunResult {
+  let mut valid = 0
+  let mut invalid = 0
+  let mut errors = 0
+  let mut exit_code = code
+  for (_, result) in results {
+    match result.status {
+      "valid" => valid += 1
+      "invalid" => invalid += 1
+      _ => errors += 1
+    }
+    if result.code > exit_code {
+      exit_code = result.code
+    }
+  }
+  let status = if !issues.is_empty() || errors > 0 {
+    "error"
+  } else if invalid > 0 {
+    "invalid"
+  } else {
+    "valid"
+  }
+  let text = format_compact(
+    @pjson.Object(members=[
+      ("reportVersion", @pjson.Number(raw="1")),
+      ("reportType", @pjson.Text(value="jsonlValidation")),
+      ("schemaFile", @pjson.Text(value=schema_path)),
+      ("inputFile", @pjson.Text(value=source)),
+      ("status", @pjson.Text(value=status)),
+      (
+        "summary",
+        @pjson.Object(members=[
+          ("records", @pjson.Number(raw=results.length().to_string())),
+          ("valid", @pjson.Number(raw=valid.to_string())),
+          ("invalid", @pjson.Number(raw=invalid.to_string())),
+          ("errors", @pjson.Number(raw=errors.to_string())),
+        ]),
+      ),
+      ("issues", @pjson.Array(items=issues)),
+      (
+        "results",
+        @pjson.Array(
+          items=results.map(fn(entry) {
+            let (line, result) = entry
+            @pjson.Object(members=[
+              ("line", @pjson.Number(raw=line.to_string())),
+              ("status", @pjson.Text(value=result.status)),
+              ("exitCode", @pjson.Number(raw=result.code.to_string())),
+              ("issues", @pjson.Array(items=result.issues)),
+            ])
+          }),
+        ),
+      ),
+    ]),
+  )
+  if exit_code == exit_success {
+    { out: text + "\n", err: "", code: exit_code, }
+  } else {
+    failure(text, exit_code)
+  }
+}
