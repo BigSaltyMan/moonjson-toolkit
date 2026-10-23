@@ -888,6 +888,21 @@ and export options. `--no-color` is allowed; help and version retain priority.
 
 For scripts and editor integrations, request a machine-readable report:
 
+See the [Schema report v1 contract](docs/schema-report-format.md) for all four
+formats and versioning rules. Check the process exit code first: successful
+reports use stdout, failed reports use stderr, and the other stream is empty.
+Argument errors can still be plain text, so do not unconditionally parse stderr
+as JSON. Run the real native CLI acceptance (Python standard library only):
+
+```sh
+python scripts/check_schema_reports.py
+# Reuse a build without rebuilding:
+python scripts/check_schema_reports.py --cli _build/native/debug/build/cmd/main/main.exe
+```
+
+Evidence is saved in `_build/schema-report-acceptance/`. This local acceptance
+is separate from Linux CI; see the contract document for verification status.
+
 ```sh
 moonjson-toolkit --check-schema schema.json --schema-output json
 # {"reportVersion":1,"schemaFile":"schema.json","status":"supported","issues":[]}

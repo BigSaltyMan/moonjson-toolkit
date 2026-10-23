@@ -818,6 +818,20 @@ moonjson-toolkit --check-schema schema.json
 
 脚本或编辑器集成可请求机器可读报告：
 
+四种格式和版本规则见 [Schema 报告版本 1 契约](docs/schema-report-format.md)。
+集成时先检查进程退出码：成功报告在 stdout，失败报告在 stderr，另一输出流为空。
+参数错误仍可能是普通文本，不能无条件把 stderr 当作 JSON。真实 native CLI 验收仅用
+Python 标准库，可执行：
+
+```sh
+python scripts/check_schema_reports.py
+# 复用现有构建，不再构建：
+python scripts/check_schema_reports.py --cli _build/native/debug/build/cmd/main/main.exe
+```
+
+证据保存在 `_build/schema-report-acceptance/`。本地验收与 Linux CI 分开记录，
+具体验证状态见契约文档。
+
 ```sh
 moonjson-toolkit --check-schema schema.json --schema-output json
 # {"reportVersion":1,"schemaFile":"schema.json","status":"supported","issues":[]}

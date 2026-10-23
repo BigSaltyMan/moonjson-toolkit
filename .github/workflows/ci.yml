@@ -31,7 +31,10 @@ jobs:
         run: moon test --target native
 
       - name: Build
-        run: moon build --target native
+        run: moon build --target native --debug
+
+      - name: Check structured Schema reports with the native CLI
+        run: python3 scripts/check_schema_reports.py --cli _build/native/debug/build/cmd/main/main.exe
 
       - name: Reproduce Schema acceptance examples
         run: bash scripts/check_schema_acceptance.sh
@@ -62,6 +65,14 @@ jobs:
         with:
           name: schema-acceptance-outputs
           path: _build/schema-acceptance/
+          if-no-files-found: warn
+
+      - name: Preserve structured report acceptance even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-report-acceptance
+          path: _build/schema-report-acceptance/
           if-no-files-found: warn
 
   frontend:
