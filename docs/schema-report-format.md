@@ -233,3 +233,6 @@ JSONL stdin 包含中文、引号、反斜杠、转义换行、空白行和损�
 Linux CI **尚未验证**。现有 native job 已接入此脚本，使用同一 job 的 debug 构建并传入
 `--cli`，失败时也上传验收目录；原单元测试和标准兼容性门禁保留。只有取得对应提交
 的真实 Linux CI 成功结果后，才在交付记录中补充提交 SHA 和成功链接。
+
+本节首次提交后的 Linux 验证进展、实际代码 SHA、日志及产物核对结果见
+[结构化报告跨平台复验记录](schema-report-verification.md)。
