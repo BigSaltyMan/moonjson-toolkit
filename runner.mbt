@@ -174,9 +174,6 @@ fn validate_options(options : CliOptions) -> Result[Unit, String] {
       return Err("--schema-output requires --check-schema or -v --schema")
     }
     if options.schema_output == Some("json") {
-      if options.files.length() > 1 {
-        return Err("--schema-output json supports only a single input file")
-      }
       for
         (present, option) in [
           (options.jsonl, "--jsonl"),
@@ -717,6 +714,7 @@ async fn run_schema_validation_report(
   options : CliOptions,
   schema_path : String,
 ) -> RunResult {
+  let many = options.files.length() > 1
   let input = if options.files.is_empty() {
     None
   } else {
@@ -727,30 +725,70 @@ async fn run_schema_validation_report(
     Ok(compiled) => compiled
     Err(error) => {
       let (_, issues) = schema_read_issues(error, stage="schema")
+      if many {
+        return schema_batch_report(
+          schema_path,
+          options.files.length(),
+          [],
+          issues,
+        )
+      }
       return schema_validation_report(
         schema_path, source, "error", issues, exit_usage_error,
       )
     }
   }
+  if many {
+    let results = []
+    for path in options.files {
+      results.push(check_schema_input(options, compiled, Some(path)))
+    }
+    return schema_batch_report(schema_path, options.files.length(), results, [])
+  }
+  let result = check_schema_input(options, compiled, input)
+  schema_validation_report(
+    schema_path,
+    result.source,
+    result.status,
+    result.issues,
+    result.code,
+  )
+}
+
+///|
+/// One input's outcome before rendering. Each validation starts its own
+/// evaluation context and budget, while all inputs share the compiled schema.
+priv struct SchemaInputResult {
+  source : String
+  status : String
+  issues : Array[@pjson.Json]
+  code : Int
+}
+
+///|
+async fn check_schema_input(
+  options : CliOptions,
+  compiled : CompiledSchema,
+  input : String?,
+) -> SchemaInputResult {
+  let source = input_label(input)
   let text = match read_input(input) {
     Ok(text) => text
     Err(message) =>
-      return schema_validation_report(
-        schema_path,
+      return {
         source,
-        "error",
-        [schema_report_issue("ReadError", None, message, stage="input")],
-        exit_input_error,
-      )
+        status: "error",
+        issues: [schema_report_issue("ReadError", None, message, stage="input")],
+        code: exit_input_error,
+      }
   }
   let json = match parse_with_diagnostic(text, options.max_depth) {
     Ok(json) => json
     Err(diagnostic) =>
-      return schema_validation_report(
-        schema_path,
+      return {
         source,
-        "error",
-        [
+        status: "error",
+        issues: [
           schema_report_issue(
             "ParseError",
             None,
@@ -758,18 +796,16 @@ async fn run_schema_validation_report(
             stage="input",
           ),
         ],
-        exit_input_error,
-      )
+        code: exit_input_error,
+      }
   }
   match validate_compiled_schema(json, compiled) {
-    Ok([]) =>
-      schema_validation_report(schema_path, source, "valid", [], exit_success)
+    Ok([]) => { source, status: "valid", issues: [], code: exit_success, }
     Ok(errors) =>
-      schema_validation_report(
-        schema_path,
+      {
         source,
-        "invalid",
-        errors.map(fn(error) {
+        status: "invalid",
+        issues: errors.map(fn(error) {
           schema_report_issue(
             "ValidationError",
             Some(error.path),
@@ -777,16 +813,15 @@ async fn run_schema_validation_report(
             stage="input",
           )
         }),
-        exit_input_error,
-      )
+        code: exit_input_error,
+      }
     Err(error) =>
-      schema_validation_report(
-        schema_path,
+      {
         source,
-        "error",
-        [schema_evaluation_issue(error)],
-        exit_usage_error,
-      )
+        status: "error",
+        issues: [schema_evaluation_issue(error)],
+        code: exit_usage_error,
+      }
   }
 }
 

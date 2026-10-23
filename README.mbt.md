@@ -379,16 +379,20 @@ with the other stream empty. Argument errors remain text. Reports are not
 standards certification.
 Example: moonjson-toolkit --check-schema schema.json --schema-output json
 
-JSON reports also support single-document -v --schema: use one --file or
-omit it for stdin. Batches, JSONL, AI, statistics, transforms and exports
-cannot be combined with this mode; --max-depth and --no-color are allowed.
-A valid input is reported on stdout (exit 0). An invalid input or an input
+JSON reports support -v --schema for stdin, one file or multiple --file inputs.
+Omit --file for stdin; one file uses reportType validation, multiple files
+use batchValidation. Batches compile the schema once and process every input
+in command order, including repeated paths. JSONL, AI, statistics, transforms,
+exports, --fail-fast and --continue-on-error cannot be combined with this mode.
+--max-depth and --no-color are allowed. Batch exit codes prefer 2 over 1 over 0.
+A valid input or batch is reported on stdout (exit 0). An invalid input or an input
 read/parse error is reported on stderr (exit 1); schema or evaluation
 errors use stderr (exit 2). The other stream stays empty. Reports include
 reportType validation, status valid/invalid/error and issue stage
 schema/input/evaluation. Locations use display paths; evaluation errors
 have separate instancePointer and schemaPointer JSON Pointers.
 Example: moonjson-toolkit -v --schema schema.json -f data.json --schema-output json
+Batch: moonjson-toolkit -v --schema schema.json -f first.json -f second.json --schema-output json
 
 Exit codes:
   0  success
@@ -898,8 +902,8 @@ moonjson-toolkit -v --schema schema.json -f data.json --schema-output json
 ```
 
 Omit `-f` to read stdin; the report then uses `"<stdin>"` as `inputFile`.
-JSON validation reports require `-v --schema`, permit at most one input file,
-and reject JSONL, AI, statistics, transforms and other export modes before
+JSON validation reports require `-v --schema` and reject JSONL, AI, statistics,
+transforms, other export modes, `--fail-fast` and `--continue-on-error` before
 reading files. `--max-depth` and `--no-color` are allowed. Schema compilation
 finishes before input is read. Default text output remains unchanged.
 
@@ -922,6 +926,36 @@ Schema compilation retains its existing problem kinds. Execution failures use
 `instancePointer` and `schemaPointer` fields; an empty pointer denotes the root.
 Argument errors remain text. The independent-check report format is unchanged,
 and neither report certifies full JSON Schema compatibility.
+
+For two or more input files, the same option emits a batch report:
+
+```sh
+moonjson-toolkit -v --schema schema.json \
+  -f first.json -f second.json --schema-output json
+```
+
+```json
+{"reportVersion":1,"reportType":"batchValidation","schemaFile":"schema.json","status":"valid","summary":{"requested":2,"processed":2,"valid":2,"invalid":0,"errors":0},"issues":[],"results":[{"inputFile":"first.json","status":"valid","exitCode":0,"issues":[]},{"inputFile":"second.json","status":"valid","exitCode":0,"issues":[]}]}
+```
+
+The Schema is compiled once, then every file is attempted in command order,
+including repeated paths. A failed input does not stop later files. Each
+validation has its own evaluation context and resource budget. One file keeps
+the single-document `validation` format; JSONL JSON reports are not supported.
+
+`summary.requested` counts the supplied paths; `processed` includes read and
+parse failures. The `valid`, `invalid` and `errors` counts sum to `processed`.
+Each result holds `inputFile`, `status`, `exitCode` and its own `issues`.
+Schema precheck failures instead use top-level `issues`, with `processed: 0`,
+zero category counts and empty `results`; no business input is read.
+
+Any file with status `error` makes the batch status `error`; otherwise any
+violation makes it `invalid`, and all matches make it `valid`. The process
+exit code takes the highest priority, **2 > 1 > 0**: input read/parse failures
+use 1, evaluation failures use 2. Only an entirely successful batch writes
+stdout. Any failure writes the complete report to stderr, leaving stdout
+empty, even when some inputs passed. Reports contain no text headings or
+summaries outside the JSON document.
 
 `--schema <path>` checks the input against a JSON Schema rather than printing
 it. It is read with `-v`, the flag that asks for a verdict rather than a

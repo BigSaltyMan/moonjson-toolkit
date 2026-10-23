@@ -358,16 +358,20 @@ with the other stream empty. Argument errors remain text. Reports are not
 standards certification.
 Example: moonjson-toolkit --check-schema schema.json --schema-output json
 
-JSON reports also support single-document -v --schema: use one --file or
-omit it for stdin. Batches, JSONL, AI, statistics, transforms and exports
-cannot be combined with this mode; --max-depth and --no-color are allowed.
-A valid input is reported on stdout (exit 0). An invalid input or an input
+JSON reports support -v --schema for stdin, one file or multiple --file inputs.
+Omit --file for stdin; one file uses reportType validation, multiple files
+use batchValidation. Batches compile the schema once and process every input
+in command order, including repeated paths. JSONL, AI, statistics, transforms,
+exports, --fail-fast and --continue-on-error cannot be combined with this mode.
+--max-depth and --no-color are allowed. Batch exit codes prefer 2 over 1 over 0.
+A valid input or batch is reported on stdout (exit 0). An invalid input or an input
 read/parse error is reported on stderr (exit 1); schema or evaluation
 errors use stderr (exit 2). The other stream stays empty. Reports include
 reportType validation, status valid/invalid/error and issue stage
 schema/input/evaluation. Locations use display paths; evaluation errors
 have separate instancePointer and schemaPointer JSON Pointers.
 Example: moonjson-toolkit -v --schema schema.json -f data.json --schema-output json
+Batch: moonjson-toolkit -v --schema schema.json -f first.json -f second.json --schema-output json
 
 Exit codes:
   0  success
@@ -826,8 +830,8 @@ moonjson-toolkit -v --schema schema.json -f data.json --schema-output json
 ```
 
 省略 `-f` 时读取 stdin，报告中的 `inputFile` 为 `"<stdin>"`。
-JSON 校验报告必须同时指定 `-v --schema`，最多允许一个输入文件；JSONL、AI、统计、
-结构变换和其他导出模式会在读取文件前被拒绝。允许 `--max-depth` 和 `--no-color`。
+JSON 校验报告必须同时指定 `-v --schema`；JSONL、AI、统计、结构变换、其他导出模式、
+`--fail-fast` 和 `--continue-on-error` 会在读取文件前被拒绝。允许 `--max-depth` 和 `--no-color`。
 先完成 Schema 编译，再读取业务输入；默认文本输出保持不变。
 
 | 结果 | status | 输出流 | 退出码 |
@@ -846,6 +850,31 @@ JSON 校验报告必须同时指定 `-v --schema`，最多允许一个输入文�
 保留原有类别。执行失败为 `ReferenceCycle` 或 `ResourceLimit`，`location` 为 `null`，
 另用 `instancePointer`、`schemaPointer` 保存现有 RFC 6901 指针，空指针表示根节点。
 参数错误仍使用文本。独立检查报告的格式保持不变，两种报告均不代表完整的标准兼容性认证。
+
+两个及以上输入文件使用批量报告：
+
+```sh
+moonjson-toolkit -v --schema schema.json \
+  -f first.json -f second.json --schema-output json
+```
+
+```json
+{"reportVersion":1,"reportType":"batchValidation","schemaFile":"schema.json","status":"valid","summary":{"requested":2,"processed":2,"valid":2,"invalid":0,"errors":0},"issues":[],"results":[{"inputFile":"first.json","status":"valid","exitCode":0,"issues":[]},{"inputFile":"second.json","status":"valid","exitCode":0,"issues":[]}]}
+```
+
+Schema 只编译一次，随后按命令行顺序尝试处理全部文件；重复路径按输入位置分别处理，不去重。
+某个文件失败后继续处理后续文件，每次校验使用独立的求值上下文和资源预算。一个文件仍使用
+原有 `validation` 单文档格式；尚不支持 JSONL 的 JSON 报告。
+
+`summary.requested` 为指定的路径数量；`processed` 包括读取、解析失败的文件。
+`valid`、`invalid`、`errors` 三项计数之和等于 `processed`。每个结果包含 `inputFile`、
+`status`、`exitCode` 和自己的 `issues`。Schema 预检查失败时，只在顶层 `issues` 报告问题，
+`processed` 和三个分类计数均为 `0`，`results` 为空，不读取任何业务输入。
+
+任意文件状态为 `error` 时，批量状态为 `error`；否则，有违规时为 `invalid`，全部符合时为
+`valid`。进程退出码取最高优先级，**2 > 1 > 0**：输入读取、解析失败退出 `1`，求值失败退出
+`2`。只有全部成功时才向 stdout 输出；整体失败时，完整报告写入 stderr，stdout 为空，即使
+部分输入已经通过。JSON 文档外不附加文本标题或总结。
 
 `--schema <path>` 拿输入去比对一份 JSON Schema，而不是把它打印出来。它和 `-v` 一起读 ——
 后者要的正是一个判断而不是一份文档 —— 两者合起来回答的，正是写一份 schema 时想问的那个

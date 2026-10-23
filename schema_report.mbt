@@ -133,3 +133,72 @@ fn schema_evaluation_issue(error : SchemaEvaluationError) -> @pjson.Json {
     ("schemaPointer", @pjson.Text(value=error.schema_path)),
   ])
 }
+
+///|
+/// Build the entire batch before choosing a stream. Schema-level failures
+/// have no input outcomes; all other issues belong to their input result.
+fn schema_batch_report(
+  schema_path : String,
+  requested : Int,
+  results : Array[SchemaInputResult],
+  issues : Array[@pjson.Json],
+) -> RunResult {
+  let mut valid = 0
+  let mut invalid = 0
+  let mut errors = 0
+  let mut code = if issues.is_empty() { exit_success } else { exit_usage_error }
+  for result in results {
+    match result.status {
+      "valid" => valid += 1
+      "invalid" => invalid += 1
+      _ => errors += 1
+    }
+    if result.code > code {
+      code = result.code
+    }
+  }
+  let status = if !issues.is_empty() || errors > 0 {
+    "error"
+  } else if invalid > 0 {
+    "invalid"
+  } else {
+    "valid"
+  }
+  let text = format_compact(
+    @pjson.Object(members=[
+      ("reportVersion", @pjson.Number(raw="1")),
+      ("reportType", @pjson.Text(value="batchValidation")),
+      ("schemaFile", @pjson.Text(value=schema_path)),
+      ("status", @pjson.Text(value=status)),
+      (
+        "summary",
+        @pjson.Object(members=[
+          ("requested", @pjson.Number(raw=requested.to_string())),
+          ("processed", @pjson.Number(raw=results.length().to_string())),
+          ("valid", @pjson.Number(raw=valid.to_string())),
+          ("invalid", @pjson.Number(raw=invalid.to_string())),
+          ("errors", @pjson.Number(raw=errors.to_string())),
+        ]),
+      ),
+      ("issues", @pjson.Array(items=issues)),
+      (
+        "results",
+        @pjson.Array(
+          items=results.map(fn(result) {
+            @pjson.Object(members=[
+              ("inputFile", @pjson.Text(value=result.source)),
+              ("status", @pjson.Text(value=result.status)),
+              ("exitCode", @pjson.Number(raw=result.code.to_string())),
+              ("issues", @pjson.Array(items=result.issues)),
+            ])
+          }),
+        ),
+      ),
+    ]),
+  )
+  if code == exit_success {
+    { out: text + "\n", err: "", code, }
+  } else {
+    failure(text, code)
+  }
+}
