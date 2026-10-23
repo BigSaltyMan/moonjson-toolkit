@@ -11,7 +11,7 @@
 
 name = "BigSaltyMan/moonjson-toolkit"
 
-version = "0.2.0"
+version = "0.3.0"
 
 readme = "README.mbt.md"
 

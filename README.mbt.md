@@ -2,6 +2,9 @@
 
 # MoonJSON Toolkit
 
+Current source version: **0.3.0**, prepared for release. This preparation does
+not upload a Mooncakes package. See the [0.3.0 release notes](docs/release-0.3.0.md).
+
 A JSON toolkit for MoonBit: format, validate, diagnose, analyse and visualise
 JSON documents. It ships as a command line tool plus a small web dashboard that
 charts the statistics the tool writes.

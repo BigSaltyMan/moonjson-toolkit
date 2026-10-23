@@ -11,7 +11,7 @@ pub let program_name : String = "moonjson-toolkit"
 /// the two from drifting is `cli_wbtest.mbt`, which reads `moon.mod` on every
 /// test run and fails when this constant disagrees with it. Bump `moon.mod` and
 /// the suite will tell you to bump this too.
-pub let version : String = "0.2.0"
+pub let version : String = "0.3.0"
 
 ///|
 /// The line printed by `-V` / `--version`.
