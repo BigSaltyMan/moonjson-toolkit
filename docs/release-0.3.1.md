@@ -1,7 +1,7 @@
 # moonjson-toolkit 0.3.1
 
-本版本修复 Mooncakes 文档构建的旧版传递依赖。实际发布、消费及平台文档结果
-在取得后追加；本文件的准备内容不表示已经上传。
+本版本修复 Mooncakes 文档构建的旧版传递依赖。2026-10-24 已发布，注册表包、
+外部消费、平台文档和 README 验收通过；实际交付证据见末尾记录。
 
 ## 依赖链与修复
 
@@ -72,3 +72,84 @@ python scripts/check_doc_compatibility.py --moon /absolute/path/to/isolated/bin/
 文档生成器实际产出模块/包 JSON 索引、Markdown README 和源码 HTML，已核对非空且
 README 包含独立检查与结构化报告说明；不是假定存在一个 `index.html`。
 最终提交 CI、实际包和公开版本页另行记录，不将这次候选预检查冒充平台构建结果。
+
+## 实际发布与交付结果（2026-10-24）
+
+### 发布代码与 CI
+
+- 修复及发布代码 SHA：`393a77281eb7603d7533025720a1c83c75ea938a`。
+- [Linux CI #24](https://github.com/BigSaltyMan/moonjson-toolkit/actions/runs/40062410755)
+  实际检出上述 SHA，三个 job 均成功。
+- 固定原工具链 native 门禁：严格检查、构建、481/481 测试通过；真实 CLI 报告验收
+  八组 9/9，HTTP 回环验收 8/8，原有 Schema 示例验收通过。
+- 标准测试：2354 条中执行并通过 1022 条、编译拒绝 442 条、跳过 890 条；
+  逐条分类与诊断和已审阅基线一致，没有更新基线。
+- 独立文档 job：固定 `moon 0.1.20261020 (2284bd2 2026-10-20)` /
+  `moonc v0.10.16+b1a0e846e`，干净依赖解析、native 检查和实际 `moon doc` 均通过。
+  文档索引、README 和源码资产已核对，证据已上传。
+- 原 frontend job 按原配置自动通过；本地未额外运行前端测试。
+
+这些完整回归结果来自修复代码提交的 Actions，不是后补发布记录提交的 CI 结论。
+产品库 API 签名未变，生成接口的已有无关工作区差异未提交。
+
+### 实际包与注册表
+
+从上述已提交代码导出独立目录，按原审计流程准备完整 README，生成实际 Mooncakes
+源码包。包共 189 个文件、970,436 字节；源码逐成员与固定提交一致，唯一必要的
+导出准备是将根 README 链接实体化为完整 README 文本。
+许可证、必需源码和模块配置齐全，没有构建产物、依赖缓存、凭据或本地申报材料。
+根 Apache-2.0 和第三方原许可证均保留。
+
+隔离目录重新生成包与审计包的成员摘要和 ZIP 摘要均一致。`moon publish` 仅执行一次，
+退出 `0`，服务器返回 `200 OK`。
+[注册表 0.3.1 元数据](https://mooncakes.io/api/v0/manifest/BigSaltyMan/moonjson-toolkit@0.3.1)
+显示模块、版本、许可证、仓库和三项直接依赖均正确，版本未被撤回。
+注册表创建时间为 `2026-10-24T04:29:50.762650+00:00`，
+即北京时间 `2026-10-24 12:29:50.762650`。
+
+[注册表下载包](https://download.mooncakes.io/user/BigSaltyMan/moonjson-toolkit/0.3.1.zip)
+已实际下载，与审计包逐字节相同，没有成员或 ZIP 容器差异。
+审计包、发布工具生成包及注册表包的 SHA-256 均为：
+
+```text
+da406936c9961a8e0bbad3599fa7ac2f55b41690ead5be471564c6542b7cad61
+```
+
+### 外部消费与平台文档
+
+实际 ZIP 解包后 native 构建通过，CLI `--version` 为 `0.3.1`，最小独立 Schema
+检查成功，报告 `reportVersion` 仍为 `1`。临时外部项目通过本地 workspace 明确消费
+解包内容，原有三项接口检查 3/3 通过。
+
+发布后另建没有 workspace 覆盖的项目，依赖固定为注册表
+`BigSaltyMan/moonjson-toolkit@0.3.1`。依赖树和下载日志确认精确来源，安装后的
+189 个成员与注册表包摘要全部一致。三项检查 3/3 通过：支持的 Schema 编译并验证、
+普通数据违规返回违规列表、未支持约束返回 Schema 问题。
+消费检查使用原固定开发工具链，和平台文档构建结果分别记录。
+
+[0.3.1 平台文档页](https://mooncakes.io/docs/BigSaltyMan/moonjson-toolkit@0.3.1)
+选择器明确显示 `0.3.1 (latest)`。平台日志已完成 native 检查和文档生成，最终为
+`Done.`，不再因旧传递依赖失败；平台日志仍未提供具体工具链版本。
+日志中的其他目标步骤不构成本项目支持所有目标的声明。
+
+浏览器实际打开版本页，确认完整 README 从版本说明一直渲染到 Apache-2.0 许可证结尾，
+正文约 108,004 个可见文本字符，不是空白或链接占位文本。独立检查、单文档、批量和
+JSONL 报告说明、`stderr`、退出码优先级及支持边界均存在。
+README 的发布说明、报告契约及其引用的复验记录链接均实际读取成功（HTTP 200）。
+
+### 标签、Release 与证据
+
+- `v0.3.1` 为已推送的附注标签，固定指向修复代码
+  `393a77281eb7603d7533025720a1c83c75ea938a`，不指向本次后补文档提交。
+- [GitHub Release v0.3.1](https://github.com/BigSaltyMan/moonjson-toolkit/releases/tag/v0.3.1)
+  已创建，包含实际 Mooncakes 链接、代码 SHA、对应 CI、契约及包摘要。
+- [Release 附件](https://github.com/BigSaltyMan/moonjson-toolkit/releases/download/v0.3.1/moonjson-toolkit-0.3.1.zip)
+  是 Mooncakes 源码包，不是 native 可执行程序；没有发布未经验证的多平台二进制包。
+
+实际包审计和干净消费证据保存在 `_build/release-audit-0.3.1/`；上传输出、注册表包、
+外部注册表消费、平台日志、README 观察及 Release 核对记录在其 `publish/` 子目录。
+这些本地证据不作为源码提交。原有无关工作区改动保留。
+
+`0.3.0` 保持原样，本次没有重复上传或覆盖它，也没有为它补建标签或 Release。
+本次只发布已验证的 `0.3.1` 内容；后补发布记录不触发重新打包。
+注册表、外部消费和平台文档均实际通过，旧依赖造成的本次交付阻塞已解除。
