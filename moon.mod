@@ -11,7 +11,7 @@
 
 name = "BigSaltyMan/moonjson-toolkit"
 
-version = "0.3.0"
+version = "0.3.1"
 
 readme = "README.mbt.md"
 
@@ -27,7 +27,6 @@ description = "A JSON toolkit for MoonBit: format, validate, diagnose, analyse a
 
 import {
   "Nanaloveyuki/parsec@0.1.3",
-  "oboard/mio@0.5.4",
   "moonbitlang/x@0.5.5",
   "moonbitlang/async@0.22.1",
 }

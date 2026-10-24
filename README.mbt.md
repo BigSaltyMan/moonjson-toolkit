@@ -2,8 +2,8 @@
 
 # MoonJSON Toolkit
 
-Current source version: **0.3.0**, prepared for release. This preparation does
-not upload a Mooncakes package. See the [0.3.0 release notes](docs/release-0.3.0.md).
+Current source version: **0.3.1**. See the [0.3.1 release notes](https://github.com/BigSaltyMan/moonjson-toolkit/blob/main/docs/release-0.3.1.md)
+for the HTTP dependency repair and the actual publication status.
 
 A JSON toolkit for MoonBit: format, validate, diagnose, analyse and visualise
 JSON documents. It ships as a command line tool plus a small web dashboard that
@@ -112,7 +112,7 @@ Dependencies are declared in `moon.mod` and fetched by `moon build`:
 
 ```sh
 moon add Nanaloveyuki/parsec   # parser combinators, with a JSON grammar
-moon add oboard/mio            # HTTP client used by --ai
+moon add moonbitlang/async@0.22.1 # runtime, IO and HTTP client used by --ai
 ```
 
 ## Usage
@@ -891,7 +891,7 @@ and export options. `--no-color` is allowed; help and version retain priority.
 
 For scripts and editor integrations, request a machine-readable report:
 
-See the [Schema report v1 contract](docs/schema-report-format.md) for all four
+See the [Schema report v1 contract](https://github.com/BigSaltyMan/moonjson-toolkit/blob/main/docs/schema-report-format.md) for all four
 formats and versioning rules. Check the process exit code first: successful
 reports use stdout, failed reports use stderr, and the other stream is empty.
 Argument errors can still be plain text, so do not unconditionally parse stderr
@@ -2370,8 +2370,7 @@ and read the same values out of them.
 | ----- | -------- |
 | [MoonBit](https://www.moonbitlang.com/) | the whole project |
 | [`Nanaloveyuki/parsec`](https://mooncakes.io/docs/Nanaloveyuki/parsec) | parser combinators, with the JSON grammar in `parsec/json` |
-| [`oboard/mio`](https://mooncakes.io/docs/oboard/mio) | the HTTP request behind `--ai` |
-| [`moonbitlang/async`](https://mooncakes.io/docs/moonbitlang/async) | async runtime, timeouts, file and standard-stream IO |
+| [`moonbitlang/async`](https://mooncakes.io/docs/moonbitlang/async) | async runtime, timeouts, file and standard-stream IO, and HTTP behind `--ai` |
 | [`moonbitlang/x`](https://mooncakes.io/docs/moonbitlang/x) | system helpers |
 | [Rabbita](https://github.com/moonbit-community/rabbita) | the web dashboard, compiled to JavaScript |
 | [Apache ECharts](https://echarts.apache.org/) | the bar and pie charts |
@@ -2379,7 +2378,7 @@ and read the same values out of them.
 ## Known limitations
 
 - **`--ai` ignores proxy settings.** The request is written with a direct socket
-  through `mio`, which does not read `http_proxy` or `https_proxy`. On a network
+  through `moonbitlang/async/http`, which does not read `http_proxy` or `https_proxy`. On a network
   that reaches the internet only through a proxy, `--ai` will fail to connect;
   run it somewhere the API is directly reachable, or route the traffic yourself.
   Everything else in the tool works offline.
@@ -2421,19 +2420,19 @@ notices be kept. Nothing in the tree is GPL or AGPL.
 | Dependency | Version | License |
 | ---------- | ------- | ------- |
 | [`Nanaloveyuki/parsec`](https://mooncakes.io/docs/Nanaloveyuki/parsec) | 0.1.3 | Apache-2.0 |
-| [`oboard/mio`](https://mooncakes.io/docs/oboard/mio) | 0.5.4 | Apache-2.0 |
 | [`moonbitlang/async`](https://mooncakes.io/docs/moonbitlang/async) | 0.22.1 | Apache-2.0 |
 | [`moonbitlang/x`](https://mooncakes.io/docs/moonbitlang/x) | 0.5.5 | Apache-2.0 |
 | [`moonbit-community/rabbita`](https://mooncakes.io/docs/moonbit-community/rabbita) | 0.15.2 | Apache-2.0 |
 
-The first four are the command line tool's dependencies and are declared in
+The first three are the command line tool's dependencies and are declared in
 `moon.mod`; Rabbita is the dashboard's and is declared in `frontend/moon.mod`.
 The license of each is the one declared in that package's own `moon.mod` on
 Mooncakes, which is also what the copy under `.mooncakes/` carries.
 
-The dependencies those pull in are Apache-2.0 as well: `bikallem/compress@0.3.4`
-and `bikallem/blit@0.2.2`, which `oboard/mio` needs, and
-`moonbitlang/async@0.20.5`, which Rabbita pins. `moon tree` prints the whole
+Since 0.3.1 the root module no longer depends on `oboard/mio`,
+`bikallem/compress` or `bikallem/blit`. HTTP uses the existing pinned async library
+and negotiates gzip or identity responses. Rabbita pins
+`moonbitlang/async@0.20.5` (Apache-2.0). `moon tree` prints the whole
 closure from either module. The dashboard build also uses
 [`moonbit-community/warren`](https://mooncakes.io/docs/moonbit-community/warren)
 (Apache-2.0) from the command line, and the chart library is vendored: see the

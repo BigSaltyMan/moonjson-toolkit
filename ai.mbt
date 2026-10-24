@@ -300,11 +300,12 @@ pub async fn analyze(
 ) -> Result[String, String] {
   let body = build_request_body(json_text, model~)
   let response = @async.with_timeout(request_timeout_ms, async fn() {
-    let headers : Map[String, String] = {
+    let headers : @http.Headers = {
       "Content-Type": "application/json",
       "Authorization": "Bearer " + api_key,
     }
-    @mio.post(endpoint, body, headers~).text()
+    let (_, response_body) = @http.post(endpoint, body, headers~)
+    response_body.text()
   }) catch {
     error =>
       // The endpoint is named in the failure because a request that never

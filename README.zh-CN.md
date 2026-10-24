@@ -2,8 +2,8 @@
 
 # MoonJSON Toolkit
 
-当前源码版本：**0.3.0**，用于发布准备。本次准备不上传 Mooncakes 包。
-发布内容见 [0.3.0 发布说明](docs/release-0.3.0.md)。
+当前源码版本：**0.3.1**。HTTP 依赖修复和实际发布状态见
+[0.3.1 发布说明](https://github.com/BigSaltyMan/moonjson-toolkit/blob/main/docs/release-0.3.1.md)。
 
 一个 MoonBit 写的 JSON 工具箱：格式化、校验、诊断、分析并可视化 JSON 文档。它由
 一个命令行工具和一个小型 Web 仪表盘组成，后者用来把工具写出的统计结果画成图。
@@ -89,7 +89,7 @@ moon build --target native
 
 ```sh
 moon add Nanaloveyuki/parsec   # parser combinators, with a JSON grammar
-moon add oboard/mio            # HTTP client used by --ai
+moon add moonbitlang/async@0.22.1 # runtime, IO and HTTP client used by --ai
 ```
 
 ## 用法
@@ -821,7 +821,7 @@ moonjson-toolkit --check-schema schema.json
 
 脚本或编辑器集成可请求机器可读报告：
 
-四种格式和版本规则见 [Schema 报告版本 1 契约](docs/schema-report-format.md)。
+四种格式和版本规则见 [Schema 报告版本 1 契约](https://github.com/BigSaltyMan/moonjson-toolkit/blob/main/docs/schema-report-format.md)。
 集成时先检查进程退出码：成功报告在 stdout，失败报告在 stderr，另一输出流为空。
 参数错误仍可能是普通文本，不能无条件把 stderr 当作 JSON。真实 native CLI 验收仅用
 Python 标准库，可执行：
@@ -2083,15 +2083,14 @@ small.json     200        0.735 s    0.039 s
 | ----- | ---- |
 | [MoonBit](https://www.moonbitlang.com/) | 整个项目 |
 | [`Nanaloveyuki/parsec`](https://mooncakes.io/docs/Nanaloveyuki/parsec) | 解析器组合子，JSON 文法是其中的 `parsec/json` |
-| [`oboard/mio`](https://mooncakes.io/docs/oboard/mio) | `--ai` 背后的 HTTP 请求 |
-| [`moonbitlang/async`](https://mooncakes.io/docs/moonbitlang/async) | 异步运行时、超时、文件与标准流 IO |
+| [`moonbitlang/async`](https://mooncakes.io/docs/moonbitlang/async) | 异步运行时、超时、文件与标准流 IO，以及 `--ai` 的 HTTP 请求 |
 | [`moonbitlang/x`](https://mooncakes.io/docs/moonbitlang/x) | 系统相关的辅助 |
 | [Rabbita](https://github.com/moonbit-community/rabbita) | Web 仪表盘，编译成 JavaScript |
 | [Apache ECharts](https://echarts.apache.org/) | 柱状图和饼图 |
 
 ## 已知限制
 
-- **`--ai` 不看代理设置。** 请求是通过 `mio` 用直连 socket 发出的，它不读 `http_proxy`
+- **`--ai` 不看代理设置。** 请求是通过 `moonbitlang/async/http` 用直连 socket 发出的，它不读 `http_proxy`
   或 `https_proxy`。在只能通过代理访问外网的环境里，`--ai` 会连不上；请在能直连该 API
   的地方运行它，或者自己把流量导过去。工具里的其它部分都能离线工作。
 
@@ -2123,17 +2122,17 @@ AGPL。
 | 依赖 | 版本 | 许可证 |
 | ---- | ---- | ------ |
 | [`Nanaloveyuki/parsec`](https://mooncakes.io/docs/Nanaloveyuki/parsec) | 0.1.3 | Apache-2.0 |
-| [`oboard/mio`](https://mooncakes.io/docs/oboard/mio) | 0.5.4 | Apache-2.0 |
 | [`moonbitlang/async`](https://mooncakes.io/docs/moonbitlang/async) | 0.22.1 | Apache-2.0 |
 | [`moonbitlang/x`](https://mooncakes.io/docs/moonbitlang/x) | 0.5.5 | Apache-2.0 |
 | [`moonbit-community/rabbita`](https://mooncakes.io/docs/moonbit-community/rabbita) | 0.15.2 | Apache-2.0 |
 
-前四个是命令行工具的依赖，声明在 `moon.mod` 里；Rabbita 是仪表盘的依赖，声明在
+前三个是命令行工具的依赖，声明在 `moon.mod` 里；Rabbita 是仪表盘的依赖，声明在
 `frontend/moon.mod` 里。各包的许可证取自它在 Mooncakes 上自己那份 `moon.mod` 中的声
 明，`.mooncakes/` 下随包拉取的那份也是一样的说法。
 
-它们带进来的依赖同样是 Apache-2.0：`oboard/mio` 需要的 `bikallem/compress@0.3.4` 和
-`bikallem/blit@0.2.2`，以及 Rabbita 锁定的 `moonbitlang/async@0.20.5`。在任一模块下运行
+自 0.3.1 起，根模块不再依赖 `oboard/mio`、`bikallem/compress` 或 `bikallem/blit`。
+HTTP 复用已有的固定版本 async 库，协商 gzip 或 identity 响应。
+Rabbita 锁定 `moonbitlang/async@0.20.5`，同样为 Apache-2.0。在任一模块下运行
 `moon tree` 都能打印出完整的依赖树。构建仪表盘时还会在命令行用到
 [`moonbit-community/warren`](https://mooncakes.io/docs/moonbit-community/warren)
 （Apache-2.0），图表库则是 vendor 进来的：见下方许可证一节。
