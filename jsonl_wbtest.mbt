@@ -20,6 +20,87 @@ fn record_error(record : Result[@pjson.Json, JsonDiagnostic]) -> JsonDiagnostic 
 }
 
 ///|
+test "jsonl incremental: order and public array compatibility" {
+  let input = "\n1\n \t\n{\ntrue\n"
+  let lines = []
+  let records = []
+  visit_jsonl_records(input, None, fn(line, record) {
+    lines.push(line)
+    records.push(record)
+    true
+  })
+  assert_eq(lines, [2, 4, 5])
+  assert_eq(jsonl_record_lines(input), lines)
+  for
+    collected in [
+      records,
+      parse_jsonl(input),
+      parse_jsonl_with_depth(input, None),
+    ] {
+    assert_eq(collected.length(), 3)
+    assert_eq(record_text(collected[0]), "1")
+    assert_eq(record_error(collected[1]).line, 4)
+    assert_eq(record_text(collected[2]), "true")
+  }
+  for empty in ["", "\n \t\r\n"] {
+    let mut calls = 0
+    visit_jsonl_records(empty, None, fn(_line, _record) {
+      calls = calls + 1
+      true
+    })
+    assert_eq(calls, 0)
+    assert_eq(parse_jsonl(empty).length(), 0)
+  }
+  assert_eq(parse_jsonl("1").map(record_text), ["1"])
+  assert_eq(parse_jsonl("1\n").map(record_text), ["1"])
+}
+
+///|
+test "jsonl incremental: CRLF Unicode diagnostics and per-record depth" {
+  let input = "\r\n{\"😀\":1}\r\n \t\r\n{\"中\":}\r\n[[]]\r\n[]\r\n"
+  let lines = []
+  let records = []
+  visit_jsonl_records(input, Some(1), fn(line, record) {
+    lines.push(line)
+    records.push(record)
+    true
+  })
+  assert_eq(lines, [2, 4, 5, 6])
+  assert_eq(record_text(records[0]), "{\"😀\":1}")
+  let syntax = record_error(records[1])
+  assert_eq(syntax.line, 4)
+  assert_eq(syntax.column, 6)
+  assert_eq(syntax.offset, 20)
+  assert_eq(syntax.snippet, "{\"中\":}\r")
+  let depth = record_error(records[2])
+  assert_eq(depth.line, 5)
+  assert_eq(depth.column, 2)
+  assert_eq(depth.offset, 24)
+  assert_eq(depth.snippet, "[[]]\r")
+  assert_eq(depth.message, "nesting depth exceeds limit 1")
+  assert_eq(record_text(records[3]), "[]")
+  // The public bounded collector still applies the same per-record limit.
+  let collected = parse_jsonl_with_depth(input, Some(1))
+  assert_eq(record_error(collected[2]).offset, depth.offset)
+  assert_eq(record_text(collected[3]), "[]")
+}
+
+///|
+test "jsonl incremental: stop after a successful or failed record" {
+  for (first, successful) in [("1", true), ("{", false)] {
+    let lines = []
+    let outcomes = []
+    visit_jsonl_records("\n" + first + "\n{\n3\n", None, fn(line, record) {
+      lines.push(line)
+      outcomes.push(record is Ok(_))
+      false
+    })
+    assert_eq(lines, [2])
+    assert_eq(outcomes, [successful])
+  }
+}
+
+///|
 test "every record of a JSON Lines input is parsed, in order" {
   let records = parse_jsonl("{\"a\":1}\n[1,2]\n\"x\"\ntrue\n")
   assert_eq(records.length(), 4)

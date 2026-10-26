@@ -28,6 +28,76 @@ fn assert_jsonl_summary(
 }
 
 ///|
+async test "jsonl incremental: structured report preserves mixed record results" {
+  let schema = "{\"properties\":{\"n\":{\"type\":\"integer\"},\"loop\":{\"$ref\":\"#/properties/loop\"}}}"
+  let (result, _) = batch_report_case(
+    "incremental_jsonl",
+    Some(schema),
+    [Some("{}\r\n\r\n{\"n\":\"bad\"}\r\n{\r\n{\"loop\":1}\r\n{\"n\":2}\r\n")],
+    extra=["--jsonl"],
+  )
+  assert_eq(result.code, 2)
+  assert_eq(result.out, "")
+  assert_false(result.err.contains("\u001b"))
+  let report = report_json(result.err)
+  assert_jsonl_summary(report, 5, 2, 1, 2)
+  assert_true(report_field(report, "status") is Text(value="error"))
+  assert_eq(report_issues(report).length(), 0)
+  let results = batch_report_results(report)
+  for
+    index, (line, status, code) in [
+      (1, "valid", 0),
+      (3, "invalid", 1),
+      (4, "error", 1),
+      (5, "error", 2),
+      (6, "valid", 0),
+    ] {
+    let item = results[index]
+    assert_true(
+      report_field(item, "line") is Number(raw~) && raw == line.to_string(),
+    )
+    assert_true(report_field(item, "status") is Text(value~) && value == status)
+    assert_true(
+      report_field(item, "exitCode") is Number(raw~) && raw == code.to_string(),
+    )
+  }
+  assert_eq(report_issues(results[0]).length(), 0)
+  let invalid = report_issues(results[1])[0]
+  assert_true(report_field(invalid, "kind") is Text(value="ValidationError"))
+  assert_true(report_field(invalid, "location") is Text(value="n"))
+  let parse = report_issues(results[2])[0]
+  assert_true(report_field(parse, "kind") is Text(value="ParseError"))
+  assert_true(report_field(parse, "stage") is Text(value="input"))
+  assert_true(
+    report_field(parse, "message") is Text(value~) &&
+    value.has_prefix("line 4, column "),
+  )
+  let cycle = report_issues(results[3])[0]
+  assert_true(report_field(cycle, "stage") is Text(value="evaluation"))
+  assert_true(report_field(cycle, "kind") is Text(value="ReferenceCycle"))
+  assert_true(report_field(cycle, "instancePointer") is Text(value="/loop"))
+  assert_true(
+    report_field(cycle, "schemaPointer") is Text(value="/properties/loop/$ref"),
+  )
+  assert_eq(report_issues(results[4]).length(), 0)
+  // Successful reports still use stdout alone, including whitespace-only input.
+  for text in ["{}\n{}\n", " \r\n\t\n"] {
+    let (valid, _) = batch_report_case(
+      "incremental_jsonl_valid",
+      Some(schema),
+      [Some(text)],
+      extra=["--jsonl"],
+    )
+    assert_eq(valid.code, 0)
+    assert_eq(valid.err, "")
+    let report = report_json(valid.out)
+    assert_true(report_field(report, "status") is Text(value="valid"))
+    let count = if text.has_prefix("{}") { 2 } else { 0 }
+    assert_jsonl_summary(report, count, count, 0, 0)
+  }
+}
+
+///|
 async test "schema jsonl report: parameter scope" {
   for extra in [[], ["-f", "data.jsonl"], ["--max-depth", "2", "--no-color"]] {
     let options = cli_ok(

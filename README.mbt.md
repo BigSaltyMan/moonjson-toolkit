@@ -663,6 +663,12 @@ printf '{"a":1}\n\n{"b":[2]}\n' | moon run cmd/main -- --jsonl
 # }
 ```
 
+The CLI parses and processes one JSONL record at a time, without collecting all
+record trees or a separate list of line numbers. The input is still read fully
+into a string, and text output or structured reports are buffered and can grow
+with the input. This is not full streaming I/O or constant-memory processing.
+The library's `parse_jsonl` and `parse_jsonl_with_depth` still collect all results.
+
 One bad line does not cost the reader the others. It is reported on standard
 error, with its line number in the file, while every record that could be read
 is still printed; the run then exits `1`:

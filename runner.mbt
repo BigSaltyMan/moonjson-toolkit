@@ -868,9 +868,8 @@ async fn run_schema_jsonl_report(
         code=exit_input_error,
       )
   }
-  let lines = jsonl_record_lines(text)
   let results = []
-  for index, record in parse_jsonl_with_depth(text, options.max_depth) {
+  visit_jsonl_records(text, options.max_depth, fn(line, record) {
     let result = match record {
       Ok(json) => check_schema_value(compiled, source, json)
       Err(diagnostic) =>
@@ -888,8 +887,9 @@ async fn run_schema_jsonl_report(
           ],
         }
     }
-    results.push((lines[index], result))
-  }
+    results.push((line, result))
+    true
+  })
   schema_jsonl_report(schema_path, source, results, [])
 }
 
@@ -1266,15 +1266,7 @@ fn run_jsonl(
   let out = StringBuilder()
   let err = StringBuilder()
   let mut code = exit_success
-  // The line each record was written on, in the order the records come: the two
-  // lists skip blank lines the same way, so the nth record is the nth line here.
-  // A report about a record names the line it is on rather than the record's
-  // number, since the line is what a reader of the file can go to.
-  let lines = jsonl_record_lines(text)
-  let mut index = 0
-  for record in parse_jsonl_with_depth(text, options.max_depth) {
-    let line = lines[index]
-    index = index + 1
+  visit_jsonl_records(text, options.max_depth, fn(line, record) {
     match record {
       Err(diagnostic) => {
         err.write_string(
@@ -1288,7 +1280,7 @@ fn run_jsonl(
           code = exit_input_error
         }
         if options.fail_fast {
-          break
+          return false
         }
       }
       Ok(json) => {
@@ -1309,10 +1301,7 @@ fn run_jsonl(
             )
             err.write_string(report.err)
             code = exit_usage_error
-            if options.fail_fast {
-              break
-            }
-            continue
+            return !options.fail_fast
           }
         }
         if violations.length() > 0 {
@@ -1329,7 +1318,7 @@ fn run_jsonl(
             code = exit_input_error
           }
           if options.fail_fast {
-            break
+            return false
           }
         } else {
           match prepare_document(options, json) {
@@ -1348,14 +1337,15 @@ fn run_jsonl(
                 code = report.code
               }
               if options.fail_fast {
-                break
+                return false
               }
             }
           }
         }
       }
     }
-  }
+    true
+  })
   if options.validate && code == exit_success {
     // The verdict names the whole file: every record parsed, and with a schema
     // every one of them matched it. A file with a record that did not match

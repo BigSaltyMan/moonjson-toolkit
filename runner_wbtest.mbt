@@ -2976,6 +2976,69 @@ async test "CLI depth limit is an execution error without a success verdict" {
 }
 
 ///|
+async test "jsonl incremental: text CLI continues or stops without false success" {
+  for fail_fast in [false, true] {
+    let extra = if fail_fast { ["--fail-fast"] } else { [] }
+    let analyzer = StubAnalyzer::new(Ok("unused"))
+    let formatted = run_on(
+      Scratch::named("incremental_text"),
+      "1\n\n{\n3\n",
+      ["--jsonl", "--compact", "--no-color"] + extra,
+      analyzer,
+    )
+    assert_eq(formatted.code, 1)
+    assert_eq(formatted.out, if fail_fast { "1\n" } else { "1\n3\n" })
+    assert_true(formatted.err.contains("line 3, column "))
+    assert_eq(analyzer.calls, 0)
+    let schema = "{\"properties\":{\"n\":{\"type\":\"integer\"},\"loop\":{\"$ref\":\"#/properties/loop\"}}}"
+    let checked = run_against_schema(
+      Scratch::named("incremental_schema_text"),
+      "{}\n{\"n\":\"bad\"}\n\n{\"loop\":1}\n{\n{}\n{\"n\":\"bad\"}",
+      schema,
+      ["--jsonl", "--no-color"] + extra,
+      analyzer,
+    )
+    assert_eq(checked.code, if fail_fast { 1 } else { 2 })
+    assert_eq(checked.out, "")
+    assert_true(checked.err.contains("line 2 does not match the schema"))
+    assert_eq(
+      checked.err.contains("line 4 schema validation could not complete"),
+      !fail_fast,
+    )
+    assert_eq(checked.err.contains("line 5, column "), !fail_fast)
+    assert_eq(
+      checked.err.contains("line 7 does not match the schema"),
+      !fail_fast,
+    )
+    assert_false(checked.err.contains("every record matches"))
+    let cycle_first = run_against_schema(
+      Scratch::named("incremental_cycle_first"),
+      "{\"loop\":1}\n{\"n\":\"bad\"}",
+      schema,
+      ["--jsonl", "--no-color"] + extra,
+      analyzer,
+    )
+    assert_eq(cycle_first.code, 2)
+    assert_eq(cycle_first.out, "")
+    assert_eq(
+      cycle_first.err.contains("line 2 does not match the schema"),
+      !fail_fast,
+    )
+    assert_eq(analyzer.calls, 0)
+  }
+  let valid = run_against_schema(
+    Scratch::named("incremental_all_valid"),
+    "{}\n\n{}\n",
+    "true",
+    ["--jsonl", "--no-color"],
+    StubAnalyzer::new(Ok("unused")),
+  )
+  assert_eq(valid.code, 0)
+  assert_eq(valid.err, "")
+  assert_true(valid.out.contains("every record matches the schema"))
+}
+
+///|
 async test "JSONL evaluation errors dominate data violations and records have independent state" {
   let schema = "{\"type\":\"object\",\"properties\":{\"n\":{\"type\":\"integer\"},\"loop\":{\"$ref\":\"#/properties/loop\"}}}"
   let data = "{\"n\":\"bad\"}\n{\"loop\":1}\n{}\n{\"n\":\"bad\"}\n"

@@ -30,17 +30,35 @@ pub fn parse_jsonl_with_depth(
   max_depth : Int?,
 ) -> Array[Result[@pjson.Json, JsonDiagnostic]] {
   let records = []
+  visit_jsonl_records(input, max_depth, fn(_line, record) {
+    records.push(record)
+    true
+  })
+  records
+}
+
+///|
+/// Parse and consume one record at a time. Returning false stops before the
+/// next record is parsed. Only callers that collect results retain their trees.
+fn visit_jsonl_records(
+  input : String,
+  max_depth : Int?,
+  consume : (Int, Result[@pjson.Json, JsonDiagnostic]) -> Bool,
+) -> Unit {
   let mut base = 0
+  let mut line = 1
   for piece in input.split("\n") {
     let record = piece.to_owned()
     if !record.trim().is_empty() {
-      records.push(parse_record(input, base, record, max_depth))
+      if !consume(line, parse_record(input, base, record, max_depth)) {
+        break
+      }
     }
     // Blank lines are skipped, not forgotten: the offset still advances over
     // them, or every line after the first blank one would be misnumbered.
     base = base + count_chars(record) + 1
+    line = line + 1
   }
-  records
 }
 
 ///|
