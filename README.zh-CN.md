@@ -312,6 +312,8 @@ null, false, true, numbers, strings, arrays, objects. Two arrays, and two
 objects, are equal and keep the order they were written in. A record whose
 path reaches nothing is sorted as though the field held null, which puts it
 before the records that have a value there. The sort is stable.
+Numeric comparisons are exact decimal comparisons, including huge exponents.
+Equal numeric values keep their order; number literals are not rewritten.
 
 --unique drops the items that repeat one already seen, keeping the first.
 What is compared is the item as the run would print it, so --sort-keys makes
@@ -1500,10 +1502,9 @@ printf '{"records":[{"user":{"age":30}},{"user":{"age":25}}]}' \
 # {"records":[{"user":{"age":25}},{"user":{"age":30}}]}
 ```
 
-数字按它表示的数比大小（超出 double 范围的写法，比如 `1e400`，按它越过的那个端点
-算，而不是变成一个无处安放的值），字符串按码位比较，不同类型之间按类型排序 —— 也就
-是 `jq` 的那套顺序 —— 于是任意两个值之间都有先后，排序结果不取决于算法恰好先看了
-哪一对：
+数字按精确的十进制数学值排序，大整数和巨大指数也不会经过浮点数转换。数学上相等的
+数字，例如 `1`、`1.0` 和 `1e0`，保持原有顺序；正零与负零比较相等。排序只移动元素，
+保留数字原文。字符串按码位比较，不同类型之间按 `jq` 的类型顺序排列：
 
 ```sh
 printf '[{"k":"9"},{"k":10},{"k":2},{"k":"3"}]' | moon run cmd/main -- --sort-by k -c

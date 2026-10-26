@@ -314,6 +314,8 @@ pub fn usage() -> String {
     "objects, are equal and keep the order they were written in. A record whose",
     "path reaches nothing is sorted as though the field held null, which puts it",
     "before the records that have a value there. The sort is stable.",
+    "Numeric comparisons are exact decimal comparisons, including huge exponents.",
+    "Equal numeric values keep their order; number literals are not rewritten.",
     "",
     "--unique drops the items that repeat one already seen, keeping the first.",
     "What is compared is the item as the run would print it, so --sort-keys makes",

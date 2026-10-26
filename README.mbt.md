@@ -333,6 +333,8 @@ null, false, true, numbers, strings, arrays, objects. Two arrays, and two
 objects, are equal and keep the order they were written in. A record whose
 path reaches nothing is sorted as though the field held null, which puts it
 before the records that have a value there. The sort is stable.
+Numeric comparisons are exact decimal comparisons, including huge exponents.
+Equal numeric values keep their order; number literals are not rewritten.
 
 --unique drops the items that repeat one already seen, keeping the first.
 What is compared is the item as the run would print it, so --sort-keys makes
@@ -1682,11 +1684,11 @@ printf '{"records":[{"user":{"age":30}},{"user":{"age":25}}]}' \
 # {"records":[{"user":{"age":25}},{"user":{"age":30}}]}
 ```
 
-Numbers are ordered as the numbers they denote — a literal past the end of a
-double's range, such as `1e400`, is read as the end it went past rather than
-left with no place at all — and strings by code point, and values of different
-kinds are ordered by kind, the way `jq` orders them, so every two values have an
-order between them:
+Numbers are ordered by their exact decimal mathematical values, including
+large integers and huge exponents. Mathematically equal values, such as `1`,
+`1.0` and `1e0`, keep their original order; positive and negative zero compare
+equal. Sorting preserves each number's original text. Strings compare by code
+point, and values of different kinds are ordered by kind, as in `jq`:
 
 ```sh
 printf '[{"k":"9"},{"k":10},{"k":2},{"k":"3"}]' | moon run cmd/main -- --sort-by k -c

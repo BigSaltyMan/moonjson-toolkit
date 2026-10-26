@@ -1,6 +1,7 @@
 ///|
-/// Exact decimal arithmetic for schema assertions only. A nonzero value is
-/// sign * digits * 10^exponent, with no leading or trailing zero digits.
+/// Exact decimal arithmetic shared by schema assertions and numeric sorting.
+/// A nonzero value is sign * digits * 10^exponent, with no leading or trailing
+/// zero digits.
 /// The exponent stores its value with arbitrary precision, never as an Int.
 priv struct SchemaNumber {
   negative : Bool

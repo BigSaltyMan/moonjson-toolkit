@@ -205,23 +205,71 @@ test "sorting puts values of different kinds in the order jq uses" {
 }
 
 ///|
-test "sorting reads a number too large for a double as the end it went past" {
-  // `1e400` and `-1e400` are legal JSON numbers that no double denotes. Reading
-  // them as the ends of the range keeps them in an order with every other
-  // number, which is what a sort needs of every pair: left equal to everything
-  // they would compare equal to both `5` and `10` at once.
+test "exact numeric sort: huge magnitudes and exponents" {
+  // Migrated from the overflow test: Double range limits used to make
+  // [1e500,1e400] compare equal and incorrectly retain its input order.
   assert_eq(transformed(sort_by(parse_ok("[1e400,5]"), "")), "[5,1e400]")
   assert_eq(transformed(sort_by(parse_ok("[-1e400,5]"), "")), "[-1e400,5]")
   assert_eq(
     transformed(sort_by(parse_ok("[1e400,-1e400]"), "")),
     "[-1e400,1e400]",
   )
-  // Two of them on the same side are equal, since neither has a size a double
-  // can tell from the other's, and equal keys keep the order they came in.
   assert_eq(
     transformed(sort_by(parse_ok("[1e500,1e400]"), "")),
-    "[1e500,1e400]",
+    "[1e400,1e500]",
   )
+  assert_eq(transformed(sort_by(parse_ok("[1e-400,0]"), "")), "[0,1e-400]")
+  assert_eq(
+    transformed(sort_by(parse_ok("[-1e400,-1e500]"), "")),
+    "[-1e500,-1e400]",
+  )
+  // Exponents exceed both Int and Int64, without allocating exponent-sized
+  // strings. Negative exponents reverse the magnitude order.
+  let huge = "10000000000000000000000000000000000000000"
+  let larger = "10000000000000000000000000000000000000001"
+  assert_eq(
+    transformed(sort_by(parse_ok("[1e" + larger + ",1e" + huge + "]"), "")),
+    "[1e" + huge + ",1e" + larger + "]",
+  )
+  assert_eq(
+    transformed(sort_by(parse_ok("[1e-" + huge + ",1e-" + larger + "]"), "")),
+    "[1e-" + larger + ",1e-" + huge + "]",
+  )
+}
+
+///|
+test "exact numeric sort: adjacent integers and fine decimals" {
+  assert_eq(
+    transformed(sort_by(parse_ok("[9007199254740993,9007199254740992]"), "")),
+    "[9007199254740992,9007199254740993]",
+  )
+  assert_eq(
+    transformed(sort_by(parse_ok("[0.10000000000000001,0.1]"), "")),
+    "[0.1,0.10000000000000001]",
+  )
+}
+
+///|
+test "exact numeric sort: signs zeros and stable equal values" {
+  assert_eq(
+    transformed(sort_by(parse_ok("[1e0,-1e0,-0.0,0,1.0,1,-1.0,-1]"), "")),
+    "[-1e0,-1.0,-1,-0.0,0,1e0,1.0,1]",
+  )
+  assert_eq(
+    transformed(sort_by(parse_ok("[0,-0,0.0,-0.0,0e500,-0e-500]"), "")),
+    "[0,-0,0.0,-0.0,0e500,-0e-500]",
+  )
+}
+
+///|
+test "exact numeric sort: field paths preserve literals and input" {
+  let source = "{\"tag\":\"keep\",\"rows\":[{\"user\":{\"n\":9007199254740993}},{\"user\":{\"n\":9007199254740992}},{\"user\":{\"n\":1e0},\"id\":\"first\"},{\"user\":{\"n\":1.0},\"id\":\"second\"}]}"
+  let original = parse_ok(source)
+  assert_eq(
+    transformed(sort_by(original, "user.n")),
+    "{\"tag\":\"keep\",\"rows\":[{\"user\":{\"n\":1e0},\"id\":\"first\"},{\"user\":{\"n\":1.0},\"id\":\"second\"},{\"user\":{\"n\":9007199254740992}},{\"user\":{\"n\":9007199254740993}}]}",
+  )
+  assert_eq(format_compact(original), source)
 }
 
 ///|

@@ -1037,6 +1037,33 @@ async test "--select, --sort-by and --unique reach the printed document" {
 }
 
 ///|
+async test "exact numeric sort: runner prints exact values" {
+  let scratch = Scratch::named("exact_numeric_sort")
+  let analyzer = StubAnalyzer::new(Ok("unused"))
+  for
+    (source, path, expected) in [
+      (
+        "[1e500,9007199254740993,1e0,1e400,9007199254740992,1.0,1,1e-400,0]", "",
+        "[0,1e-400,1e0,1.0,1,9007199254740992,9007199254740993,1e400,1e500]\n",
+      ),
+      (
+        "[{\"n\":0.10000000000000001},{\"n\":0.1}]", "n", "[{\"n\":0.1},{\"n\":0.10000000000000001}]\n",
+      ),
+    ] {
+    let result = run_on(
+      scratch,
+      source,
+      ["--sort-by", path, "--compact"],
+      analyzer,
+    )
+    assert_eq(result.code, 0)
+    assert_eq(result.out, expected)
+    assert_eq(result.err, "")
+  }
+  assert_eq(analyzer.calls, 0)
+}
+
+///|
 async test "--unique compares items as the run would print them" {
   let scratch = Scratch::named("transform_tidied")
   let analyzer = StubAnalyzer::new(Ok("unused"))

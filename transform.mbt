@@ -120,36 +120,6 @@ pub fn lookup_path(json : @pjson.Json, path : String) -> @pjson.Json? {
 }
 
 ///|
-/// Read a JSON number's text as a value to compare.
-///
-/// The parser keeps a number as the text it was written with, so that printing
-/// a document gives back the digits it was given, which means the comparison
-/// has to read that text here.
-///
-/// `Double` is what the reading is done in, as it is in `jq` and in most other
-/// tools that sort JSON. The cost is that two numbers closer together than a
-/// double can tell apart — beyond seventeen significant digits — compare equal
-/// and keep the order they came in, which is a sort that leaves them where they
-/// were rather than one that puts them in the wrong order.
-///
-/// A literal past the end of the range is read as the end it went past: `1e400`
-/// is more than every number a double can hold, `-1e400` is less than all of
-/// them. Those are legal JSON numbers that no double denotes, and the reading
-/// has to place them somewhere — leaving them equal to everything would put
-/// `1e400` equal to both `5` and `10` while `5` is less than `10`, and a
-/// comparison that says that has no order in it for a sort to find.
-fn number_value(raw : String) -> Double {
-  @string.parse_double(raw) catch {
-    _ =>
-      if raw.has_prefix("-") {
-        @double.neg_infinity
-      } else {
-        @double.infinity
-      }
-  }
-}
-
-///|
 /// Where a value belongs in the order of kinds, which is how two values of
 /// different kinds are compared.
 ///
@@ -188,8 +158,8 @@ fn kind_rank(json : @pjson.Json) -> Int {
 /// start of a longer one therefore sorts first here without the length being
 /// consulted at all, which is what the order of a dictionary looks like.
 ///
-/// Both places that order strings use this one: `--sort-by` and `--unique`
-/// through `compare_keys` below, and `--sort-keys` through `sort_keys` in
+/// Both places that order strings use this one: `--sort-by` through
+/// `compare_keys` below, and `--sort-keys` through `sort_keys` in
 /// `formatter.mbt`, so the order a key is printed in and the order a value is
 /// sorted in are the same order.
 fn compare_text(first : String, second : String) -> Int {
@@ -214,7 +184,8 @@ fn compare_text(first : String, second : String) -> Int {
 ///
 /// Values of different kinds are ordered by kind, so the comparison is a total
 /// order and the sort it drives is one whose answer does not depend on the
-/// algorithm underneath. Numbers compare as numbers and strings as strings.
+/// algorithm underneath. Numbers use exact decimal comparison, while their
+/// original text is retained; strings compare by code point.
 fn compare_keys(first : @pjson.Json, second : @pjson.Json) -> Int {
   let order = kind_rank(first).compare(kind_rank(second))
   if order != 0 {
@@ -222,7 +193,7 @@ fn compare_keys(first : @pjson.Json, second : @pjson.Json) -> Int {
   }
   match (first, second) {
     (Number(raw=first_raw), Number(raw=second_raw)) =>
-      number_value(first_raw).compare(number_value(second_raw))
+      schema_number_compare(first_raw, second_raw)
     (Text(value=first_text), Text(value=second_text)) =>
       compare_text(first_text, second_text)
     _ => 0
