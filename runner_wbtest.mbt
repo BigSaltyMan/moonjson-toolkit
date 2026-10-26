@@ -1037,6 +1037,60 @@ async test "--select, --sort-by and --unique reach the printed document" {
 }
 
 ///|
+async test "integer option: overflow stops before input and output operations" {
+  let scratch = Scratch::named("integer_option_overflow")
+  let analyzer = StubAnalyzer::new(Ok("should never run"))
+  discard(scratch.input)
+  discard(scratch.schema)
+  discard(scratch.stats)
+  for
+    (args, diagnostic) in [
+      (
+        [
+          "-f",
+          scratch.input,
+          "--ai",
+          "--json-out",
+          scratch.stats,
+          "--indent",
+          "4294967298",
+        ],
+        "indent integer out of range: 4294967298",
+      ),
+      (
+        [
+          "-v",
+          "--schema",
+          scratch.schema,
+          "--schema-output=json",
+          "-f",
+          scratch.input,
+          "--max-depth=4294967296",
+        ],
+        "max-depth integer out of range: 4294967296",
+      ),
+      (
+        ["--ai", "--json-out", scratch.stats, "--max-depth", "-4294967296"],
+        "max-depth integer out of range: -4294967296",
+      ),
+    ] {
+    let result = run(args, analyze=analyzer.analyzer())
+    assert_eq(result.code, 2)
+    assert_eq(result.out, "")
+    assert_eq(
+      result.err,
+      "error: " +
+      diagnostic +
+      " (expected -2147483648 to 2147483647)\nrun 'moonjson-toolkit --help' to see the available options\n",
+    )
+    assert_eq(analyzer.calls, 0)
+    assert_false(exists(scratch.stats))
+  }
+  assert_false(exists(scratch.input))
+  assert_false(exists(scratch.schema))
+}
+
+///|
 async test "exact numeric sort: runner prints exact values" {
   let scratch = Scratch::named("exact_numeric_sort")
   let analyzer = StubAnalyzer::new(Ok("unused"))

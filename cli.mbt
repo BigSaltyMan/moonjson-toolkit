@@ -149,6 +149,10 @@ pub fn usage() -> String {
     "",
     "Short options may be combined, so -vh means -v -h. The value of --indent",
     "may be attached, as in -i4, -i=4, --indent=4 or --indent 4.",
+    "--indent accepts values from 0 to 16. --max-depth accepts nonnegative Int",
+    "values up to 2147483647. Both parse decimal integers with optional signs",
+    "and leading zeros. Integers outside -2147483648..2147483647 are rejected",
+    "without truncation or wraparound.",
     "",
     "--file may be repeated. Each file is handled in turn, each under a",
     "'==> path <==' heading once more than one is given, and the run exits with",
@@ -399,12 +403,19 @@ pub fn usage() -> String {
 }
 
 ///|
+priv enum DecimalParseError {
+  InvalidDecimal
+  DecimalOverflow
+}
+
+///|
 /// Parse a signed decimal integer, rejecting empty strings, stray characters
-/// and a lone sign.
-fn parse_decimal(value : String) -> Int? {
+/// and a lone sign. MoonBit Int is signed 32-bit. Accumulating negatively
+/// allows MIN_VALUE without ever taking its unrepresentable absolute value.
+fn parse_decimal(value : String) -> Result[Int, DecimalParseError] {
   let chars = value.to_array()
   if chars.length() == 0 {
-    return None
+    return Err(InvalidDecimal)
   }
   let mut index = 0
   let mut negative = false
@@ -415,26 +426,53 @@ fn parse_decimal(value : String) -> Int? {
     index = 1
   }
   if index >= chars.length() {
-    return None
+    return Err(InvalidDecimal)
   }
+  let limit = if negative { -2147483648 } else { -2147483647 }
+  let multiply_limit = limit / 10
+  let last_digit = -(limit % 10)
   let mut result = 0
+  let mut overflow = false
   while index < chars.length() {
     let ch = chars[index]
     if ch < '0' || ch > '9' {
-      return None
+      return Err(InvalidDecimal)
     }
-    result = result * 10 + (ch.to_int() - 48)
+    let digit = ch.to_int() - 48
+    if !overflow {
+      // Check both multiplication and subtraction before doing either.
+      if result < multiply_limit ||
+        (result == multiply_limit && digit > last_digit) {
+        overflow = true
+      } else {
+        result = result * 10 - digit
+      }
+    }
+    // Still scan after overflow: a trailing nondigit makes this invalid
+    // decimal syntax, rather than a valid integer outside the Int range.
     index = index + 1
   }
-  Some(if negative { -result } else { result })
+  if overflow {
+    Err(DecimalOverflow)
+  } else {
+    // The positive limit kept result >= -MAX_VALUE, so negation is safe.
+    Ok(if negative { result } else { -result })
+  }
 }
 
 ///|
 /// Interpret the text given to `-i` / `--indent` as a width in `0..=16`.
 fn parse_indent(value : String) -> Result[Int, String] {
   match parse_decimal(value) {
-    None => Err("invalid indent value: " + value + " (expected an integer)")
-    Some(width) =>
+    Err(InvalidDecimal) =>
+      Err("invalid indent value: " + value + " (expected an integer)")
+    Err(DecimalOverflow) =>
+      Err(
+        "indent integer out of range: " +
+        value +
+        " (expected -2147483648 to 2147483647)",
+      )
+    Ok(width) =>
       if width < 0 || width > max_indent {
         Err(
           "indent out of range: " +
@@ -456,8 +494,15 @@ fn parse_indent(value : String) -> Result[Int, String] {
 /// does with it: a document of bare scalars still parses.
 fn parse_max_depth(value : String) -> Result[Int, String] {
   match parse_decimal(value) {
-    None => Err("invalid max-depth value: " + value + " (expected an integer)")
-    Some(limit) =>
+    Err(InvalidDecimal) =>
+      Err("invalid max-depth value: " + value + " (expected an integer)")
+    Err(DecimalOverflow) =>
+      Err(
+        "max-depth integer out of range: " +
+        value +
+        " (expected -2147483648 to 2147483647)",
+      )
+    Ok(limit) =>
       if limit < 0 {
         Err("max-depth out of range: " + value + " (expected 0 or more)")
       } else {

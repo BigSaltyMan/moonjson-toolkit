@@ -168,6 +168,10 @@ Options:
 
 Short options may be combined, so -vh means -v -h. The value of --indent
 may be attached, as in -i4, -i=4, --indent=4 or --indent 4.
+--indent accepts values from 0 to 16. --max-depth accepts nonnegative Int
+values up to 2147483647. Both parse decimal integers with optional signs
+and leading zeros. Integers outside -2147483648..2147483647 are rejected
+without truncation or wraparound.
 
 --file may be repeated. Each file is handled in turn, each under a
 '==> path <==' heading once more than one is given, and the run exits with

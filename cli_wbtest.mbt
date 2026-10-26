@@ -262,6 +262,119 @@ fn cli_err(args : Array[String]) -> String {
 }
 
 ///|
+test "integer option: boundaries and legal decimal spellings" {
+  assert_true(parse_decimal("2147483647") is Ok(2147483647))
+  assert_true(parse_decimal("+2147483647") is Ok(2147483647))
+  assert_true(parse_decimal("-2147483648") is Ok(-2147483648))
+  for value in ["0", "+0", "-0", "0000", "+0000", "-0000"] {
+    assert_true(parse_decimal(value) is Ok(0))
+  }
+  let padded = "0000000000000000000000000000000000000000000000000016"
+  assert_true(parse_decimal(padded) is Ok(16))
+  assert_true(parse_decimal("+" + padded) is Ok(16))
+  assert_true(parse_decimal("-" + padded) is Ok(-16))
+}
+
+///|
+test "integer option: invalid syntax and overflow remain distinct" {
+  let long_digits = "9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999"
+  for value in ["", "+", "-", "1.0", "1e3", " 1", "1 ", "1x", long_digits + "x"] {
+    assert_true(parse_decimal(value) is Err(InvalidDecimal))
+  }
+  for
+    value in [
+      "2147483648",
+      "+2147483648",
+      "-2147483649",
+      "4294967296",
+      "4294967297",
+      "4294967298",
+      "-4294967296",
+      long_digits,
+      "-" + long_digits,
+    ] {
+    assert_true(parse_decimal(value) is Err(DecimalOverflow))
+  }
+}
+
+///|
+test "integer option: indent forms and existing range diagnostics" {
+  for
+    (args, expected) in [
+      (["--indent", "0"], 0),
+      (["--indent=16"], 16),
+      (["-i", "16"], 16),
+      (["-i16"], 16),
+      (["-i=+16"], 16),
+      (["--indent", "-0"], 0),
+      (["--indent=+00000000000000000000000000000000000016"], 16),
+    ] {
+    assert_eq(cli_ok(args).indent, expected)
+  }
+  for value in ["17", "-1", "2147483647", "-2147483648"] {
+    assert_eq(
+      cli_err(["--indent", value]),
+      "indent out of range: " + value + " (expected 0 to 16)",
+    )
+  }
+  assert_eq(
+    cli_err(["-i=1.0"]),
+    "invalid indent value: 1.0 (expected an integer)",
+  )
+  for
+    (args, value) in [
+      (["--indent", "4294967298"], "4294967298"),
+      (["--indent", "-4294967296"], "-4294967296"),
+      (["-i4294967298"], "4294967298"),
+      (["-i=-4294967296"], "-4294967296"),
+      (["--indent=2147483648"], "2147483648"),
+    ] {
+    assert_eq(
+      cli_err(args),
+      "indent integer out of range: " +
+      value +
+      " (expected -2147483648 to 2147483647)",
+    )
+  }
+}
+
+///|
+test "integer option: depth accepts its full nonnegative Int range" {
+  for
+    (args, expected) in [
+      (["--max-depth", "0"], 0),
+      (["--max-depth=+0000000000000000000000000000000016"], 16),
+      (["--max-depth", "-000000000000000000000000000000000"], 0),
+      (["--max-depth=1000000001"], 1000000001),
+      (["--max-depth", "2147483647"], 2147483647),
+    ] {
+    // Only parse the boundary; do not construct a deeply nested instance.
+    assert_eq(cli_ok(args).max_depth, Some(expected))
+  }
+  for value in ["-1", "-2147483648"] {
+    assert_eq(
+      cli_err(["--max-depth", value]),
+      "max-depth out of range: " + value + " (expected 0 or more)",
+    )
+  }
+  assert_eq(
+    cli_err(["--max-depth=1e3"]),
+    "invalid max-depth value: 1e3 (expected an integer)",
+  )
+  for
+    value in [
+      "4294967296", "4294967297", "-4294967296", "2147483648", "-2147483649",
+    ] {
+    assert_eq(
+      cli_err(["--max-depth=" + value]),
+      "max-depth integer out of range: " +
+      value +
+      " (expected -2147483648 to 2147483647)",
+    )
+  }
+}
+
+///|
 async test "conditional CLI preserves selected instance paths and exit 0 1 2" {
   for
     index, (schema, input, code, reason) in [

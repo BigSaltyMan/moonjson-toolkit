@@ -5,8 +5,8 @@ fn json_child(node : @pjson.Json, key : String) -> @pjson.Json? {
     Some(value) => Some(value)
     None =>
       match parse_decimal(key) {
-        Some(index) => array_item(node, index)
-        None => None
+        Ok(index) => array_item(node, index)
+        Err(_) => None
       }
   }
 }

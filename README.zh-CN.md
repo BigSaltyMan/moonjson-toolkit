@@ -147,6 +147,10 @@ Options:
 
 Short options may be combined, so -vh means -v -h. The value of --indent
 may be attached, as in -i4, -i=4, --indent=4 or --indent 4.
+--indent accepts values from 0 to 16. --max-depth accepts nonnegative Int
+values up to 2147483647. Both parse decimal integers with optional signs
+and leading zeros. Integers outside -2147483648..2147483647 are rejected
+without truncation or wraparound.
 
 --file may be repeated. Each file is handled in turn, each under a
 '==> path <==' heading once more than one is given, and the run exits with
@@ -397,6 +401,10 @@ Exit codes:
 
 短选项可以合并，`-vh` 就是 `-v -h`。`--indent` 的值可以贴着写，即 `-i4`、`-i=4`、
 `--indent=4` 或 `--indent 4` 都可以。
+
+`--indent` 的范围仍为 `0..16`，`--max-depth` 接受 `0..2147483647` 的非负整数。
+两者只接受十进制整数语法，允许正负号和前导零。超出 `Int` 表示范围的整数会明确报错，
+不会截断或回绕；例如很多个前导零后接 `16`，仍按 `16` 处理。
 
 注意 `-v` 和 `-V` 是两个不同的选项：小写的做校验，大写的打印版本号。
 
