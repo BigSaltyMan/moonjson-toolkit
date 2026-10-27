@@ -353,11 +353,11 @@ to every one of them in turn. A record that is not valid JSON is reported
 with its line in the file and the rest are still printed; the run exits 1 if
 any record failed. It describes many documents at once, so it is refused
 with --json-out and with --ai.
-JSONL validation (-v --jsonl) reads files or stdin in blocks for text
-and --schema-output json. JSON reports wait for EOF and are buffered.
-In text mode, --fail-fast stops further reads without waiting for EOF.
-JSONL formatting still reads the whole input. Memory can grow with the
-longest record and buffered diagnostics/results; report output is not streamed.
+JSONL formatting and validation read files or stdin in blocks. Text
+--fail-fast stops further reads without waiting for EOF, including formatting.
+JSON reports wait for EOF. Formatted output, diagnostics and JSON reports
+are still buffered in memory; usage can grow with the longest record and
+accumulated output. This is not constant-memory processing or streaming output.
 
 --ai asks an OpenAI-compatible chat-completions API for a review of the
 formatted document. The endpoint, the model and the key are taken from
@@ -668,17 +668,17 @@ printf '{"a":1}\n\n{"b":[2]}\n' | moon run cmd/main -- --jsonl
 # }
 ```
 
-JSONL validation (`-v --jsonl`) reads files or stdin in fixed-size blocks and
-validates each complete record immediately. This covers text output (including
-explicit `--schema-output text`) and Schema JSON reports (`--schema-output json`).
-In text mode, `--fail-fast` stops further reads without waiting for stdin EOF.
+JSONL formatting and validation (`--jsonl`, with or without `-v`) read files or
+stdin in fixed-size blocks and process each complete record immediately. This
+also covers explicit `--schema-output text` and Schema JSON reports
+(`--schema-output json`). In text formatting and validation, `--fail-fast` stops
+further reads without waiting for stdin EOF, keeping completed record output.
 JSON reports wait for normal EOF before emitting the complete summary; an input
 read failure ends processing with a report of the completed records and error.
-JSONL formatting still reads the entire input.
 The CLI does not collect all record trees or a separate list of line numbers.
-Memory can still grow with the longest record and buffered diagnostics/output or
-structured reports. This is not constant-memory processing or streaming report
-output.
+Formatted output, diagnostics and JSON report results are still buffered in
+memory, so usage can grow with the longest record and accumulated output.
+This is not constant-memory processing or full streaming I/O; output is not streamed.
 The library's `parse_jsonl` and `parse_jsonl_with_depth` still collect all results.
 
 One bad line does not cost the reader the others. It is reported on standard

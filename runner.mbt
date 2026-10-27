@@ -1039,7 +1039,7 @@ async fn handle_input(
 ) -> InputOutcome {
   let source = input_label(input)
   // JSON reports have already taken their separate path before batch dispatch.
-  if options.jsonl && options.validate && options.schema_output != Some("json") {
+  if options.jsonl {
     let result = run_jsonl_stream(options, schema, input)
     return { source, out: result.out, err: result.err, code: result.code, }
   }
@@ -1053,11 +1053,7 @@ async fn handle_input(
         code: exit_input_error,
       }
   }
-  let result = if options.jsonl {
-    run_jsonl(options, schema, source, text)
-  } else {
-    run_document(options, schema, source, text, analyze)
-  }
+  let result = run_document(options, schema, source, text, analyze)
   { source, out: result.out, err: result.err, code: result.code, }
 }
 
@@ -1284,34 +1280,8 @@ async fn render_document(
 }
 
 ///|
-/// Handle one JSON Lines input: every record is rendered onto a line of its
-/// own, and every record that is not valid JSON is reported on standard error.
-///
-/// A bad record does not stop the run, unless `--fail-fast` asks it to. Each
-/// line of the input stands alone by definition, so the ones that can be read
-/// are printed whether or not the others could be, and a mistake on the fourth
-/// line does not cost the reader the fifth. The code is the first non-zero one
-/// any record produced, so a run with a single bad record ends 1 however many
-/// good ones followed it.
-///
-/// `-v` asks for no document output at all, so a run where every record parsed
-/// is answered with the one verdict line it prints for a single document, and a
-/// run where one did not is answered by that record's report alone.
-fn run_jsonl(
-  options : CliOptions,
-  schema : CompiledSchema?,
-  source : String,
-  text : String,
-) -> RunResult {
-  let state = JsonlTextRun::new(options, schema, source)
-  visit_jsonl_records(text, options.max_depth, fn(line, record) {
-    state.consume(line, record)
-  })
-  state.finish()
-}
-
-///|
-/// Shared record handling for buffered formatting and streaming validation.
+/// Record handling shared by JSONL formatting and text validation. Outputs
+/// remain buffered; only input reading and record parsing are incremental.
 priv struct JsonlTextRun {
   options : CliOptions
   schema : CompiledSchema?
