@@ -332,6 +332,11 @@ to every one of them in turn. A record that is not valid JSON is reported
 with its line in the file and the rest are still printed; the run exits 1 if
 any record failed. It describes many documents at once, so it is refused
 with --json-out and with --ai.
+Text validation (-v --jsonl, including --schema-output text) reads files
+or stdin in blocks and validates complete records as they arrive.
+--fail-fast stops further reads without waiting for EOF. Formatting and
+JSON reports still read the whole input. Memory can grow with the longest
+record and buffered diagnostics/output; not all modes have streaming I/O.
 
 --ai asks an OpenAI-compatible chat-completions API for a review of the
 formatted document. The endpoint, the model and the key are taken from
@@ -612,9 +617,12 @@ printf '{"a":1}\n\n{"b":[2]}\n' | moon run cmd/main -- --jsonl
 # }
 ```
 
-CLI 每解析一条 JSONL 记录就处理一条，不再收集全部记录的解析树或额外的行号数组。
-输入仍会完整读取为字符串，文本输出和结构化报告仍有缓冲，可能随输入增长；这还不是完整
-流式 I/O，也不是恒定内存处理。库接口 `parse_jsonl` 和 `parse_jsonl_with_depth` 仍收集全部结果。
+文本 JSONL 校验（`-v --jsonl`，可带 `--schema`，也包括显式 `--schema-output text`）
+按固定大小的块读取文件或 stdin，组装好一条记录就解析和校验；`--fail-fast` 停止后续读取，
+无需等待 stdin EOF。格式化和 JSON 报告模式仍完整读取输入。CLI 不收集全部记录的解析树
+或额外的行号数组，但最长单条记录、诊断输出及报告缓冲仍可能占用较多内存；这不是恒定内存
+处理，也没有实现所有模式的流式 I/O。库接口 `parse_jsonl` 和 `parse_jsonl_with_depth`
+仍收集全部结果。
 
 一行坏掉不会让读者失去其余的。它带着自己在文件中的行号报到标准错误上，而每一条读得出
 的记录照常打印；这一轮随后以 `1` 退出：

@@ -1003,6 +1003,11 @@ async fn handle_input(
   analyze : async (String, String, String, String) -> Result[String, String],
 ) -> InputOutcome {
   let source = input_label(input)
+  // JSON reports have already taken their separate path before batch dispatch.
+  if options.jsonl && options.validate && options.schema_output != Some("json") {
+    let result = run_jsonl_stream(options, schema, input)
+    return { source, out: result.out, err: result.err, code: result.code, }
+  }
   let text = match read_input(input) {
     Ok(text) => text
     Err(message) =>
@@ -1263,89 +1268,138 @@ fn run_jsonl(
   source : String,
   text : String,
 ) -> RunResult {
-  let out = StringBuilder()
-  let err = StringBuilder()
-  let mut code = exit_success
+  let state = JsonlTextRun::new(options, schema, source)
   visit_jsonl_records(text, options.max_depth, fn(line, record) {
-    match record {
-      Err(diagnostic) => {
+    state.consume(line, record)
+  })
+  state.finish()
+}
+
+///|
+/// Shared record handling for buffered formatting and streaming validation.
+priv struct JsonlTextRun {
+  options : CliOptions
+  schema : CompiledSchema?
+  source : String
+  out : StringBuilder
+  err : StringBuilder
+  mut code : Int
+}
+
+///|
+fn JsonlTextRun::new(
+  options : CliOptions,
+  schema : CompiledSchema?,
+  source : String,
+) -> JsonlTextRun {
+  {
+    options,
+    schema,
+    source,
+    out: StringBuilder(),
+    err: StringBuilder(),
+    code: exit_success,
+  }
+}
+
+///|
+fn JsonlTextRun::consume(
+  self : JsonlTextRun,
+  line : Int,
+  record : Result[@pjson.Json, JsonDiagnostic],
+) -> Bool {
+  let options = self.options
+  let schema = self.schema
+  let source = self.source
+  let out = self.out
+  let err = self.err
+  match record {
+    Err(diagnostic) => {
+      err.write_string(
+        error_prefix() +
+        source +
+        " is not valid JSON\n" +
+        diagnostic.render() +
+        "\n",
+      )
+      if self.code == exit_success {
+        self.code = exit_input_error
+      }
+      if options.fail_fast {
+        return false
+      }
+    }
+    Ok(json) => {
+      // Each record is a document of its own, so it is checked on its own: the
+      // schema is applied to the record rather than to the file, and a record
+      // that does not match is reported with its line and skipped, the rest of
+      // the file still being read.
+      let verdict = match schema {
+        Some(schema) => validate_compiled_schema(json, schema)
+        None => Ok([])
+      }
+      let violations = match verdict {
+        Ok(errors) => errors
+        Err(error) => {
+          let report = evaluation_failure(
+            source + " line " + line.to_string(),
+            error,
+          )
+          err.write_string(report.err)
+          self.code = exit_usage_error
+          return !options.fail_fast
+        }
+      }
+      if violations.length() > 0 {
         err.write_string(
           error_prefix() +
           source +
-          " is not valid JSON\n" +
-          diagnostic.render() +
+          " line " +
+          line.to_string() +
+          " does not match the schema\n" +
+          schema_report(violations) +
           "\n",
         )
-        if code == exit_success {
-          code = exit_input_error
+        if self.code == exit_success {
+          self.code = exit_input_error
         }
         if options.fail_fast {
           return false
         }
-      }
-      Ok(json) => {
-        // Each record is a document of its own, so it is checked on its own: the
-        // schema is applied to the record rather than to the file, and a record
-        // that does not match is reported with its line and skipped, the rest of
-        // the file still being read.
-        let verdict = match schema {
-          Some(schema) => validate_compiled_schema(json, schema)
-          None => Ok([])
-        }
-        let violations = match verdict {
-          Ok(errors) => errors
-          Err(error) => {
-            let report = evaluation_failure(
-              source + " line " + line.to_string(),
-              error,
-            )
+      } else {
+        match prepare_document(options, json) {
+          Ok(prepared) =>
+            if !options.validate {
+              out.write_string(format_document(options, prepared))
+              out.write_string("\n")
+            }
+          Err(message) => {
+            // As with a record that does not parse, one that cannot be
+            // reshaped is reported and the rest are still printed, and the run
+            // ends 1.
+            let report = shape_failure(options, source, message)
             err.write_string(report.err)
-            code = exit_usage_error
-            return !options.fail_fast
-          }
-        }
-        if violations.length() > 0 {
-          err.write_string(
-            error_prefix() +
-            source +
-            " line " +
-            line.to_string() +
-            " does not match the schema\n" +
-            schema_report(violations) +
-            "\n",
-          )
-          if code == exit_success {
-            code = exit_input_error
-          }
-          if options.fail_fast {
-            return false
-          }
-        } else {
-          match prepare_document(options, json) {
-            Ok(prepared) =>
-              if !options.validate {
-                out.write_string(format_document(options, prepared))
-                out.write_string("\n")
-              }
-            Err(message) => {
-              // As with a record that does not parse, one that cannot be
-              // reshaped is reported and the rest are still printed, and the run
-              // ends 1.
-              let report = shape_failure(options, source, message)
-              err.write_string(report.err)
-              if code == exit_success {
-                code = report.code
-              }
-              if options.fail_fast {
-                return false
-              }
+            if self.code == exit_success {
+              self.code = report.code
+            }
+            if options.fail_fast {
+              return false
             }
           }
         }
       }
     }
-    true
-  })
+  }
+  true
+}
+
+///|
+fn JsonlTextRun::finish(self : JsonlTextRun) -> RunResult {
+  let options = self.options
+  let source = self.source
+  let out = self.out
+  let err = self.err
+  let code = self.code
   if options.validate && code == exit_success {
     // The verdict names the whole file: every record parsed, and with a schema
     // every one of them matched it. A file with a record that did not match
@@ -1359,6 +1413,54 @@ fn run_jsonl(
     }
   }
   { out: out.to_string(), err: err.to_string(), code, }
+}
+
+///|
+fn jsonl_read_message(input : String?, error : Error) -> String {
+  let source = match input {
+    Some(path) => path
+    None => "standard input"
+  }
+  "cannot read " + source + ": " + describe_io_error(error)
+}
+
+///|
+async fn run_jsonl_reader(
+  options : CliOptions,
+  schema : CompiledSchema?,
+  input : String?,
+  reader : JsonlInput,
+) -> RunResult {
+  let state = JsonlTextRun::new(options, schema, input_label(input))
+  visit_jsonl_input(reader, options.max_depth, fn(line, record) {
+    state.consume(line, record)
+  }) catch {
+    error => {
+      state.err.write_string(
+        error_prefix() + jsonl_read_message(input, error) + "\n",
+      )
+      if state.code == exit_success {
+        state.code = exit_input_error
+      }
+    }
+  }
+  state.finish()
+}
+
+///|
+async fn run_jsonl_stream(
+  options : CliOptions,
+  schema : CompiledSchema?,
+  input : String?,
+) -> RunResult {
+  let reader = open_jsonl_input(input) catch {
+    error =>
+      return failure(
+        error_prefix() + jsonl_read_message(input, error),
+        exit_input_error,
+      )
+  }
+  run_jsonl_reader(options, schema, input, reader)
 }
 
 ///|

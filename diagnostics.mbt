@@ -110,6 +110,11 @@ pub fn describe_json_error(error : @pjson.JsonError) -> String {
 /// takes the searching.
 fn first_defined_at(input : String, offset : Int) -> String {
   let (line, column) = offset_to_line_col(input, offset)
+  first_defined_location(line, column)
+}
+
+///|
+fn first_defined_location(line : Int, column : Int) -> String {
   " (first defined at line " +
   line.to_string() +
   ", column " +

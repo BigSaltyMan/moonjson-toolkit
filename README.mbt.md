@@ -353,6 +353,11 @@ to every one of them in turn. A record that is not valid JSON is reported
 with its line in the file and the rest are still printed; the run exits 1 if
 any record failed. It describes many documents at once, so it is refused
 with --json-out and with --ai.
+Text validation (-v --jsonl, including --schema-output text) reads files
+or stdin in blocks and validates complete records as they arrive.
+--fail-fast stops further reads without waiting for EOF. Formatting and
+JSON reports still read the whole input. Memory can grow with the longest
+record and buffered diagnostics/output; not all modes have streaming I/O.
 
 --ai asks an OpenAI-compatible chat-completions API for a review of the
 formatted document. The endpoint, the model and the key are taken from
@@ -663,10 +668,14 @@ printf '{"a":1}\n\n{"b":[2]}\n' | moon run cmd/main -- --jsonl
 # }
 ```
 
-The CLI parses and processes one JSONL record at a time, without collecting all
-record trees or a separate list of line numbers. The input is still read fully
-into a string, and text output or structured reports are buffered and can grow
-with the input. This is not full streaming I/O or constant-memory processing.
+Text JSONL validation (`-v --jsonl`, with or without `--schema`, including explicit
+`--schema-output text`) reads files or stdin in fixed-size blocks and validates
+each complete record immediately. `--fail-fast` stops further reads without
+waiting for stdin EOF. Formatting and JSON reports still read the entire input.
+The CLI does not collect all record trees or a separate list of line numbers.
+Memory can still grow with the longest record and buffered diagnostics/output or
+structured reports. This is not constant-memory processing or streaming I/O for
+every mode.
 The library's `parse_jsonl` and `parse_jsonl_with_depth` still collect all results.
 
 One bad line does not cost the reader the others. It is reported on standard
