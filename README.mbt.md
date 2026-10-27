@@ -2,8 +2,8 @@
 
 # MoonJSON Toolkit
 
-Current source version: **0.3.1**. See the [0.3.1 release notes](https://github.com/BigSaltyMan/moonjson-toolkit/blob/main/docs/release-0.3.1.md)
-for the HTTP dependency repair and the actual publication status.
+Current source version: **0.3.2** (release preparation). See the [0.3.2 release notes](https://github.com/BigSaltyMan/moonjson-toolkit/blob/main/docs/release-0.3.2.md)
+for precision fixes, integer option checks, JSONL input changes and publication status.
 
 A JSON toolkit for MoonBit: format, validate, diagnose, analyse and visualise
 JSON documents. It ships as a command line tool plus a small web dashboard that

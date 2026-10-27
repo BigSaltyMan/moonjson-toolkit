@@ -556,7 +556,7 @@ fn moon_mod_version(text : String) -> String {
 
 ///|
 test "the version line reads as documented" {
-  assert_eq(version_line(), "moonjson-toolkit 0.3.1")
+  assert_eq(version_line(), "moonjson-toolkit 0.3.2")
 }
 
 ///|

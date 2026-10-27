@@ -2,8 +2,8 @@
 
 # MoonJSON Toolkit
 
-当前源码版本：**0.3.1**。HTTP 依赖修复和实际发布状态见
-[0.3.1 发布说明](https://github.com/BigSaltyMan/moonjson-toolkit/blob/main/docs/release-0.3.1.md)。
+当前源码版本：**0.3.2**（发布准备中）。精度修复、整数参数检查、JSONL 输入改进及发布状态见
+[0.3.2 发布说明](https://github.com/BigSaltyMan/moonjson-toolkit/blob/main/docs/release-0.3.2.md)。
 
 一个 MoonBit 写的 JSON 工具箱：格式化、校验、诊断、分析并可视化 JSON 文档。它由
 一个命令行工具和一个小型 Web 仪表盘组成，后者用来把工具写出的统计结果画成图。
