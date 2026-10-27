@@ -37,7 +37,7 @@ JSON 报告只表示本工具支持子集中的检查结果，不代表完整 JS
 
 | kind | stage（独立检查除外） | location / 其他位置 |
 | --- | --- | --- |
-| `ReadError` | `schema` 或 `input` | `null`；整个文件/输入无法读取 |
+| `ReadError` | `schema` 或 `input` | `null`；输入无法读取或中途读取失败 |
 | `ParseError` | `schema` 或 `input` | `null`；消息包含解析行列 |
 | `InvalidSchema` | `schema` | Schema 关键字的显示位置 |
 | `UnsupportedFeature` | `schema` | 未支持能力的显示位置 |
@@ -173,9 +173,22 @@ printf '%s\n' '{"id":1,"name":"Moon","extra":true}' | moonjson-toolkit -v --sche
 `valid + invalid + errors == records`。这不是批量文件的 `requested/processed` 统计。
 空输入或纯空白输入为 `valid`、退出 `0`，四项计数为零。
 
-Schema 预检查失败或整个输入无法读取时，问题在顶层 `issues`，四项计数均为 `0`，
-`results` 为空。Schema 问题退出 `2`，整个输入的 `ReadError` 退出 `1`。
+Schema 预检查失败或打开输入失败时，问题在顶层 `issues`，四项计数均为 `0`，
+`results` 为空。Schema 问题退出 `2`，打开输入失败的 `ReadError` 退出 `1`。
 记录内的问题只在对应结果中，实例指针相对于当前记录。
+
+JSONL 文本校验和结构化校验均按块读取文件或 stdin，完整记录形成后立即解析、校验；
+JSONL 格式化仍完整读取输入。JSON 汇总报告必须等待正常 EOF 才能确定整份输入的结果，
+不会提前输出成功或 JSON 片段。报告结果仍保存在内存中，最长记录、诊断和结果缓冲仍可能
+增长；这不是恒定内存处理，也不是流式报告输出。
+
+中途读取失败时，保留此前已完成的记录结果，并在顶层 `issues` 追加 `stage: "input"`、
+`kind: "ReadError"`、`location: null` 的问题，顶层 `status` 为 `error`。
+`summary.records` 只统计已完成处理的非空白记录，包含这些记录中的解析失败；
+顶层读取错误不额外增加记录级 `summary.errors`。尚未完成的尾部不生成结果，
+也不会把读取失败当作 EOF 再解析尾部、虚构一个 `ParseError`。
+退出码仍按 **2 > 1 > 0** 汇总：没有执行错误时读取失败退出 `1`，已有执行错误时仍为 `2`。
+包含完整记录结果和顶层读取错误的一个 JSON 文档写入 stderr，stdout 为空。
 
 最小成功示例（stdout）：
 

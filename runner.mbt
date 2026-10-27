@@ -857,19 +857,41 @@ async fn run_schema_jsonl_report(
   input : String?,
 ) -> RunResult {
   let source = input_label(input)
-  let text = match read_input(input) {
-    Ok(text) => text
-    Err(message) =>
+  let reader = open_jsonl_input(input) catch {
+    error =>
       return schema_jsonl_report(
         schema_path,
         source,
         [],
-        [schema_report_issue("ReadError", None, message, stage="input")],
+        [
+          schema_report_issue(
+            "ReadError",
+            None,
+            jsonl_read_message(input, error),
+            stage="input",
+          ),
+        ],
         code=exit_input_error,
       )
   }
+  run_schema_jsonl_reader_report(options, schema_path, compiled, input, reader)
+}
+
+///|
+/// Retain only completed report results. A failed read is not EOF: the reader
+/// discards its unfinished tail, while earlier results survive in this report.
+async fn run_schema_jsonl_reader_report(
+  options : CliOptions,
+  schema_path : String,
+  compiled : CompiledSchema,
+  input : String?,
+  reader : JsonlInput,
+) -> RunResult {
+  let source = input_label(input)
   let results = []
-  visit_jsonl_records(text, options.max_depth, fn(line, record) {
+  let issues = []
+  let mut read_code = exit_success
+  visit_jsonl_input(reader, options.max_depth, fn(line, record) {
     let result = match record {
       Ok(json) => check_schema_value(compiled, source, json)
       Err(diagnostic) =>
@@ -889,8 +911,21 @@ async fn run_schema_jsonl_report(
     }
     results.push((line, result))
     true
-  })
-  schema_jsonl_report(schema_path, source, results, [])
+  }) catch {
+    error => {
+      issues.push(
+        schema_report_issue(
+          "ReadError",
+          None,
+          jsonl_read_message(input, error),
+          stage="input",
+        ),
+      )
+      read_code = exit_input_error
+    }
+  }
+  // The report renderer combines read_code with record codes using 2 > 1 > 0.
+  schema_jsonl_report(schema_path, source, results, issues, code=read_code)
 }
 
 ///|

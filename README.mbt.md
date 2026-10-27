@@ -353,11 +353,11 @@ to every one of them in turn. A record that is not valid JSON is reported
 with its line in the file and the rest are still printed; the run exits 1 if
 any record failed. It describes many documents at once, so it is refused
 with --json-out and with --ai.
-Text validation (-v --jsonl, including --schema-output text) reads files
-or stdin in blocks and validates complete records as they arrive.
---fail-fast stops further reads without waiting for EOF. Formatting and
-JSON reports still read the whole input. Memory can grow with the longest
-record and buffered diagnostics/output; not all modes have streaming I/O.
+JSONL validation (-v --jsonl) reads files or stdin in blocks for text
+and --schema-output json. JSON reports wait for EOF and are buffered.
+In text mode, --fail-fast stops further reads without waiting for EOF.
+JSONL formatting still reads the whole input. Memory can grow with the
+longest record and buffered diagnostics/results; report output is not streamed.
 
 --ai asks an OpenAI-compatible chat-completions API for a review of the
 formatted document. The endpoint, the model and the key are taken from
@@ -668,14 +668,17 @@ printf '{"a":1}\n\n{"b":[2]}\n' | moon run cmd/main -- --jsonl
 # }
 ```
 
-Text JSONL validation (`-v --jsonl`, with or without `--schema`, including explicit
-`--schema-output text`) reads files or stdin in fixed-size blocks and validates
-each complete record immediately. `--fail-fast` stops further reads without
-waiting for stdin EOF. Formatting and JSON reports still read the entire input.
+JSONL validation (`-v --jsonl`) reads files or stdin in fixed-size blocks and
+validates each complete record immediately. This covers text output (including
+explicit `--schema-output text`) and Schema JSON reports (`--schema-output json`).
+In text mode, `--fail-fast` stops further reads without waiting for stdin EOF.
+JSON reports wait for normal EOF before emitting the complete summary; an input
+read failure ends processing with a report of the completed records and error.
+JSONL formatting still reads the entire input.
 The CLI does not collect all record trees or a separate list of line numbers.
 Memory can still grow with the longest record and buffered diagnostics/output or
-structured reports. This is not constant-memory processing or streaming I/O for
-every mode.
+structured reports. This is not constant-memory processing or streaming report
+output.
 The library's `parse_jsonl` and `parse_jsonl_with_depth` still collect all results.
 
 One bad line does not cost the reader the others. It is reported on standard
@@ -1032,8 +1035,12 @@ The Schema compiles once. All records are processed, including those after
 parse, validation or evaluation failures, with independent evaluation contexts
 and budgets. `summary.records` counts nonblank records, including parse errors;
 `valid + invalid + errors == records`. Record issues belong to their result.
-Schema failures and whole-input read errors instead appear in top-level
-`issues`, with zero counts and empty `results`.
+Schema failures and input read errors instead appear in top-level `issues`.
+Schema precheck or input-open failure has zero counts and empty `results`.
+If a read fails midway, completed results are retained and status is `error`;
+the unfinished tail produces no result. The top-level `ReadError` does not add
+to record-level `summary.errors`, and an earlier evaluation error still takes
+exit-code priority. The JSON summary remains buffered until EOF or read failure.
 
 Any record error makes status `error`; otherwise ordinary violations make it
 `invalid`, and all matches make it `valid`. Exit codes prefer **2 > 1 > 0**:

@@ -332,11 +332,11 @@ to every one of them in turn. A record that is not valid JSON is reported
 with its line in the file and the rest are still printed; the run exits 1 if
 any record failed. It describes many documents at once, so it is refused
 with --json-out and with --ai.
-Text validation (-v --jsonl, including --schema-output text) reads files
-or stdin in blocks and validates complete records as they arrive.
---fail-fast stops further reads without waiting for EOF. Formatting and
-JSON reports still read the whole input. Memory can grow with the longest
-record and buffered diagnostics/output; not all modes have streaming I/O.
+JSONL validation (-v --jsonl) reads files or stdin in blocks for text
+and --schema-output json. JSON reports wait for EOF and are buffered.
+In text mode, --fail-fast stops further reads without waiting for EOF.
+JSONL formatting still reads the whole input. Memory can grow with the
+longest record and buffered diagnostics/results; report output is not streamed.
 
 --ai asks an OpenAI-compatible chat-completions API for a review of the
 formatted document. The endpoint, the model and the key are taken from
@@ -617,11 +617,13 @@ printf '{"a":1}\n\n{"b":[2]}\n' | moon run cmd/main -- --jsonl
 # }
 ```
 
-文本 JSONL 校验（`-v --jsonl`，可带 `--schema`，也包括显式 `--schema-output text`）
-按固定大小的块读取文件或 stdin，组装好一条记录就解析和校验；`--fail-fast` 停止后续读取，
-无需等待 stdin EOF。格式化和 JSON 报告模式仍完整读取输入。CLI 不收集全部记录的解析树
+JSONL 校验（`-v --jsonl`）按固定大小的块读取文件或 stdin，组装好一条记录就解析和校验。
+文本输出（包括显式 `--schema-output text`）和 Schema JSON 报告（`--schema-output json`）
+均使用这一方式。文本模式的 `--fail-fast` 停止后续读取，无需等待 stdin EOF；JSON 报告
+须等到正常 EOF 才输出完整汇总，中途读取失败时则汇总已完成的记录和读取错误。
+JSONL 格式化模式仍完整读取输入。CLI 不收集全部记录的解析树
 或额外的行号数组，但最长单条记录、诊断输出及报告缓冲仍可能占用较多内存；这不是恒定内存
-处理，也没有实现所有模式的流式 I/O。库接口 `parse_jsonl` 和 `parse_jsonl_with_depth`
+处理，也没有实现流式报告输出。库接口 `parse_jsonl` 和 `parse_jsonl_with_depth`
 仍收集全部结果。
 
 一行坏掉不会让读者失去其余的。它带着自己在文件中的行号报到标准错误上，而每一条读得出
@@ -945,8 +947,10 @@ cat data.jsonl | moonjson-toolkit -v \
 
 Schema 只编译一次，每条记录使用独立求值上下文和预算；解析、普通违规或执行失败后继续处理
 后续记录。`summary.records` 统计非空白记录，包括解析失败；`valid + invalid + errors == records`。
-记录问题归入各自结果；Schema 问题和整个输入的读取失败归入顶层 `issues`，此时四项记录计数
-均为 `0`，`results` 为空，不虚构记录。
+记录问题归入各自结果；Schema 问题和输入读取失败归入顶层 `issues`。Schema 预检查或打开输入
+失败时，四项记录计数均为 `0`，`results` 为空。中途读取失败保留已完成的记录，状态为 `error`，
+未完成的尾部不生成结果；顶层 `ReadError` 不额外增加记录级 `summary.errors`，也不会降低
+此前执行错误的退出码优先级。JSON 汇总结果仍保存在内存中，直到 EOF 或读取失败后统一输出。
 
 任意记录错误使顶层状态为 `error`；否则有普通违规时为 `invalid`，全部符合时为 `valid`。
 退出码优先级为 **2 > 1 > 0**：Schema 或执行失败退出 `2`，输入读取、解析失败和普通违规退出
