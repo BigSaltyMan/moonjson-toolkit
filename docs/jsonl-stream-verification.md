@@ -1,6 +1,9 @@
 # JSONL 流式输入跨平台复验
 
-核对日期：2026 年 10 月 27 日。结论：开发代码的 Linux native 门禁及四个真实 CLI
+下文首先保留 `610e4cb` 的首次复验记录。格式化接入后的三种模式完整结果见文末追加记录；
+历史测试数量、代码 SHA 和当时的能力边界不代表最新开发状态。
+
+首次核对日期：2026 年 10 月 27 日。结论：开发代码的 Linux native 门禁及四个真实 CLI
 场景均通过，下载产物完整，稳定报告字段与 Windows 证据一致。
 
 ## 验证对象
@@ -120,8 +123,103 @@ python scripts/check_jsonl_stream_report.py --cli _build/native/debug/build/cmd/
 两份脚本各自从自身路径定位仓库根目录，支持 `--cli` 指定已构建产物。
 单进程退出等待上限为 10 秒，清理等待为 5 秒；这些是验收超时，不是性能测量。
 
-## 能力边界
+## 能力边界（首次复验的历史状态）
 
 文本 JSONL 校验和 JSONL 结构化校验已经逐条读取，JSONL 格式化仍完整读取输入。
 内存仍会随最长记录、诊断和报告结果增长。JSON 汇总等待正常 EOF；中途读取失败时
 保留已完成记录并报告错误。报告结果仍保存在内存中，尚未实现完整流式输出。
+
+## 追加：格式化及三种模式的 Linux 复验
+
+核对日期：2026 年 10 月 27 日。本次以格式化开发提交 `8e86f42` 为起点，仅增加 CI
+验收及产物上传，没有修改产品代码、脚本、工具链、报告契约或标准测试基线。
+
+### 本次验证对象
+
+- CI 接入及实际验证代码：`f232f3fbf0ddb065e875bf2c0229823bff14b08a`。
+- [固定代码](https://github.com/BigSaltyMan/moonjson-toolkit/tree/f232f3fbf0ddb065e875bf2c0229823bff14b08a)。
+- [Linux CI #28](https://github.com/BigSaltyMan/moonjson-toolkit/actions/runs/40471850066)：
+  run ID `40471850066`，第 1 次运行，push 自动触发并成功，没有重复手动触发。
+- [native job](https://github.com/BigSaltyMan/moonjson-toolkit/actions/runs/40471850066/job/122080586650)。
+
+运行元数据、checkout 日志和产物的 `workflow_run.head_sha` 均核对为本次完整 SHA。
+本节在结果核实后单独提交，**CI #28 验证的是上述代码提交，不是后补的文档提交**。
+前文 `610e4cb` / CI #26 的结果继续作为历史证据，未用来替代本次验证。
+
+### 实际结果
+
+| 检查 | 本次 Linux 结果 |
+| --- | --- |
+| native 严格检查及构建 | 均通过，三组脚本共用同一 native CLI |
+| native 单元测试 | **504/504**，0 失败，来自本次日志 |
+| 文本 JSONL 校验进程验收 | **2/2** 通过 |
+| JSONL 结构化报告进程验收 | **2/2** 通过 |
+| JSONL 格式化进程验收 | **2/2** 通过 |
+| 标准测试严格运行 | 462 组、2354 条中，实际执行 **1022 条全部通过** |
+| 标准测试其余分类 | 442 条编译拒绝、890 条跳过，均不计作通过 |
+| 标准测试差异及基线 | 误通过、误拒绝、执行错误均为 0；分类与逐条诊断匹配原基线 |
+| 其他原有 native 门禁及产物上传 | 全部通过，无跳过或 `continue-on-error` |
+| 前端及文档兼容 job | 保留原配置，随本次 workflow 自动执行并通过 |
+
+固定工具链的本次实际记录为：
+
+```text
+moon 0.1.20260915 (2e1a46d 2026-09-15)
+moonc v0.10.13+cbb11c36f (2026-09-15)
+moonrun 0.1.20260915 (2e1a46d 2026-09-15)
+Feature flags enabled: rr_moon_mod,rr_moon_pkg
+```
+
+### 六个场景与下载产物
+
+| 场景 | 本次原始证据 |
+| --- | --- |
+| 文本 `fail-fast-before-eof` | stdin 保持打开，退出 1；stdout 为空，stderr 为第 1 行解析诊断 |
+| 文本 `schema-check-before-input` | 无业务输入，stdin 保持打开，退出 2；问题属于 Schema 阶段 |
+| 报告 `stdin-segments-then-eof` | EOF 前等待且无输出；EOF 后退出 1，stderr 整体解析为一个 JSON，stdout 为空；行号 `1/3/4`，结果与统计完整 |
+| 报告 `schema-error-before-input` | stdin 保持打开，退出 2；stderr 为完整 Schema 错误 JSON，stdout 为空，没有虚构记录 |
+| 格式化 `format-fail-fast-before-eof` | stdin 保持打开，退出 1；stdout 保留 `{"ok":1}` 及换行，stderr 定位第 2 行、第 2 列 |
+| 格式化 `format-segments-then-eof` | 跨写入 UTF-8、空白行和末尾无换行均正常；EOF 后退出 0，stderr 为空，stdout 两条记录顺序及数字原文正确 |
+
+本次已下载并核对三份进程验收产物及标准测试产物：
+
+- [文本验收](https://github.com/BigSaltyMan/moonjson-toolkit/actions/runs/40471850066/artifacts/12718483817)：
+  `jsonl-stream-input-acceptance`，6 个成员。
+- [结构化报告验收](https://github.com/BigSaltyMan/moonjson-toolkit/actions/runs/40471850066/artifacts/12718533359)：
+  `jsonl-stream-report-acceptance`，7 个成员。
+- [格式化验收](https://github.com/BigSaltyMan/moonjson-toolkit/actions/runs/40471850066/artifacts/12719800436)：
+  `jsonl-stream-format-acceptance`，5 个成员。
+- [标准测试报告和工具链记录](https://github.com/BigSaltyMan/moonjson-toolkit/actions/runs/40471850066/artifacts/12719495766)：
+  下载报告的可移植投影另与仓库基线核对一致。
+
+四个 ZIP 的 SHA-256 均与 GitHub 上传摘要一致。三组各有两例，无遗漏、重复或
+`fatal_errors`；原始 stdout/stderr、预期与实际退出码、stdin 状态均核对完成。
+JSON 输出按整份文档解析，没有截取片段或过滤额外文本。
+
+Windows 格式化证据来自 Commit 32 的既有 `_build/jsonl-stream-format-acceptance/`，
+2/2 通过；文本及报告证据沿用前次本地验收。原汇总未嵌入 Git HEAD，归属仍依据对应开发
+步骤的执行记录，不冒充对本次 CI SHA 的 Windows 重跑。三组均已复制归档到
+`_build/jsonl-stream-format-verification/windows/`，本笔没有重新启动任何 Windows 验收。
+
+Linux 原始输出与 Windows 对照：退出码、stdin 状态、JSON 的版本、类型、状态、计数、
+顺序、类别和位置一致；格式化 stdout 与明确的预期内容及原 Windows 输出一致。
+平台路径、临时目录和诊断文案不要求逐字节一致，未比较耗时或声称性能提升。
+
+本地证据位于 `_build/jsonl-stream-format-verification/`，含运行元数据、native 日志、
+四份 ZIP、解包内容及 `artifact-audit.json`；机器证据不提交到源码仓库。
+
+### 修复、复现与当前边界
+
+未发现需要修复的平台问题，格式化脚本保持原样；没有放宽断言或改变预期退出码。
+本地只运行差异检查和已下载证据的读取、比对，没有执行 `moon info`、`moon fmt`、编译、
+MoonBit 测试或三份 CLI 验收，也没有安排本地全量、兼容性、前端或性能测试。
+
+格式化验收的复现入口（复用已有产物，不重复构建）：
+
+```sh
+python scripts/check_jsonl_stream_format.py --cli _build/native/debug/build/cmd/main/main.exe
+```
+
+JSONL 格式化、文本校验和结构化校验均逐条读取输入；格式化输出、诊断和 JSON 汇总报告
+仍在内存缓冲。内存仍可能随最长记录及累计输出增长。JSON 汇总仍等待 EOF，尚未实现
+流式输出。这些能力属于当前开发提交，**不属于已发布的 `0.3.1`**；本笔未调整版本或发布。
