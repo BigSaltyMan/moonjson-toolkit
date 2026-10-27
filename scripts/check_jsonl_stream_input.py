@@ -22,6 +22,7 @@ def run_case(cli, name, args, payload, code, expected, forbidden):
     stdout = stderr = b""
     actual = None
     exited_with_stdin_open = False
+    collected = False
     failures = []
     try:
         process = subprocess.Popen(
@@ -43,6 +44,7 @@ def run_case(cli, name, args, payload, code, expected, forbidden):
         process.stdin.close()
         process.stdin = None
         stdout, stderr = process.communicate(timeout=5)
+        collected = True
         if actual != code:
             failures.append(f"expected exit {code}, got {actual}")
         if not exited_with_stdin_open:
@@ -68,9 +70,21 @@ def run_case(cli, name, args, payload, code, expected, forbidden):
                 process.kill()
             # On failures too, reap the child and release all three pipe handles.
             process.wait(timeout=5)
+            actual = process.returncode
+            if not collected:
+                if process.stdin is not None:
+                    try:
+                        process.stdin.close()
+                    except OSError as error:
+                        failures.append("stdin cleanup: " + str(error))
+                    process.stdin = None
+                stdout, stderr = process.communicate(timeout=5)
             for stream in (process.stdin, process.stdout, process.stderr):
                 if stream is not None:
-                    stream.close()
+                    try:
+                        stream.close()
+                    except OSError as error:
+                        failures.append("pipe cleanup: " + str(error))
     (OUTPUT / (name + ".stdout")).write_bytes(stdout)
     (OUTPUT / (name + ".stderr")).write_bytes(stderr)
     print(("FAIL " if failures else "PASS ") + name)

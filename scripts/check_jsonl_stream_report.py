@@ -70,7 +70,10 @@ def run_case(cli, name, schema, parts, needs_eof):
                 process.wait(timeout=5)
                 actual = process.returncode
                 if process.stdin is not None:
-                    process.stdin.close()
+                    try:
+                        process.stdin.close()
+                    except OSError as error:
+                        failures.append("stdin cleanup: " + str(error))
             out.seek(0)
             err.seek(0)
             stdout, stderr = out.read(), err.read()

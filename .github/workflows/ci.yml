@@ -31,7 +31,16 @@ jobs:
         run: moon test --target native
 
       - name: Build
+        id: native-build
         run: moon build --target native --debug
+
+      - name: Check JSONL text streaming with the native CLI
+        if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
+        run: python3 scripts/check_jsonl_stream_input.py --cli _build/native/debug/build/cmd/main/main.exe
+
+      - name: Check JSONL report streaming with the native CLI
+        if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
+        run: python3 scripts/check_jsonl_stream_report.py --cli _build/native/debug/build/cmd/main/main.exe
 
       - name: Check structured Schema reports with the native CLI
         run: python3 scripts/check_schema_reports.py --cli _build/native/debug/build/cmd/main/main.exe
@@ -84,6 +93,22 @@ jobs:
         with:
           name: ai-http-acceptance
           path: _build/ai-http-acceptance/
+          if-no-files-found: warn
+
+      - name: Preserve JSONL text streaming evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jsonl-stream-input-acceptance
+          path: _build/jsonl-stream-input-acceptance/
+          if-no-files-found: warn
+
+      - name: Preserve JSONL report streaming evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jsonl-stream-report-acceptance
+          path: _build/jsonl-stream-report-acceptance/
           if-no-files-found: warn
 
   documentation-compatibility:
